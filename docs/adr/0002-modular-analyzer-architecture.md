@@ -1,9 +1,9 @@
-# ADR-0003: Modular Analyzer Architecture
+# ADR-0002: Modular Analyzer Architecture
 
 **Date:** 2026-01-20  
 **Status:** Accepted  
 **Context:** Iteration 1 (Sections 2–3)  
-
+**Deciders:** Evan King (lead), team discussion with Claude
 
 ---
 
@@ -270,6 +270,6 @@ Once refactoring verified, implement 5 high-ROI features:
 ## References
 
 - [ADR-0001: Initial Scope](0001-initial-scope.md) - Project scope and constraints
-- [ADR-0002: PE Parsing Strategy](0002-pe-parsing-strategy.md) - Why dumpbin + regex initially
+- [ADR-0003: PE Parsing Strategy](0003-pe-parsing-strategy.md) - Why dumpbin + regex initially (future)
 - [lab-notes.md](../lab-notes.md) - Implementation timeline and status
 - [CONTRIBUTING.md](../../CONTRIBUTING.md) - Module development guidelines

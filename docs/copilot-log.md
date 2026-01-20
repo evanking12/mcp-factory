@@ -105,14 +105,14 @@
 | Refactor before features | Modularization unblocks team + easier feature additions | Ship features on csv_script.py | 2-3 days refactoring time vs future flexibility |
 | 8 modules | Single responsibility + testability + aligns with analyzer types (PE, .NET, COM) | Fewer larger modules | More files, clearer boundaries |
 | Keep dumpbin initially | Proven, reduces refactoring risk; can replace incrementally | Direct PE parsing now | Depends on VS, but reduces scope of refactoring |
-| Wait for Microsoft direction | Don't optimize for unknown requirements | Build all 50 features now | Some Tier B items may be wrong priorities |
-| schema.py first | Foundation module; enables Section 4 to start design | Extract all modules in parallel | Sequentially dependent, but creates stable contract |
+| Wait for Microsoft direction | Don't optimize for unknown requirements | Build all 50 features now | Some features may be wrong priorities |
+| schema.py first | Foundation module; enables Section 4 to start design in parallel | Extract all modules in parallel | Sequentially dependent, but creates stable contract |
 
 **Result:**
-- ADR-0003: Modular Analyzer Architecture (comprehensive decision document)
-- lab-notes.md: Updated with modularization plan and timeline
+- ADR-0002: Modular Analyzer Architecture (comprehensive decision document)
+- lab-notes.md: Updated with modularization plan
 - Refactoring plan: Start Jan 21 with schema.py extraction
-- Tier A roadmap: 5 features, ~5 days implementation after refactoring verified
+- Feature roadmap: See ADR-0002 for detailed plans
 
 **Key Outcomes:**
 ✅ Architecture prioritizes team coordination (Section 4 can import schema.py independently)  
