@@ -36,7 +36,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ### Production-Ready Features (Week 1)
 
-- ✅ **Direct PE parsing** - Eliminates Visual Studio dependency, enables portability
+- ✅ **Direct PE parsing** - Native export extraction, dumpbin fallback for compatibility
 - ✅ **Forwarded export resolution** - Maps export chains to real targets
 - ✅ **Digital signature extraction** - Identifies signed/unsigned binaries and publishers
 - ✅ **Confidence scoring** - Transparent reasoning for export invocability (low/medium/high)
@@ -150,7 +150,7 @@ ZSTD_compress,1,0x12345,High,True,Zstandard Project,False
 {"function":"ZSTD_compress","ordinal":1,"rva":"0x12345","confidence":"High","is_signed":true,"publisher":"Zstandard Project","is_forwarded":false}
 ```
 
-See full fixture outputs in [artifacts/](artifacts/) and schema reference in [docs/schemas/](docs/schemas/).
+Full sample outputs are generated during `setup-dev.ps1` in `artifacts/` directory (created at runtime). Schema reference in [docs/schemas/](docs/schemas/).
 
 ## Next Steps (Iteration 2+)
 
