@@ -21,6 +21,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 ## Current Status (Week 1)
 
 - [x] **Sections 2-3: Binary Discovery** (Evan) - DLL export analysis with header matching - **WORKING**
+  - ✅ [5/5 tests passing](tests/test_fixtures.py) (zstd: 98.4% match, sqlite3: 95.9% match)
 - [ ] **Section 4: MCP Generation** (Team) - JSON schema output
 - [ ] **Section 5: Verification UI** (Team) - Interactive validation
 - [ ] **Section 6: Deployment** (Team) - Azure integration
@@ -133,6 +134,23 @@ This release implements **Sections 2–3** of the project requirements:
   - Parses Doxygen-style documentation comments
   - Generates tiered CSV/Markdown reports (5 levels: full → metadata only)
   - Captures function metadata: ordinal, hint, RVA, forwarding info
+
+## Sample Output (for Section 4)
+
+One exported function from discovery, in both formats:
+
+**CSV row:**
+```
+function,ordinal,rva,confidence,is_signed,publisher,is_forwarded
+ZSTD_compress,1,0x12345,High,True,Zstandard Project,False
+```
+
+**JSON object:**
+```json
+{"function":"ZSTD_compress","ordinal":1,"rva":"0x12345","confidence":"High","is_signed":true,"publisher":"Zstandard Project","is_forwarded":false}
+```
+
+See full fixture outputs in [artifacts/](artifacts/) and schema reference in [docs/schemas/](docs/schemas/).
 
 ## Next Steps (Iteration 2+)
 
@@ -260,6 +278,14 @@ Get-Content "artifacts\zstd_tier2_api_zstd_fixture.csv" | Select-Object -First 1
 - **Section 4 (MCP Generation):** Layalie AbuOleim, Caden Spokas - JSON schema generation, tool definitions
 - **Section 5 (Verification):** Thinh Nguyen - Interactive UI, LLM-based validation
 - **Integration & Deployment:** Team effort - Azure deployment, CI/CD, documentation
+
+## Data Contract Stability (for Section 4)
+
+Section 2-3 produces a stable JSON schema that Section 4 teams depend on:
+
+- **Current Schema:** v1.0 (function, ordinal, rva, confidence, is_signed, publisher, is_forwarded)
+- **Versioning:** Breaking changes documented in [CHANGELOG.md](CHANGELOG.md)
+- **For Section 4 teams:** Pin schema version in MCP generation to prevent drift
 
 ## Contributing
 
