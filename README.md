@@ -1,6 +1,29 @@
-# mcp-factory
+# MCP Factory
 
-Automated DLL export analyzer that extracts function signatures from Windows DLLs using dumpbin and header file parsing. Generates structured CSV/Markdown reports with function prototypes, parameters, and documentation for API analysis and MCP tool schema generation.
+> Automated generation of Model Context Protocol servers from Windows binaries
+
+**Project:** USF CSE Senior Design Capstone - Microsoft Sponsored  
+**Team:** Evan King, Layalie AbuOleim, Caden Spokas, Thinh Nguyen  
+**Objective:** Enable AI agents to interact with legacy Windows applications through automated MCP server generation
+
+## Business Scenario
+
+Enterprise organizations need AI-powered customer service that can invoke existing internal tools lacking API documentation or modern integration points. MCP Factory bridges this gap by automatically analyzing Windows binaries and generating standards-compliant Model Context Protocol servers.
+
+## Current Status (Week 1)
+
+- [x] **Sections 2-3: Binary Discovery** (Evan) - DLL export analysis with header matching - **WORKING**
+- [ ] **Section 4: MCP Generation** (Team) - JSON schema output
+- [ ] **Section 5: Verification UI** (Team) - Interactive validation
+- [ ] **Section 6: Deployment** (Team) - Azure integration
+
+## Key Features
+
+- 🔍 **Zero-config setup** - Auto-detects vcpkg and Visual Studio toolchain
+- 📊 **Tiered analysis** - 5 output levels from detailed to metadata-only
+- 🧪 **Reproducible fixtures** - Automated test suite with zstd + sqlite3
+- 📝 **Header matching** - Extracts function prototypes and Doxygen comments
+- ⚡ **Fast execution** - Processes 500+ exports in seconds
 
 ## Prerequisites
 
@@ -12,7 +35,7 @@ Automated DLL export analyzer that extracts function signatures from Windows DLL
 
 ## Quick Start
 
-Run the complete fixture test in one command:
+Run the complete fixture test with automatic tool detection:
 
 ```powershell
 # 1. Clone this repo
@@ -22,15 +45,19 @@ cd mcp-factory
 # 2. Allow PowerShell scripts (one-time per session)
 Set-ExecutionPolicy -Scope Process Bypass
 
-# 3. Get vcpkg (one-time setup)
-git clone https://github.com/microsoft/vcpkg.git $env:USERPROFILE\Downloads\vcpkg
-Push-Location $env:USERPROFILE\Downloads\vcpkg
-.\bootstrap-vcpkg.bat
-Pop-Location
-
-# 4. Run fixture test (analyzes zstd + sqlite3)
-.\scripts\run_fixtures.ps1 -VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"
+# 3. Run fixture test (auto-installs vcpkg if needed, auto-detects dumpbin)
+.\scripts\run_fixtures.ps1 -BootstrapVcpkg
 ```
+
+**Alternative:** If you already have vcpkg installed:
+```powershell
+.\scripts\run_fixtures.ps1
+```
+
+The script will automatically:
+- Locate vcpkg in PATH, `$env:USERPROFILE\Downloads\vcpkg`, or repo-local vcpkg
+- Detect dumpbin.exe from Visual Studio installations
+- Bootstrap into VS developer environment if needed
 
 ### What Success Looks Like
 
@@ -52,16 +79,18 @@ The script will print: `FIXTURE TEST COMPLETED SUCCESSFULLY` and show export cou
 
 ## Troubleshooting
 
+**"vcpkg not found"**
+- The script auto-detects vcpkg in PATH and common locations
+- Use `-BootstrapVcpkg` to auto-install: `.\scripts\run_fixtures.ps1 -BootstrapVcpkg`
+- Or specify manually: `-VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"`
+
 **"dumpbin not found in PATH"**
-- Run from: Start Menu → "x64 Native Tools Command Prompt for VS 2022"
-- Or specify: `.\scripts\run_fixtures.ps1 -VcpkgExe "..." -DumpbinExe "C:\Path\To\dumpbin.exe"`
+- The script auto-detects dumpbin from Visual Studio installations
+- If detection fails, it will bootstrap into VS developer environment automatically
+- Or specify manually: `-DumpbinExe "C:\Path\To\dumpbin.exe"`
 
 **"cannot be loaded because running scripts is disabled"**
 - Run: `Set-ExecutionPolicy -Scope Process Bypass` before the script
-
-**"vcpkg install failed"**
-- Ensure vcpkg path is correct: `Test-Path "C:\path\to\vcpkg.exe"`
-- Try running vcpkg from its directory: `cd C:\path\to\vcpkg; .\vcpkg.exe version`
 
 ## What This Iteration Covers
 
@@ -111,33 +140,34 @@ python src\discovery\csv_script.py --dll "C:\path\to\your.dll" --dumpbin "C:\cus
 ### Fixture Script Options
 
 ```powershell
+# With auto-detection (recommended)
+.\scripts\run_fixtures.ps1
+
+# Explicit vcpkg path
+.\scripts\run_fixtures.ps1 -VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"
+
 # Custom output directory
-.\scripts\run_fixtures.ps1 -VcpkgExe "C:\vcpkg\vcpkg.exe" -OutDir "test_output"
+.\scripts\run_fixtures.ps1 -OutDir "test_output"
 
 # Different triplet (e.g., static linking)
-.\scripts\run_fixtures.ps1 -VcpkgExe "C:\vcpkg\vcpkg.exe" -Triplet "x64-windows-static"
+.\scripts\run_fixtures.ps1 -Triplet "x64-windows-static"
 
 # Specify dumpbin location
-.\scripts\run_fixtures.ps1 -VcpkgExe "C:\vcpkg\vcpkg.exe" -DumpbinExe "C:\Path\To\dumpbin.exe"
+.\scripts\run_fixtures.ps1 -DumpbinExe "C:\Path\To\dumpbin.exe"
 ```
 
 ## One-Command Demo
 
-For a clean demonstration from scratch (run from PowerShell at repo root):
+For a completely automated setup from scratch:
 
 ```powershell
-# Complete setup and test in one command block
+# Clone, setup, and run - everything is auto-detected
 Set-ExecutionPolicy -Scope Process Bypass
-git clone https://github.com/microsoft/vcpkg.git $env:USERPROFILE\Downloads\vcpkg
-Push-Location $env:USERPROFILE\Downloads\vcpkg
-.\bootstrap-vcpkg.bat
-Pop-Location
-.\scripts\run_fixtures.ps1 -VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"
+.\scripts\run_fixtures.ps1 -BootstrapVcpkg
 ```
 
-Expected completion time: ~5 minutes (vcpkg download/build + analysis).
+Expected completion time: ~5 minutes (vcpkg clone/build + analysis).
 Verify success: See 8 files in `artifacts/` directory matching the "What Success Looks Like" section above.
-```
 
 ## Next Iteration Preview
 
@@ -180,9 +210,28 @@ Select-String -Path "artifacts\sqlite3_tier2_api_sqlite3_fixture.csv" -Pattern "
 Get-Content "artifacts\zstd_tier2_api_zstd_fixture.csv" | Select-Object -First 11
 ```
 
+## Team Responsibilities
+
+- **Sections 2-3 (Binary Analysis):** Evan King - DLL/EXE export discovery, header matching, tiered output
+- **Section 4 (MCP Generation):** Layalie AbuOleim, Caden Spokas - JSON schema generation, tool definitions
+- **Section 5 (Verification):** Thinh Nguyen - Interactive UI, LLM-based validation
+- **Integration & Deployment:** Team effort - Azure deployment, CI/CD, documentation
+
+## Contributing
+
+This is an active capstone project. For development setup and workflow guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Questions? Contact via GitHub issues or @evanking12.
+
 ## Documentation
+
 - Architecture: `docs/architecture.md`
 - Product flow (Sections 2–5): `docs/product-flow.md`
 - Schemas: `docs/schemas/`
 - Compliance/Security/Cost: `docs/`
 - References: `docs/references.md`
+
+---
+
+**Sponsored by Microsoft** | Mentored by Microsoft Engineers  
+_Last updated: January 2026_
