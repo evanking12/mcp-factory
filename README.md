@@ -33,6 +33,14 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 - 📝 **Header matching** - Extracts function prototypes and Doxygen comments
 - ⚡ **Fast execution** - Processes 500+ exports in seconds
 
+### Production-Ready Features (Week 1)
+
+- ✅ **Direct PE parsing** - Eliminates Visual Studio dependency, enables portability
+- ✅ **Forwarded export resolution** - Maps export chains to real targets
+- ✅ **Digital signature extraction** - Identifies signed/unsigned binaries and publishers
+- ✅ **Confidence scoring** - Transparent reasoning for export invocability (low/medium/high)
+- ✅ **Structured logging** - Production-ready with error handling and debugging support
+
 ## Prerequisites
 
 - **Python 3.6+** - Ensure `python` is available in PATH
@@ -43,17 +51,25 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ## Quick Start
 
-Run the complete fixture test with automatic tool detection:
+### One-Command Setup (Recommended)
 
 ```powershell
 # 1. Clone this repo
 git clone https://github.com/evanking12/mcp-factory.git
 cd mcp-factory
 
-# 2. Allow PowerShell scripts (one-time per session)
+# 2. Set PowerShell execution policy (one-time per session)
 Set-ExecutionPolicy -Scope Process Bypass
 
-# 3. Run fixture test (auto-installs vcpkg if needed, auto-detects dumpbin)
+# 3. Run dev environment setup
+.\scripts\setup-dev.ps1
+```
+
+This validates Python, Git, and VS Build Tools; bootstraps fixtures; and runs tests automatically.
+
+### Manual Fixture Test
+
+```powershell
 .\scripts\run_fixtures.ps1 -BootstrapVcpkg
 ```
 
@@ -118,12 +134,23 @@ This release implements **Sections 2–3** of the project requirements:
   - Generates tiered CSV/Markdown reports (5 levels: full → metadata only)
   - Captures function metadata: ordinal, hint, RVA, forwarding info
 
-## What It Doesn't Cover Yet
+## Next Steps (Iteration 2+)
 
-- **Section 4: User Deselection UI** - No interactive checkbox interface for excluding functions
-- **Section 5: MCP Generation** - No JSON schema output for Model Context Protocol tools
-- **Section 6: Verification Chat UI** - No LLM-based validation interface
-- **Azure/Aspire Integration** - Deployment pipeline not yet implemented
+### High Priority (Weeks 2-3)
+- **Section 4 Prep:** JSON schema generation foundation for MCP tool definitions
+- **.NET Reflection:** Analyze .NET assemblies (CLR metadata, type information)
+- **Type Library Parsing:** COM type information extraction from TLBs
+
+### Medium Priority (Weeks 4-5)
+- **Interactive UI:** Checkbox interface for excluding functions before schema generation
+- **PDB Parsing:** Enhanced type information from program databases
+- **Safety Annotations:** Automatic detection of thread safety, error codes, ownership
+
+### Future (Weeks 6-8)
+- **Section 5:** MCP schema to interactive validation chat UI
+- **Azure Integration:** Deployment to Azure Container Instances
+- **CLI Tools:** EXE command-line argument extraction and analysis
+- **RPC/Registry:** Windows RPC endpoint and registry scanning
 
 ## Advanced Usage
 
@@ -133,16 +160,19 @@ Analyze any DLL directly:
 
 ```powershell
 # Basic analysis (exports only)
-python src\discovery\csv_script.py --dll "C:\path\to\your.dll" --out "output"
+python src\discovery\main.py --dll "C:\path\to\your.dll" --out "output"
 
 # Full analysis with header matching
-python src\discovery\csv_script.py --dll "C:\path\to\your.dll" --headers "C:\path\to\headers" --out "detailed_output"
+python src\discovery\main.py --dll "C:\path\to\your.dll" --headers "C:\path\to\headers" --out "detailed_output"
 
 # With documentation extraction
-python src\discovery\csv_script.py --dll "C:\path\to\your.dll" --headers "C:\path\to\headers" --docs "C:\path\to\docs" --out "full_output"
+python src\discovery\main.py --dll "C:\path\to\your.dll" --headers "C:\path\to\headers" --docs "C:\path\to\docs" --out "full_output"
 
 # Custom dumpbin path
-python src\discovery\csv_script.py --dll "C:\path\to\your.dll" --dumpbin "C:\custom\path\dumpbin.exe" --out "output"
+python src\discovery\main.py --dll "C:\path\to\your.dll" --dumpbin "C:\custom\path\dumpbin.exe" --out "output"
+
+# Show all options
+python src\discovery\main.py --help
 ```
 
 ### Fixture Script Options
@@ -193,8 +223,14 @@ mcp-factory/
 │   ├── run_fixtures.ps1         # Main fixture test runner
 │   └── smoke_test.ps1           # Output verification
 ├── src/discovery/               # Section 2-3: Discovery pipeline
-│   ├── csv_script.py            # DLL export analyzer
-│   └── README_csv_script.md     # Tool documentation
+│   ├── main.py                  # CLI orchestrator
+│   ├── schema.py                # Data models and CSV/JSON writers
+│   ├── pe_parse.py              # PE header parsing
+│   ├── classify.py              # File type detection
+│   ├── exports.py               # Export enrichment (demangle, forwarding)
+│   ├── headers_scan.py          # Header prototype matching
+│   ├── docs_scan.py             # Documentation correlation
+│   └── com_scan.py              # COM analysis (plugin registry)
 ├── tests/fixtures/              # Test dependencies
 │   └── vcpkg.json               # vcpkg manifest (zstd, sqlite3)
 ├── artifacts/                   # Generated outputs (gitignored)
