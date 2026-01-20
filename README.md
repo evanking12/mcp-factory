@@ -3,8 +3,16 @@
 > Automated generation of Model Context Protocol servers from Windows binaries
 
 **Project:** USF CSE Senior Design Capstone - Microsoft Sponsored  
-**Team:** Evan King, Layalie AbuOleim, Caden Spokas, Thinh Nguyen  
 **Objective:** Enable AI agents to interact with legacy Windows applications through automated MCP server generation
+
+## Team
+
+| Role | Member | GitHub |
+|------|--------|--------|
+| Lead & Sections 2-3 | Evan King | [@evanking12](https://github.com/evanking12) |
+| Section 4 (MCP Generation) | Layalie AbuOleim | [@abuoleim1](https://github.com/abuoleim1) |
+| Section 4 (MCP Generation) | Caden Spokas | TBD |
+| Section 5 (Verification) | Thinh Nguyen | TBD |
 
 ## Business Scenario
 
