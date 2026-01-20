@@ -1,5 +1,7 @@
 # Output directories
 artifacts/
+test_*/
+mcp_dumpbin_out/
 tests/fixtures/vcpkg_installed/
 
 # Build artifacts
