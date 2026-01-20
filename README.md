@@ -14,9 +14,8 @@ Automated DLL export analyzer that extracts function signatures from Windows DLL
 
 Run the complete fixture test in one command:
 
-```powershell
 # 1. Clone this repo
-git clone <repo-url>
+git clone https://github.com/evanking12/mcp-factory.git
 cd mcp-factory
 
 # 2. Allow PowerShell scripts (one-time per session)
@@ -30,7 +29,7 @@ Pop-Location
 
 # 4. Run fixture test (analyzes zstd + sqlite3)
 .\scripts\run_fixtures.ps1 -VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"
-```
+
 
 ### What Success Looks Like
 
