@@ -1,7 +1,8 @@
-# Copilot Development Log
+# GitHub Copilot & Claude Development Log
 
 **Project:** mcp-factory  
-**Iteration:** 1 (Sections 2–3: Target Binary Selection + Function Discovery)
+**Iteration:** 1 (Sections 2–3: Target Binary Selection + Function Discovery)  
+**Note:** Tracks AI-assisted architectural and coding work. All output is reviewed, validated, and often enhanced with manual changes.
 
 ## 2026-01-19 — Fixture Harness + Robust Parser
 
@@ -48,6 +49,76 @@
 - dumpbin auto-detection searches VS 2022 Community, Professional, Enterprise, BuildTools
 - Forwarded exports (RVA = "--------") are captured in ForwardedTo column
 - Header matching success rate: ~98% for zstd, ~96% for sqlite3
+
+---
+
+## 2026-01-20 — Architecture Design & Refactoring Strategy
+
+**Task:** Design modular architecture for csv_script.py to enable feature expansion, improve testability, and unblock Section 4 team for parallel work.
+
+**Context:** 
+- csv_script.py is 500 lines with mixed concerns (parsing, extraction, enrichment, output)
+- Need clean architecture before adding .NET/COM/CLI analyzers
+- Section 4 team needs stable data contracts to design MCP schemas in parallel
+- Total timeline is 12 weeks; must validate priorities with Microsoft before deep implementation
+
+**Prompts Used:**
+1. Copilot: "Design modular architecture for binary analysis pipeline with separate responsibilities for classify, parse, extract, enrich, output"
+2. Claude: "Filter 50 ambitious features to high-ROI items given 12-week timeline and unknown requirements"  
+3. Claude: "Documentation and git workflow best practices for academic capstone with sponsor review"
+
+**Copilot Output Accepted:**
+- 8-module architecture with clear input/output contracts per module
+- Interface matrix (module dependencies and data flow)
+- Testing strategy: unit tests per module + integration test against fixtures
+- Dataclass design for Invocable record (unified callable representation)
+
+**Manual Enhancements:**
+1. **Feature filtering:** Started with 50 ambitious ideas (decompiler integration, ETW tracing, YARA rules), filtered to Tier A (5 items) based on:
+   - Time-to-ROI ratio (what's doable in 1-2 days with high value?)
+   - What unblocks Section 4 (JSON output is priority)
+   - External dependency reduction (dumpbin removal improves portability)
+   - Validation needed (don't over-optimize for unknown Microsoft priorities)
+
+2. **Timeline mapping:** Each Tier A feature sized:
+   - PE export parsing without dumpbin: 1.5 days (high value, moderate complexity)
+   - Forwarder resolution: 1 day (solves real problem, simple logic)
+   - JSON writer: 0.5 days (unblocks Section 4)
+   - Architecture detection: 0.5 days (low complexity, prevents bugs)
+   - Digital signatures: 1 day (trust/vendor info, moderate complexity)
+
+3. **Team coordination design:** schema.py planned to be:
+   - Importable by Section 4 team without csv_script.py dependencies
+   - Single source of truth for "what is an Invocable?"
+   - Enables parallel design of MCP schema generation
+
+4. **Documentation strategy:** Clear separation of concerns:
+   - lab-notes.md: What happened (decisions made, outcomes)
+   - ADR-0003: Why (context, alternatives, tradeoffs)
+   - copilot-log.md: How AI helped (prompts, outputs, manual changes)
+   - git commits: Tied to ADRs, reference decision rationale
+
+**Design Decisions & Rationale:**
+
+| Decision | Rationale | Alternative | Trade-off |
+|----------|-----------|-------------|-----------|
+| Refactor before features | Modularization unblocks team + easier feature additions | Ship features on csv_script.py | 2-3 days refactoring time vs future flexibility |
+| 8 modules | Single responsibility + testability + aligns with analyzer types (PE, .NET, COM) | Fewer larger modules | More files, clearer boundaries |
+| Keep dumpbin initially | Proven, reduces refactoring risk; can replace incrementally | Direct PE parsing now | Depends on VS, but reduces scope of refactoring |
+| Wait for Microsoft direction | Don't optimize for unknown requirements | Build all 50 features now | Some Tier B items may be wrong priorities |
+| schema.py first | Foundation module; enables Section 4 to start design | Extract all modules in parallel | Sequentially dependent, but creates stable contract |
+
+**Result:**
+- ADR-0003: Modular Analyzer Architecture (comprehensive decision document)
+- lab-notes.md: Updated with modularization plan and timeline
+- Refactoring plan: Start Jan 21 with schema.py extraction
+- Tier A roadmap: 5 features, ~5 days implementation after refactoring verified
+
+**Key Outcomes:**
+✅ Architecture prioritizes team coordination (Section 4 can import schema.py independently)  
+✅ Realistic feature pipeline avoids over-commitment  
+✅ Decision rationale documented for Microsoft sponsor review  
+✅ Modular design supports incremental improvements without breaking changes
 
 **References:**
 - vcpkg manifest mode: https://github.com/microsoft/vcpkg/blob/master/docs/users/manifests.md
