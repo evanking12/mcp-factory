@@ -12,7 +12,7 @@
 | Lead & Sections 2-3 | Evan King | [@evanking12](https://github.com/evanking12) |
 | Section 4 (MCP Generation) | Layalie AbuOleim | [@abuoleim1](https://github.com/abuoleim1) |
 | Section 4 (MCP Generation) | Caden Spokas | TBD |
-| Section 5 (Verification) | Thinh Nguyen | TBD |
+| Section 5 (Verification) | Thinh Nguyen | [@TheNgith](https://github.com/TheNgith) |
 
 ## Business Scenario
 
