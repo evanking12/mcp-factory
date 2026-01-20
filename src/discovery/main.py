@@ -6,9 +6,12 @@ Parses arguments, runs the analysis pipeline, and writes outputs.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from classify import classify_file, FileType, extract_signature, get_architecture
 from docs_scan import scan_docs_for_exports
@@ -70,6 +73,7 @@ def get_default_output_dir() -> Path:
 
 def main():
     """Main entry point."""
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
     parser = argparse.ArgumentParser(
         description="Advanced DLL Export Analyzer - Generate MCP schemas from Windows binaries"
     )
@@ -154,7 +158,7 @@ def main():
             from pe_parse import parse_dumpbin_exports
             exports = parse_dumpbin_exports(raw_text)
         except Exception as e:
-            print(f"Error reading exports-raw file: {e}", file=sys.stderr)
+            logger.error(f"Error reading exports-raw file: {e}")
             return 1
     elif args.dll:
         # Run dumpbin
@@ -162,7 +166,7 @@ def main():
         exports, success = get_exports_from_dumpbin(args.dll, args.dumpbin, raw_path)
 
         if not success:
-            print(f"Error: Could not extract exports from {args.dll}", file=sys.stderr)
+            logger.error(f"Could not extract exports from {args.dll}")
             if raw_path.exists():
                 try:
                     raw_content = raw_path.read_text()
@@ -177,7 +181,7 @@ def main():
             return 1
 
     if not exports:
-        print("Error: No exports found", file=sys.stderr)
+        logger.error("No exports found")
         return 1
 
     # Phase 2: Deduplicate and demangle, resolve forwarders
@@ -256,10 +260,10 @@ def main():
     summary_md = out_dir / f"{base_name}_tiers.md"
     write_tier_summary(summary_md, tier_entries)
 
-    print(f"[OK] Analysis complete. Results in: {out_dir}")
-    print(f"  Exports found: {len(exports)}")
-    print(f"  Matched to headers: {sum(1 for e in exports if e.name in matches)}")
-    print(f"  Demangled: {sum(1 for e in exports if e.demangled)}")
+    logger.info(f"Analysis complete. Results in: {out_dir}")
+    logger.info(f"Exports found: {len(exports)}")
+    logger.info(f"Matched to headers: {sum(1 for e in exports if e.name in matches)}")
+    logger.info(f"Demangled: {sum(1 for e in exports if e.demangled)}")
 
     return 0
 
