@@ -44,7 +44,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ## Prerequisites
 
-- **Python 3.6+** - Ensure `python` is available in PATH
+- **Python 3.8+** - Ensure `python` is available in PATH (see [pyproject.toml](pyproject.toml) for details)
 - **Visual Studio Build Tools** - Provides `dumpbin.exe` for DLL analysis (auto-detected from common VS 2022 locations)
 - **PowerShell** - For running automation scripts
 - **git** - For cloning vcpkg and this repository
@@ -150,7 +150,7 @@ ZSTD_compress,1,0x12345,High,True,Zstandard Project,False
 {"function":"ZSTD_compress","ordinal":1,"rva":"0x12345","confidence":"High","is_signed":true,"publisher":"Zstandard Project","is_forwarded":false}
 ```
 
-Full sample outputs are generated during `setup-dev.ps1` in `artifacts/` directory (created at runtime). Schema reference in [docs/schemas/](docs/schemas/).
+Full sample outputs are generated during `setup-dev.ps1` in `artifacts/` directory (created at runtime). **Schema reference:** [docs/schemas/v1.0.json](docs/schemas/v1.0.json)
 
 ## Next Steps (Iteration 2+)
 
@@ -283,8 +283,9 @@ Get-Content "artifacts\zstd_tier2_api_zstd_fixture.csv" | Select-Object -First 1
 
 Section 2-3 produces a stable JSON schema that Section 4 teams depend on:
 
-- **Current Schema:** v1.0 (function, ordinal, rva, confidence, is_signed, publisher, is_forwarded)
-- **Versioning:** Breaking changes documented in [CHANGELOG.md](CHANGELOG.md)
+- **Schema:** [docs/schemas/v1.0.json](docs/schemas/v1.0.json) - Formal JSON Schema with required fields, types, and constraints
+- **Validation:** CI tests validate outputs match schema on every push
+- **Versioning:** Breaking changes → v2.0. See [CHANGELOG.md](CHANGELOG.md)
 - **For Section 4 teams:** Pin schema version in MCP generation to prevent drift
 
 ## Contributing
