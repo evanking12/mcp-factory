@@ -1,0 +1,26 @@
+# Output directories
+artifacts/
+tests/fixtures/vcpkg_installed/
+
+# Build artifacts
+**/vcpkg_installed/
+**/installed/
+*.dll
+*.lib
+*.pdb
+*.log
+
+# Generated output files
+*_exports_raw.txt
+*_symbols.txt
+*_api*.csv
+*_api*.md
+*_tier*.csv
+*_tier*.md
+*_tiers_*.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/

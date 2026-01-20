@@ -1,0 +1,10 @@
+{
+  "title": "Selection Schema (v0)",
+  "type": "object",
+  "properties": {
+    "target_path": { "type": "string" },
+    "selected_ids": { "type": "array", "items": { "type": "string" } },
+    "component_name": { "type": "string" }
+  },
+  "required": ["target_path", "selected_ids"]
+}
