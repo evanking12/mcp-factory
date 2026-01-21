@@ -19,6 +19,7 @@ from exports import demangle_with_undname, deduplicate_exports, resolve_forwarde
 from headers_scan import scan_headers
 from pe_parse import get_exports_from_dumpbin
 from schema import ExportedFunc, Invocable, MatchInfo, write_csv, write_json, write_markdown, write_tier_summary
+from utils import Spinner, format_verbose_header, format_verbose_result
 
 
 # Plugin-based analyzer registry
@@ -273,8 +274,21 @@ def main():
         default=2,
         help="Maximum documentation file hits per export",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed pipeline steps with spinner animation",
+    )
 
     args = parser.parse_args()
+
+    # Configure verbose mode for Spinner
+    Spinner.enabled = args.verbose
+    
+    if args.verbose:
+        print("\n" + "=" * 60)
+        print("MCP FACTORY - ADVANCED BINARY ANALYZER")
+        print("=" * 60 + "\n")
 
     # Resolve output directory
     out_dir = args.out or get_default_output_dir()
