@@ -482,7 +482,7 @@ function Bootstrap-Vcpkg {
         Write-Host "[Bootstrap] Running bootstrap-vcpkg.bat..." -ForegroundColor Cyan
         Push-Location $TargetDir
         
-        & .\bootstrap-vcpkg.bat -disableMetrics
+        & .\bootstrap-vcpkg.bat -disableMetrics 2>&1 | Where-Object { $_ -notmatch 'See LICENSE|Downloading|Validating' }
         if ($LASTEXITCODE -ne 0) {
             Pop-Location
             Pop-Location
@@ -494,11 +494,13 @@ function Bootstrap-Vcpkg {
         Pop-Location
 
         $VcpkgExePath = Join-Path $TargetDir "vcpkg.exe"
+        Write-Host "[Debug] Checking for vcpkg.exe at: $VcpkgExePath" -ForegroundColor DarkGray
         if (Test-Path $VcpkgExePath) {
             Write-Success "vcpkg bootstrapped successfully: $VcpkgExePath"
+            Write-Host "[Debug] vcpkg.exe verified, returning path" -ForegroundColor DarkGray
             return $VcpkgExePath
         } else {
-            Write-Host "[ERROR] vcpkg.exe not found after bootstrap" -ForegroundColor Red
+            Write-Host "[ERROR] vcpkg.exe not found after bootstrap at: $VcpkgExePath" -ForegroundColor Red
             return $null
         }
     } catch {
@@ -607,8 +609,17 @@ if (-not $VcpkgPath) {
 Write-Success "Using vcpkg: $VcpkgPath"
 
 # Determine VCPKG_ROOT (folder containing vcpkg.exe)
-$VcpkgRoot = Split-Path -Parent (Resolve-Path $VcpkgPath)
-Write-Success "VCPKG_ROOT: $VcpkgRoot"
+Write-Host "[Debug] Computing VCPKG_ROOT from path: $VcpkgPath" -ForegroundColor DarkGray
+if ($VcpkgPath) {
+    Write-Host "[Debug] VcpkgPath is not empty, proceeding with Split-Path" -ForegroundColor DarkGray
+    $VcpkgRoot = Split-Path -Parent (Resolve-Path $VcpkgPath)
+    Write-Host "[Debug] VCPKG_ROOT computed: $VcpkgRoot" -ForegroundColor DarkGray
+    Write-Success "VCPKG_ROOT: $VcpkgRoot"
+} else {
+    Write-Host "[ERROR] VcpkgPath is empty after bootstrap attempt" -ForegroundColor Red
+    Write-Host "[Debug] VcpkgPath variable is null or empty string" -ForegroundColor DarkGray
+    exit 1
+}
 
 # Check Python script exists (path is relative to repo root)
 $ScriptFullPath = Join-Path $RepoRoot $ScriptPath
@@ -703,6 +714,7 @@ if (-not $DumpbinPath) {
 }
 
 Write-Success "Using dumpbin: $DumpbinPath"
+Write-Host "[Debug] Dumpbin path verified: $DumpbinPath" -ForegroundColor DarkGray
 
 #endregion
 
@@ -954,6 +966,7 @@ if (Test-Path $Sqlite3Csv) {
 
 Write-Host ""
 Write-Host "All checks complete!" -ForegroundColor Green
+Write-Host "[Debug] Fixture testing completed successfully" -ForegroundColor DarkGray
 Write-Host ""
 
 #endregion
