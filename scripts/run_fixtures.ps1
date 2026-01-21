@@ -515,7 +515,12 @@ function Bootstrap-Vcpkg {
 Write-Step "Determining repository root"
 
 # Get the directory where this script is located
-$ScriptDir = Split-Path -Parent $PSCommandPath
+$ScriptDir = if ($PSCommandPath) {
+    Split-Path -Parent $PSCommandPath
+} else {
+    # Fallback if $PSCommandPath is empty (can happen when invoked via &)
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+}
 
 # Assume repo root is the parent of 'scripts' folder
 if ($ScriptDir -match '\\scripts$') {
