@@ -30,9 +30,9 @@ Write-Host ""
 function Write-Check {
     param([string]$Message, [bool]$Success = $true)
     if ($Success) {
-        Write-Host "  [✓] $Message" -ForegroundColor Green
+        Write-Host "  [+] $Message" -ForegroundColor Green
     } else {
-        Write-Host "  [✗] $Message" -ForegroundColor Red
+        Write-Host "  [-] $Message" -ForegroundColor Red
     }
 }
 
@@ -111,7 +111,7 @@ Write-Host ""
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
-    Write-Host "  [✗] Setup failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+    Write-Host "  [-] Setup failed with exit code: $LASTEXITCODE" -ForegroundColor Red
     Write-Host ""
     Write-Host "  Try running manually:" -ForegroundColor Yellow
     Write-Host "    .\scripts\run_fixtures.ps1 -BootstrapVcpkg" -ForegroundColor Gray
@@ -121,7 +121,7 @@ if ($LASTEXITCODE -ne 0) {
 # Completion
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  [✓] Setup Complete!" -ForegroundColor Green
+Write-Host "  [+] Setup Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor Cyan
