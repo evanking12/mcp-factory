@@ -153,3 +153,60 @@ Reference: Microsoft Learn/VS docs for VC tools environment (dumpbin/undname ava
 **Next Steps:**
 - Commit and push (ready for Monday Microsoft conversation)
 - Week 2: Begin .NET reflection analysis (Section 2 item 2)
+
+---
+
+## 2026-01-21 — Confidence Scoring + Frictionless Setup (12 commits)
+
+**Task:** Implement human-readable confidence analysis with color-coded output. Fix path resolution bugs in setup scripts. Add professional boot checks. Achieve one-command reproducible setup on clean Windows machines.
+
+**Implementation Details:**
+
+1. **Confidence Scoring** (commit aff6871, a1fec1e)
+   - `score_confidence(export, matches, is_signed, forwarded_resolved) -> tuple(confidence_level, reasons)`
+   - 6 factors: header_match, doc_comment, signature_complete, parameter_count, return_type, non_forwarded
+   - Thresholds: HIGH (>=6 factors), MEDIUM (>=4 factors), LOW (<4 factors)
+   - `generate_confidence_summary()` prints color-coded breakdown (RED for LOW, YELLOW for MEDIUM, GREEN for HIGH)
+   - Sample outputs per confidence level + improvement suggestions
+
+2. **Color-Coded Terminal Output**
+   - ANSI codes: RED (\033[91m), YELLOW (\033[93m), GREEN (\033[92m)
+   - Display order: LOW -> MEDIUM -> HIGH (progression visualization)
+   - Example: LOW (RED), MEDIUM (YELLOW), HIGH (GREEN)
+
+3. **Path Resolution Fixes** (commits 3a3c320, 5f73dc3, d5b25c6, e2b39af)
+   - **Issue:** setup-dev.ps1 -> run_fixtures.ps1 invocation via `&` operator emptied $PSCommandPath
+   - **Solution:** 3-fallback chain in run_fixtures.ps1:
+     - Method 1: $PSCommandPath (standard invocation)
+     - Method 2: $MyInvocation.MyCommand.Path (& operator invocation)
+     - Method 3: Get-Location (last resort)
+   - Explicit checks before Split-Path to prevent "empty string" errors
+   - Validated on 5+ fresh clone tests
+
+4. **Boot Checks Pattern** (commit e2b39af)
+   - Pre-flight validation: repo root, Python 3.8+, Git, PowerShell 5.1+
+   - ASCII indicators: [+] for pass (green), [-] for fail (red)
+   - "MCP Factory Development Setup" banner with professional styling
+
+5. **Encoding Fix** (commit 6eef026)
+   - **Issue:** Unicode checkmarks (✓/✗) corrupted during file creation
+   - **Solution:** Replaced with ASCII [+] and [-] (Windows terminal compatible)
+
+**Test Results:**
+- zstd.dll: 187 exports (8 HIGH, 176 MEDIUM, 3 LOW) = 98.4% header match
+- sqlite3.dll: 294 exports (8 HIGH, 274 MEDIUM, 12 LOW) = 95.9% header match
+- Setup time: 30-45 seconds on fresh machines
+- Tested on 2+ Windows machines without pre-installed vcpkg ✓
+
+**Files Modified:**
+- `scripts/setup-dev.ps1`: Rewritten (100 lines) with boot checks + path detection
+- `scripts/run_fixtures.ps1`: +25 lines (path resolution + filtering)
+- `src/discovery/main.py`: +35 lines (confidence scoring, color codes)
+- `README.md`: Clarity improvements + confidence examples
+
+**Strategic Value:**
+- Frictionless one-command deployment (any Windows machine)
+- Reproducible on clean systems (proven on 2+ machines)
+- Confidence analysis signals production-quality thinking
+- Unblocks Section 4 with standardized, scored exports
+
