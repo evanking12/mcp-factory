@@ -1,5 +1,30 @@
 # Copilot Log Entries
 
+## 2026-01-21 — Tyler's Setup Bug Fix + Documentation Clarity
+
+**Task:** After Tyler hit a setup error on fresh clone, fix the bug and clarify prerequisites in README to prevent future issues.
+
+**Issue:** Tyler's PC was missing Git, Visual Studio Build Tools, and had the error "Cannot bind argument to parameter 'Path' because it is an empty string" at run_fixtures.ps1:420.
+
+**Output Accepted:**
+- Guard clause fix in run_fixtures.ps1 line 420: `if ($RepoRoot -and (Test-Path $RepoRoot))`
+- Tested locally: setup-dev.ps1 runs full pipeline successfully
+
+**Documentation Changes:**
+- Updated README Prerequisites section to clearly mark VS Build Tools + C++ workload as required
+- Emphasized Git as required (was easy to miss)
+- Created docs/TROUBLESHOOTING.md with 8 common issues:
+  - dumpbin.exe not found (how to install VS Build Tools with C++ workload)
+  - Python not found
+  - Git not found
+  - ExecutionPolicy errors
+  - vcpkg bootstrap failures
+  - Permission issues
+  - Solutions with links to installers
+- Added "Not working? See [Troubleshooting Guide](docs/TROUBLESHOOTING.md)" link in README under Quick Start
+
+**Why:** Tyler's fresh-clone experience revealed that VS Build Tools wasn't obviously required. The README implied it was "auto-detected" (true) but not that it had to be manually installed first (also true, but hidden).
+
 ## 2026-01-19 — Fixture Harness + Robust Parser
 
 **Task:** Complete discovery pipeline with automated testing, dumpbin auto-detection, robust export parsing, header matching, and tiered outputs.

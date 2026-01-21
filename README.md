@@ -30,12 +30,15 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ## Prerequisites
 
+**Required (install manually):**
 - **PowerShell** 5.1+ (built into Windows 10+)
-- **Git** - For cloning the repo (install from [git-scm.com](https://git-scm.com))
+- **Git** — Download from [git-scm.com](https://git-scm.com)
+- **Visual Studio Build Tools 2022** — Download from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/downloads/)
+  - During installation, **select the "Desktop development with C++" workload**
+  - This installs `dumpbin.exe` and development tools (required for binary analysis)
 
-That's it! **The quickstart script automatically installs everything else:**
-- Python 3.8+ (detects existing install or uses system Python)
-- Visual Studio Build Tools (auto-detects `dumpbin.exe` from VS 2022 Community/Enterprise/BuildTools)
+**Auto-installed by setup script:**
+- Python 3.8+ (auto-detects existing installation)
 - vcpkg (~100 MB, one-time download to `$env:USERPROFILE\Downloads\vcpkg`)
 - zstd + sqlite3 test libraries
 
@@ -50,6 +53,8 @@ cd mcp-factory
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup-dev.ps1
 ```
+
+**Not working?** See [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions.
 
 **The script handles everything:**
 - ✅ Detects Python 3.8+ (or uses existing installation)
