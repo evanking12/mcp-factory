@@ -26,7 +26,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 - [ ] **Section 5: Verification UI** (Team) - Interactive validation
 - [ ] **Section 6: Deployment** (Team) - Azure integration
 
-**Approach:** 8-week phased delivery across 6 sections. Section 2-3 (binary discovery) is the foundation—extract what's callable, who calls it, how to invoke it. Sections 4-6 (MCP generation, verification UI, Azure deployment) consume this foundation in parallel.
+**Approach:** Phased delivery across 6 sections. Section 2-3 (binary discovery) is the foundation—extract what's callable, who calls it, how to invoke it. Sections 4-6 (MCP generation, verification UI, Azure deployment) consume this foundation in parallel.
 
 ## Prerequisites
 
