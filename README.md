@@ -3,7 +3,7 @@
 > Automated generation of Model Context Protocol servers from Windows binaries
 
 **Project:** USF CSE Senior Design Capstone - Microsoft Sponsored  
-**Objective:** Enable AI agents to interact with legacy Windows applications through automated MCP server generation
+**Objective:** Enable AI agents to interact with Windows applications through automated MCP server generation
 
 ## Team
 
@@ -21,7 +21,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 ## Current Status (Week 1)
 
 - [x] **Sections 2-3: Binary Discovery** (Evan) - DLL export analysis with header matching - **WORKING**
-  - ✅ [5/5 tests passing](tests/test_fixtures.py) (zstd: 98.4% match, sqlite3: 95.9% match)
+  - ✅ 5/5 tests passing (zstd: 98.4% match, sqlite3: 95.9% match)
 - [ ] **Section 4: MCP Generation** (Team) - JSON schema output
 - [ ] **Section 5: Verification UI** (Team) - Interactive validation
 - [ ] **Section 6: Deployment** (Team) - Azure integration
