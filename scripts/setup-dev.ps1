@@ -41,13 +41,13 @@ if ($LASTEXITCODE -eq 0) {
 
 # Check Git
 Write-Host "Checking Git..." -NoNewline
-$gitCheck = git --version 2>&1 | Select-Object -First 1
-if ($LASTEXITCODE -eq 0) {
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $gitVersion = git --version 2>&1
     Write-Host " OK" -ForegroundColor Green
 } else {
-    Write-Host " FAILED" -ForegroundColor Red
-    Write-Error "Git not found. Install from https://git-scm.com"
-    exit 1
+    Write-Host " NOT FOUND" -ForegroundColor Yellow
+    Write-Warning "Git not found. Install from https://git-scm.com"
+    Write-Warning "  (Continuing anyway - Git required only for version control)"
 }
 
 Write-Host ""

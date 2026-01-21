@@ -70,12 +70,16 @@ def read_pe_exports(dll_path: Path) -> Tuple[List[ExportedFunc], bool]:
 def run_dumpbin(dll_path: Path, dumpbin_exe: str) -> Tuple[int, str]:
     """Run dumpbin /exports on a DLL.
     
+    Executes Microsoft's dumpbin utility to extract the export table from a PE binary.
+    Output contains ordinal, hint, RVA, and exported function names with optional forwarding info.
+    
     Args:
-        dll_path: Path to DLL file
-        dumpbin_exe: Path to dumpbin.exe (or name on PATH)
+        dll_path: Path to DLL file (can be relative or absolute)
+        dumpbin_exe: Path to dumpbin.exe or command name (searches PATH if not absolute)
         
     Returns:
-        (return_code, output_text)
+        Tuple of (return_code, output_text). return_code is 0 on success.
+        output_text contains raw dumpbin output or error message.
     """
     try:
         cmd = [dumpbin_exe, '/exports', str(dll_path)]
@@ -97,6 +101,13 @@ def run_dumpbin(dll_path: Path, dumpbin_exe: str) -> Tuple[int, str]:
 
 def parse_dumpbin_exports(text: str) -> List[ExportedFunc]:
     """Parse dumpbin /exports output and extract function list.
+    
+    Extracts export entries from dumpbin output using regex, handling:
+    - Ordinal numbers
+    - Hint values (lookup index)
+    - RVA (relative virtual address) or '--------' for forwarded exports
+    - Function names with optional forwarded-to references
+    - Special characters and C++ decorated names
     
     Args:
         text: Raw dumpbin output text

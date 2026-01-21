@@ -164,3 +164,10 @@ mcp-factory/
 ---
 
 **Note:** This is an active capstone project with weekly iterations. Expect frequent updates to structure and guidelines.
+
+
+
+## Development Notes
+
+This project leverages GitHub Copilot for productivity. See `docs/copilot-log.md` 
+for details on AI-assisted development decisions.

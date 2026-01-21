@@ -26,16 +26,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 - [ ] **Section 5: Verification UI** (Team) - Interactive validation
 - [ ] **Section 6: Deployment** (Team) - Azure integration
 
-## Project Scope & Deliverables
-
-**Mission:** Transform Windows binaries (DLL/EXE/COM/RPC/Registry) into invokable endpoints for AI agents via MCP servers.
-
 **Approach:** 8-week phased delivery across 6 sections. Section 2-3 (binary discovery) is the foundation—extract what's callable, who calls it, how to invoke it. Sections 4-6 (MCP generation, verification UI, Azure deployment) consume this foundation in parallel.
-
-**Week 1 Status:**
-- ✅ **Section 2-3 WORKING:** PE export extraction, header matching, confidence scoring, digital signatures
-- 🔄 **Sections 4-6 READY:** Stable schema (v1.0.json) + CI validation enables parallel team startup
-- 📋 **Full scope:** DLL/EXE (✅ Week 1), COM/RPC/Registry (Weeks 2-3), UI/Azure (Weeks 3-6)
 
 ## Prerequisites
 
@@ -279,7 +270,6 @@ Get-Content "artifacts\zstd_tier2_api_zstd_fixture.csv" | Select-Object -First 1
 Section 2-3 produces a stable JSON schema that Section 4 teams depend on:
 
 - **Schema:** [docs/schemas/v1.0.json](docs/schemas/v1.0.json) - Formal JSON Schema with required fields, types, and constraints
-- **Validation:** CI tests validate outputs match schema on every push
 - **Versioning:** Breaking changes → v2.0. See [CHANGELOG.md](CHANGELOG.md)
 - **For Section 4 teams:** Pin schema version in MCP generation to prevent drift
 
