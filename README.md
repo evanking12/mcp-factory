@@ -38,66 +38,83 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ## Quick Start
 
-### One-Command Setup (Recommended)
+### One-Command Setup ⚡ (Just Works)
 
 ```powershell
-# 1. Clone this repo
+# Clone, set execution policy, run setup - that's it!
 git clone https://github.com/evanking12/mcp-factory.git
 cd mcp-factory
-
-# 2. Set PowerShell execution policy (one-time per session)
 Set-ExecutionPolicy -Scope Process Bypass
-
-# 3. Run dev environment setup
 .\scripts\setup-dev.ps1
 ```
 
-This validates Python, Git, and VS Build Tools; bootstraps fixtures; and runs tests automatically.
+**The script handles everything:**
+- ✅ Detects Python 3.8+ (or uses existing installation)
+- ✅ Auto-detects/bootstraps vcpkg (~100 MB download, one-time)
+- ✅ Auto-detects dumpbin from Visual Studio
+- ✅ Installs zstd + sqlite3 test libraries
+- ✅ Runs DLL export analysis on both
+- ✅ **Shows confidence analysis with color-coded output** 🔴🟡🟢
+- ✅ Generates detailed CSV/Markdown reports
 
-### Manual Fixture Test
+### What You'll See
 
-```powershell
-.\scripts\run_fixtures.ps1 -BootstrapVcpkg
+After running, you'll see colored confidence summaries like:
+
+```
+CONFIDENCE BREAKDOWN
+------------------------------------------------------------
+LOW     Confidence:   3 exports (  1.6%)
+MEDIUM  Confidence: 176 exports ( 94.1%)
+HIGH    Confidence:   8 exports (  4.3%)
 ```
 
-**Alternative:** If you already have vcpkg installed:
-```powershell
-.\scripts\run_fixtures.ps1
-```
+Plus sample exports showing WHY each confidence level was assigned.
 
-The script will automatically:
-- Locate vcpkg in PATH, `$env:USERPROFILE\Downloads\vcpkg`, or repo-local vcpkg
-- Detect dumpbin.exe from Visual Studio installations
-- Bootstrap into VS developer environment if needed
+### Output Files
 
-### What Success Looks Like
-
-After running, you'll see these files in `artifacts/`:
+All results saved to `artifacts/`:
 
 **ZSTD (187 exports):**
 - `zstd_tier2_api_zstd_fixture.csv` - Full analysis with headers (119 KB)
-- `zstd_tier4_api_zstd_fixture.csv` - Basic exports (17 KB)
-- `zstd_tiers_zstd_fixture.md` - Tier summary
+- `zstd_confidence_summary_zstd_fixture.txt` - Confidence breakdown
 - `zstd_exports_raw.txt` - Raw dumpbin output (14 KB)
 
 **SQLite3 (294 exports):**
 - `sqlite3_tier2_api_sqlite3_fixture.csv` - Full analysis with headers (89 KB)
-- `sqlite3_tier4_api_sqlite3_fixture.csv` - Basic exports (25 KB)
-- `sqlite3_tiers_sqlite3_fixture.md` - Tier summary
+- `sqlite3_confidence_summary_sqlite3_fixture.txt` - Confidence breakdown
 - `sqlite3_exports_raw.txt` - Raw dumpbin output (21 KB)
 
-The script will print: `FIXTURE TEST COMPLETED SUCCESSFULLY` and show export counts.
+### Cleanup & Fresh Run
 
-## Troubleshooting
+```powershell
+# Delete everything and start fresh
+Remove-Item -Recurse -Force "$env:USERPROFILE\Downloads\vcpkg" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "tests\fixtures\vcpkg_installed" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "artifacts" -ErrorAction SilentlyContinue
 
-**"vcpkg not found"**
-- The script auto-detects vcpkg in PATH and common locations
-- Use `-BootstrapVcpkg` to auto-install: `.\scripts\run_fixtures.ps1 -BootstrapVcpkg`
-- Or specify manually: `-VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"`
+# Then just run setup again
+.\scripts\setup-dev.ps1
+```
 
-**"dumpbin not found in PATH"**
-- The script auto-detects dumpbin from Visual Studio installations
-- If detection fails, it will bootstrap into VS developer environment automatically
+## Advanced Usage
+
+### Run Analysis on Custom DLL
+
+```powershell
+python src/discovery/csv_script.py --dll path/to/your_library.dll --headers path/to/include/dir --out ./results
+```
+
+### Re-run Fixtures Only
+
+```powershell
+.\scripts\run_fixtures.ps1
+```
+
+If vcpkg not found:
+```powershell
+.\scripts\run_fixtures.ps1 -BootstrapVcpkg
+```
 - Or specify manually: `-DumpbinExe "C:\Path\To\dumpbin.exe"`
 
 **"cannot be loaded because running scripts is disabled"**
