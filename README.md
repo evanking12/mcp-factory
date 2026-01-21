@@ -26,21 +26,16 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 - [ ] **Section 5: Verification UI** (Team) - Interactive validation
 - [ ] **Section 6: Deployment** (Team) - Azure integration
 
-## Key Features
+## Project Scope & Deliverables
 
-- 🔍 **Zero-config setup** - Auto-detects vcpkg and Visual Studio toolchain
-- 📊 **Tiered analysis** - 5 output levels from detailed to metadata-only
-- 🧪 **Reproducible fixtures** - Automated test suite with zstd + sqlite3
-- 📝 **Header matching** - Extracts function prototypes and Doxygen comments
-- ⚡ **Fast execution** - Processes 500+ exports in seconds
+**Mission:** Transform Windows binaries (DLL/EXE/COM/RPC/Registry) into invokable endpoints for AI agents via MCP servers.
 
-### Production-Ready Features (Week 1)
+**Approach:** 8-week phased delivery across 6 sections. Section 2-3 (binary discovery) is the foundation—extract what's callable, who calls it, how to invoke it. Sections 4-6 (MCP generation, verification UI, Azure deployment) consume this foundation in parallel.
 
-- ✅ **Direct PE parsing** - Native export extraction, dumpbin fallback for compatibility
-- ✅ **Forwarded export resolution** - Maps export chains to real targets
-- ✅ **Digital signature extraction** - Identifies signed/unsigned binaries and publishers
-- ✅ **Confidence scoring** - Transparent reasoning for export invocability (low/medium/high)
-- ✅ **Structured logging** - Production-ready with error handling and debugging support
+**Week 1 Status:**
+- ✅ **Section 2-3 WORKING:** PE export extraction, header matching, confidence scoring, digital signatures
+- 🔄 **Sections 4-6 READY:** Stable schema (v1.0.json) + CI validation enables parallel team startup
+- 📋 **Full scope:** DLL/EXE (✅ Week 1), COM/RPC/Registry (Weeks 2-3), UI/Azure (Weeks 3-6)
 
 ## Prerequisites
 
