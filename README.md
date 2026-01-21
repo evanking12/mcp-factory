@@ -30,11 +30,14 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ## Prerequisites
 
-- **Python 3.8+** - Ensure `python` is available in PATH (see [pyproject.toml](pyproject.toml) for details)
-- **Visual Studio Build Tools** - Provides `dumpbin.exe` for DLL analysis (auto-detected from common VS 2022 locations)
-- **PowerShell** - For running automation scripts
-- **git** - For cloning vcpkg and this repository
-- **vcpkg** - Package manager for installing test fixtures (see Quick Start)
+- **PowerShell** 5.1+ (built into Windows 10+)
+- **Git** - For cloning the repo (install from [git-scm.com](https://git-scm.com))
+
+That's it! **The quickstart script automatically installs everything else:**
+- Python 3.8+ (detects existing install or uses system Python)
+- Visual Studio Build Tools (auto-detects `dumpbin.exe` from VS 2022 Community/Enterprise/BuildTools)
+- vcpkg (~100 MB, one-time download to `$env:USERPROFILE\Downloads\vcpkg`)
+- zstd + sqlite3 test libraries
 
 ## Quick Start
 
@@ -78,47 +81,20 @@ All results saved to `artifacts/`:
 **ZSTD (187 exports):**
 - `zstd_tier2_api_zstd_fixture.csv` - Full analysis with headers (119 KB)
 - `zstd_confidence_summary_zstd_fixture.txt` - Confidence breakdown
-- `zstd_exports_raw.txt` - Raw dumpbin output (14 KB)
 
 **SQLite3 (294 exports):**
 - `sqlite3_tier2_api_sqlite3_fixture.csv` - Full analysis with headers (89 KB)
 - `sqlite3_confidence_summary_sqlite3_fixture.txt` - Confidence breakdown
-- `sqlite3_exports_raw.txt` - Raw dumpbin output (21 KB)
-
-### Cleanup & Fresh Run
-
-```powershell
-# Delete everything and start fresh
-Remove-Item -Recurse -Force "$env:USERPROFILE\Downloads\vcpkg" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "tests\fixtures\vcpkg_installed" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "artifacts" -ErrorAction SilentlyContinue
-
-# Then just run setup again
-.\scripts\setup-dev.ps1
-```
 
 ## Advanced Usage
 
-### Run Analysis on Custom DLL
+### Analyze Your Own DLL
 
 ```powershell
-python src/discovery/csv_script.py --dll path/to/your_library.dll --headers path/to/include/dir --out ./results
+python src/discovery/csv_script.py --dll path/to/your_library.dll --headers path/to/include/ --out ./results
 ```
 
-### Re-run Fixtures Only
-
-```powershell
-.\scripts\run_fixtures.ps1
-```
-
-If vcpkg not found:
-```powershell
-.\scripts\run_fixtures.ps1 -BootstrapVcpkg
-```
-- Or specify manually: `-DumpbinExe "C:\Path\To\dumpbin.exe"`
-
-**"cannot be loaded because running scripts is disabled"**
-- Run: `Set-ExecutionPolicy -Scope Process Bypass` before the script
+See `python src/discovery/csv_script.py --help` for all options.
 
 ## What This Iteration Covers
 
