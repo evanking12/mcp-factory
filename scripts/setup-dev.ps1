@@ -20,12 +20,37 @@
     Requires PowerShell 5.1+ and Windows OS
 #>
 
-# Set working directory to repo root (script's parent directory's parent)
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-if (-not (Test-Path (Join-Path $RepoRoot "README.md"))) {
-    # Fallback if not in scripts folder
+# Set working directory to repo root
+# Try multiple methods to find repo root (handles various invocation scenarios)
+$RepoRoot = $null
+
+# Method 1: Try via $PSCommandPath (standard invocation)
+if ($PSCommandPath) {
+    $scriptDir = Split-Path -Parent $PSCommandPath
+    if ($scriptDir -match '\\scripts$') {
+        $RepoRoot = Split-Path -Parent $scriptDir
+    }
+}
+
+# Method 2: Try via $MyInvocation (fallback for & operator invocations)
+if (-not $RepoRoot -and $MyInvocation.MyCommand.Path) {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    if ($scriptDir -match '\\scripts$') {
+        $RepoRoot = Split-Path -Parent $scriptDir
+    }
+}
+
+# Method 3: Use current directory (last resort)
+if (-not $RepoRoot) {
     $RepoRoot = Get-Location
 }
+
+# Validate we found a real repo root
+if (-not (Test-Path (Join-Path $RepoRoot "README.md"))) {
+    Write-Error "Cannot find repository root. Please ensure README.md exists in repo root directory."
+    exit 1
+}
+
 Set-Location $RepoRoot
 
 # Just run the fixtures script with bootstrap - it handles everything
