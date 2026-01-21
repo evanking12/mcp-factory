@@ -515,19 +515,36 @@ function Bootstrap-Vcpkg {
 Write-Step "Determining repository root"
 
 # Get the directory where this script is located
-$ScriptDir = if ($PSCommandPath) {
-    Split-Path -Parent $PSCommandPath
-} else {
-    # Fallback if $PSCommandPath is empty (can happen when invoked via &)
-    Split-Path -Parent $MyInvocation.MyCommand.Path
+# Try multiple methods to handle various invocation patterns
+$ScriptDir = $null
+if ($PSCommandPath) {
+    $ScriptDir = Split-Path -Parent $PSCommandPath
+} elseif ($MyInvocation.MyCommand.Path) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
 
-# Assume repo root is the parent of 'scripts' folder
-if ($ScriptDir -match '\\scripts$') {
-    $RepoRoot = Split-Path -Parent $ScriptDir
+# If we got a script directory, use it as anchor
+if ($ScriptDir) {
+    if ($ScriptDir -match '\\scripts$') {
+        $RepoRoot = Split-Path -Parent $ScriptDir
+    } else {
+        # Check if we're in repo root already (has scripts folder)
+        if (Test-Path (Join-Path $ScriptDir "scripts")) {
+            $RepoRoot = $ScriptDir
+        } else {
+            # Try to go up one level
+            $RepoRoot = Split-Path -Parent $ScriptDir
+        }
+    }
 } else {
-    # If not in scripts folder, assume current directory is repo root
+    # Last resort: use current location
     $RepoRoot = Get-Location
+}
+
+# Validate repo root by checking for key files
+if (-not (Test-Path (Join-Path $RepoRoot "README.md"))) {
+    Write-Error "Cannot determine repository root. Please run from repo root or scripts/ folder."
+    exit 1
 }
 
 # Verify repo structure

@@ -20,6 +20,14 @@
     Requires PowerShell 5.1+ and Windows OS
 #>
 
+# Set working directory to repo root (script's parent directory's parent)
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+if (-not (Test-Path (Join-Path $RepoRoot "README.md"))) {
+    # Fallback if not in scripts folder
+    $RepoRoot = Get-Location
+}
+Set-Location $RepoRoot
+
 # Just run the fixtures script with bootstrap - it handles everything
 & .\scripts\run_fixtures.ps1 -BootstrapVcpkg
 
