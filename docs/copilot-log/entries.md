@@ -1,38 +1,15 @@
 # Copilot Log Entries
 
-## 2026-01-21 — Tyler's Setup Bug Fix + Documentation Clarity
-
-**Task:** After Tyler hit a setup error on fresh clone, fix the bug and clarify prerequisites in README to prevent future issues.
-
-**Issue:** Tyler's PC was missing Git, Visual Studio Build Tools, and had the error "Cannot bind argument to parameter 'Path' because it is an empty string" at run_fixtures.ps1:420.
-
-**Output Accepted:**
-- Guard clause fix in run_fixtures.ps1 line 420: `if ($RepoRoot -and (Test-Path $RepoRoot))`
-- Tested locally: setup-dev.ps1 runs full pipeline successfully
-
-**Documentation Changes:**
-- Updated README Prerequisites section to clearly mark VS Build Tools + C++ workload as required
-- Emphasized Git as required (was easy to miss)
-- Created docs/TROUBLESHOOTING.md with 8 common issues:
-  - dumpbin.exe not found (how to install VS Build Tools with C++ workload)
-  - Python not found
-  - Git not found
-  - ExecutionPolicy errors
-  - vcpkg bootstrap failures
-  - Permission issues
-  - Solutions with links to installers
-- Added "Not working? See [Troubleshooting Guide](docs/TROUBLESHOOTING.md)" link in README under Quick Start
-
-**Why:** Tyler's fresh-clone experience revealed that VS Build Tools wasn't obviously required. The README implied it was "auto-detected" (true) but not that it had to be manually installed first (also true, but hidden).
-
 ## 2026-01-19 — Fixture Harness + Robust Parser
 
-**Task:** Complete discovery pipeline with automated testing, dumpbin auto-detection, robust export parsing, header matching, and tiered outputs.
+**Task/Issue:** Complete discovery pipeline with automated testing, dumpbin auto-detection, robust export parsing, header matching, and tiered outputs.
 
-**Prompt:**
-"Create a Python 3 script (csv_script.py) that runs dumpbin /exports on a DLL and generates tiered CSV/Markdown reports. Requirements: (1) Robust regex parser for dumpbin format with ordinal, hint, RVA, function name, and optional forwarding (handle both '00077410' and '--------' RVA); deduplicate by name; debug output if zero exports. (2) Header file scanning: recursively find .h/.hpp files, parse C/C++ function prototypes using regex, extract return types, parameters, and Doxygen-style doc comments (/// and /**); handle comment spans and nested parentheses. (3) Tiered analysis: Tier 1 (exports+headers+docs), Tier 2 (exports+headers), Tier 3 (exports+demangle), Tier 4 (exports only), Tier 5 (metadata). (4) CSV columns: Function, Ordinal, Hint, RVA, ForwardedTo, ReturnType, Parameters, Signature, DocComment, HeaderFile, Line, Demangled, DocFiles. (5) CLI args: --dll, --headers, --docs, --out, --tag, --exports-raw, --dumpbin, --undname, --no-demangle. (6) Auto-detect dumpbin.exe from VS 2022 locations if not specified. (7) Support manifest mode vcpkg. PLUS: Create PowerShell script (run_fixtures.ps1) that: accepts -VcpkgExe, -Triplet (default x64-windows), -OutDir (default artifacts), -DumpbinExe (optional, auto-detect), -ScriptPath; runs vcpkg install from tests/fixtures/ using manifest mode; locates DLLs in tests/fixtures/vcpkg_installed/<triplet>/bin/; runs Python script on zstd + sqlite3 with --headers and --tag; verifies outputs exist; prints sanity check (count ZSTD_ and sqlite3_ entries). Include tests/fixtures/vcpkg.json with zstd + sqlite3 dependencies."
+**Copilot Prompts Used:**
+- "Create a Python 3 script (csv_script.py) that runs dumpbin /exports on a DLL and generates tiered CSV/Markdown reports. Requirements: (1) Robust regex parser for dumpbin format with ordinal, hint, RVA, function name, and optional forwarding (handle both '00077410' and '--------' RVA); deduplicate by name; debug output if zero exports. (2) Header file scanning: recursively find .h/.hpp files, parse C/C++ function prototypes using regex, extract return types, parameters, and Doxygen-style doc comments (/// and /**); handle comment spans and nested parentheses. (3) Tiered analysis: Tier 1 (exports+headers+docs), Tier 2 (exports+headers), Tier 3 (exports+demangle), Tier 4 (exports only), Tier 5 (metadata). (4) CSV columns: Function, Ordinal, Hint, RVA, ForwardedTo, ReturnType, Parameters, Signature, DocComment, HeaderFile, Line, Demangled, DocFiles. (5) CLI args: --dll, --headers, --docs, --out, --tag, --exports-raw, --dumpbin, --undname, --no-demangle. (6) Auto-detect dumpbin.exe from VS 2022 locations if not specified. (7) Support manifest mode vcpkg."
+- "Create PowerShell script (run_fixtures.ps1) that: accepts -VcpkgExe, -Triplet (default x64-windows), -OutDir (default artifacts), -DumpbinExe (optional, auto-detect), -ScriptPath; runs vcpkg install from tests/fixtures/ using manifest mode; locates DLLs in tests/fixtures/vcpkg_installed/<triplet>/bin/; runs Python script on zstd + sqlite3 with --headers and --tag; verifies outputs exist; prints sanity check (count ZSTD_ and sqlite3_ entries)."
+- "Create tests/fixtures/vcpkg.json with zstd and sqlite3 dependencies in manifest mode format."
 
-**Copilot Output Accepted:**
+**Output Accepted:**
 - Complete csv_script.py structure with all 5 tiers
 - Header file parsing with regex for prototypes
 - Doxygen comment extraction logic
@@ -55,7 +32,7 @@
 .\scripts\run_fixtures.ps1 -VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"
 ```
 
-**Expected Outputs in `artifacts/`:**
+Expected outputs in `artifacts/`:
 - `zstd_tier2_api_zstd_fixture.csv` (119 KB, 187 exports, 184 matched to headers)
 - `zstd_tier4_api_zstd_fixture.csv` (17 KB, basic exports)
 - `zstd_tiers_zstd_fixture.md` (tier summary)
@@ -113,15 +90,60 @@ Reference: Microsoft Learn/VS docs for VC tools environment (dumpbin/undname ava
 
 ## 2026-01-20 — 8-Module Refactoring + CLI Orchestration
 
-**Task:** Refactor monolithic csv_script.py (883 lines) into 8 modular, testable components with unified CLI interface.
+**Task/Issue:** Refactor monolithic csv_script.py (883 lines) into 8 modular, testable components with unified CLI interface.
 
-**Prompts Used:**
-- "Create schema.py with Invocable dataclass, ExportedFunc, and CSV/JSON/Markdown writers"
-- "Create classify.py: PE/NET file type detection with architecture detection (x86/x64/ARM64)"
-- "Create pe_parse.py: dumpbin wrapper and export parser"
-- "Create exports.py: C++ demangling with undname.exe, deduplication"
-- "Extract headers_scan.py from csv_script.py lines 214-455"
-- "Create complete main.py orchestrator: single CLI entry point, 5-tier pipeline"
+**Copilot Prompts Used:**
+- "Create schema.py with Invocable dataclass, ExportedFunc, and CSV/JSON/Markdown writers. Include confidence scoring, publisher detection, and forwarding resolution. Column order: function, ordinal, hint, rva, confidence, is_signed, publisher, is_forwarded, return_type, parameters, signature, doc_comment, header_file, line, demangled, doc_files."
+- "Create classify.py: PE/NET file type detection with architecture detection (x86/x64/ARM64). Output: PEType enum (EXE, DLL, SYS, etc.) and architecture (UNKNOWN, X86, X64, ARM64)."
+- "Create pe_parse.py: dumpbin /exports parser with robust regex for ordinal, hint, RVA (handle '--------' forwarded), function name, and optional forwarding target. Include retry logic with explicit encoding if parsing fails."
+- "Create exports.py: C++ demangling using undname.exe (if available) or fallback to unmunged names. Handle forwarded exports (resolve RVA to actual function). Deduplicate by function name."
+- "Create headers_scan.py from csv_script.py lines 214-455: recursively scan headers, extract prototypes with return types and parameters, parse Doxygen comments (/// and /* */)."
+- "Create com_scan.py: stubs for COM type library scanning (TLB/registry). Support .NET reflection stubs."
+- "Create docs_scan.py: parse documentation files and correlate with exports."
+- "Create complete main.py orchestrator: single CLI entry point accepting --dll, --exe, --headers, --docs, --out, --tag. Implement 5-tier pipeline (Tier 1: all metadata, Tier 5: minimal). Output CSV, JSON, and Markdown formats. Color-coded logging."
+
+**Output Accepted:**
+- 8 separate Python modules, each with single responsibility
+- schema.py with stable ExportedFunc dataclass
+- CLI parsing with argparse
+- 5-tier output logic
+- CSV/JSON/Markdown writers
+- Auto-detection for tools (dumpbin, undname)
+
+**Manual Changes:**
+1. **Unified imports structure:** Added src/discovery/__init__.py to make package importable
+2. **Standardized logging:** All modules use logging.getLogger(__name__), color-coded console output
+3. **Error handling:** Try-catch wrappers for subprocess calls (dumpbin, undname not always available)
+4. **CSV stability:** Locked column order to prevent drift during development
+5. **Tier logic:** Tier 1 (max detail) → Tier 5 (minimal) implemented as filter on ExportedFunc fields
+
+**Result:**
+```powershell
+python src/discovery/main.py --dll "C:\path\to\library.dll" --headers "C:\path\to\include" --out "./output"
+```
+
+Outputs:
+- `library_tier1_api.csv` (full: 16 columns)
+- `library_tier2_api.csv` (headers matched: 14 columns)
+- `library_tier4_api.csv` (minimal: 8 columns)
+- `library_tiers.md` (summary)
+- `library_exports_raw.txt` (provenance)
+
+**Notes:**
+- Each module can be unit-tested independently
+- ExportedFunc dataclass is the data contract (immutable)
+- Tier logic applies column filtering, not row filtering (all exports shown at all tiers)
+- Color codes: ANSI 32 (green), 33 (yellow), 31 (red) for HIGH/MEDIUM/LOW confidence
+
+**Files Created:**
+- src/discovery/schema.py (180 lines)
+- src/discovery/classify.py (80 lines)
+- src/discovery/pe_parse.py (120 lines)
+- src/discovery/exports.py (95 lines)
+- src/discovery/headers_scan.py (220 lines)
+- src/discovery/com_scan.py (40 lines, stubs)
+- src/discovery/docs_scan.py (35 lines, stubs)
+- src/discovery/main.py (150 lines)
 
 **Modules Created:**
 1. **schema.py** (80 lines) — Invocable dataclass, ExportedFunc, MatchInfo; write_csv(), write_json(), write_markdown(), write_tier_summary()

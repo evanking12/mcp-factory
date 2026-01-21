@@ -13,30 +13,46 @@
 **Cadence:** After each work session with Copilot  
 **Audience:** Archival record, basis for lab-notes later
 
-**Structure:**
+**REQUIRED Format (exact structure):**
 ```markdown
 ## [DATE] — [Feature/Task Name]
 
 **Task/Issue:** [What problem were we solving?]
 
 **Copilot Prompts Used:**
-- "Prompt 1 here"
-- "Prompt 2 here"
+- "Prompt 1 that generated expected output"
+- "Prompt 2 that generated expected output"
+- "Prompt 3 that generated expected output"
 
 **Output Accepted:**
-- List of files/code generated
+- List of files/code Copilot generated
+- What worked from the response
+- What you accepted as-is
 
 **Manual Changes:**
-- Any edits you made after Copilot generated code
+- List of edits you made after Copilot generated code
+- Bug fixes, adjustments, refinements
+- Why each change was needed
 
 **Result:**
-- What was completed
-- Test results
-- Metrics (if applicable)
+- Command(s) to reproduce
+- Expected outputs (file names, sizes, sample data)
+- Test results/metrics
+
+**Notes:**
+- Important implementation details
+- Edge cases handled
+- Known limitations
 
 **References:**
-- Related ADRs, commits, etc.
+- Related ADRs, commits, docs
+- External documentation links
 ```
+
+**Why this format:**
+- **Prompts Used** (not just "Prompt"):  Show the exact prompts that yielded the result. Future you/teammates can re-run these.
+- **Output Accepted + Manual Changes**: Separate the Copilot work from your work. Clear accountability.
+- **Result + Notes**: Make reproducibility explicit. Show the happy path and caveats.
 
 **Recent Entries:**
 - 2026-01-19: Fixture Harness + Robust Parser
