@@ -6,7 +6,10 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Evan King", email = "evanking@usf.edu"}
+    {name = "Evan King", email = "evanking@usf.edu"},
+    {name = "Layalie AbuOleim", email = "abuoleim1@usf.edu"},
+    {name = "Caden Spokas", email = "bustlingbungus@usf.edu"},
+    {name = "Thinh Nguyen", email = "thenguyen@usf.edu"}
 ]
 
 [project.urls]
