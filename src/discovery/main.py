@@ -109,6 +109,13 @@ def generate_confidence_summary(
     med_pct = (len(confidence_data['medium']) / total * 100) if total > 0 else 0
     low_pct = (len(confidence_data['low']) / total * 100) if total > 0 else 0
     
+    # ANSI color codes for terminal output
+    RED = '\033[91m'      # Bright red
+    YELLOW = '\033[93m'   # Bright yellow
+    GREEN = '\033[92m'    # Bright green
+    BLUE = '\033[94m'     # Bright blue
+    RESET = '\033[0m'     # Reset to default
+    
     # Generate summary text
     lines = [
         f"CONFIDENCE ANALYSIS SUMMARY",
@@ -120,9 +127,9 @@ def generate_confidence_summary(
         f"",
         f"CONFIDENCE BREAKDOWN",
         f"{'-' * 60}",
-        f"HIGH    Confidence: {len(confidence_data['high']):3d} exports ({high_pct:5.1f}%)",
-        f"MEDIUM  Confidence: {len(confidence_data['medium']):3d} exports ({med_pct:5.1f}%)",
-        f"LOW     Confidence: {len(confidence_data['low']):3d} exports ({low_pct:5.1f}%)",
+        f"{RED}LOW     Confidence: {len(confidence_data['low']):3d} exports ({low_pct:5.1f}%){RESET}",
+        f"{YELLOW}MEDIUM  Confidence: {len(confidence_data['medium']):3d} exports ({med_pct:5.1f}%){RESET}",
+        f"{GREEN}HIGH    Confidence: {len(confidence_data['high']):3d} exports ({high_pct:5.1f}%){RESET}",
         f"",
     ]
     
@@ -164,10 +171,22 @@ def generate_confidence_summary(
         f"{'-' * 60}",
     ])
     
-    # Add sample exports from each tier
-    for level in ['high', 'medium', 'low']:
+    # Add sample exports from each tier (LOW, MEDIUM, HIGH)
+    for level in ['low', 'medium', 'high']:
         data = confidence_data[level]
-        lines.append(f"\n{level.upper()} CONFIDENCE ({len(data)} exports):")
+        
+        # Select color based on confidence level
+        if level == 'low':
+            color = RED
+            level_text = "LOW"
+        elif level == 'medium':
+            color = YELLOW
+            level_text = "MEDIUM"
+        else:
+            color = GREEN
+            level_text = "HIGH"
+        
+        lines.append(f"\n{color}{level_text} CONFIDENCE ({len(data)} exports):{RESET}")
         
         if data:
             # Show first 5 and last 2 if more than 7
@@ -177,8 +196,8 @@ def generate_confidence_summary(
                     lines.append(f"  ... ({len(data) - 7} more)")
                 else:
                     reasons_str = ', '.join(item['reasons']) if item['reasons'] else 'no info'
-                    lines.append(f"  • {item['name']}")
-                    lines.append(f"      → {reasons_str}")
+                    lines.append(f"{BLUE}  * {item['name']}")
+                    lines.append(f"      -> {reasons_str}{RESET}")
     
     lines.append("")
     
