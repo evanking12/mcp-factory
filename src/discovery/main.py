@@ -66,6 +66,130 @@ def score_confidence(export: Invocable, matches: dict, is_signed: bool, forwarde
     return confidence, reasons
 
 
+def generate_confidence_summary(
+    exports: List[ExportedFunc],
+    matches: dict,
+    is_signed: bool,
+    forwarding_chain: dict,
+    base_name: str,
+    out_dir: Path
+) -> str:
+    """Generate human-readable confidence summary and write to file."""
+    
+    # Score all exports
+    confidence_data = {'high': [], 'medium': [], 'low': []}
+    reason_counts = {}
+    
+    for exp in exports:
+        # Convert ExportedFunc to Invocable-like object for scoring
+        forwarded_resolved = exp.name in forwarding_chain and forwarding_chain[exp.name] != exp.name
+        score, reasons = score_confidence(
+            type('Export', (), {
+                'name': exp.name,
+                'source_type': 'export',
+                'doc_comment': getattr(exp, 'doc_comment', None)
+            })(),
+            matches,
+            is_signed,
+            forwarded_resolved
+        )
+        
+        confidence_data[score].append({
+            'name': exp.name,
+            'reasons': reasons
+        })
+        
+        # Track reason frequency
+        for reason in reasons:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    
+    # Calculate percentages
+    total = len(exports)
+    high_pct = (len(confidence_data['high']) / total * 100) if total > 0 else 0
+    med_pct = (len(confidence_data['medium']) / total * 100) if total > 0 else 0
+    low_pct = (len(confidence_data['low']) / total * 100) if total > 0 else 0
+    
+    # Generate summary text
+    lines = [
+        f"CONFIDENCE ANALYSIS SUMMARY",
+        f"{'=' * 60}",
+        f"",
+        f"DLL: {base_name}",
+        f"Total Exports: {total}",
+        f"Analysis Date: {__import__('datetime').datetime.now().isoformat()}",
+        f"",
+        f"CONFIDENCE BREAKDOWN",
+        f"{'-' * 60}",
+        f"HIGH    Confidence: {len(confidence_data['high']):3d} exports ({high_pct:5.1f}%)",
+        f"MEDIUM  Confidence: {len(confidence_data['medium']):3d} exports ({med_pct:5.1f}%)",
+        f"LOW     Confidence: {len(confidence_data['low']):3d} exports ({low_pct:5.1f}%)",
+        f"",
+    ]
+    
+    # Add reason breakdown
+    if reason_counts:
+        lines.extend([
+            f"CONFIDENCE FACTORS (by frequency)",
+            f"{'-' * 60}",
+        ])
+        for reason, count in sorted(reason_counts.items(), key=lambda x: -x[1]):
+            pct = (count / total * 100) if total > 0 else 0
+            lines.append(f"  • {reason:<40s} {count:3d} ({pct:5.1f}%)")
+        lines.append("")
+    
+    # Add improvement opportunities
+    lines.extend([
+        f"WAYS TO IMPROVE CONFIDENCE",
+        f"{'-' * 60}",
+    ])
+    
+    improvements = []
+    if len(matches) < total:
+        improvements.append(f"  • Provide header files (.h/.hpp): Would match function prototypes")
+        improvements.append(f"    and increase HIGH confidence exports")
+    if not is_signed:
+        improvements.append(f"  • Obtain signed binaries: Digital signatures boost confidence")
+    if 'forwarded reference resolved' not in reason_counts:
+        improvements.append(f"  • Document forwarder chains: Track indirect function references")
+    
+    if improvements:
+        for imp in improvements:
+            lines.append(imp)
+    else:
+        lines.append("  • All major confidence factors are present!")
+    
+    lines.extend([
+        "",
+        f"EXPORT DETAILS BY CONFIDENCE LEVEL",
+        f"{'-' * 60}",
+    ])
+    
+    # Add sample exports from each tier
+    for level in ['high', 'medium', 'low']:
+        data = confidence_data[level]
+        lines.append(f"\n{level.upper()} CONFIDENCE ({len(data)} exports):")
+        
+        if data:
+            # Show first 5 and last 2 if more than 7
+            shown = data[:5] if len(data) <= 7 else data[:5] + [{'name': '...', 'reasons': []}] + data[-2:]
+            for item in shown:
+                if item['name'] == '...':
+                    lines.append(f"  ... ({len(data) - 7} more)")
+                else:
+                    reasons_str = ', '.join(item['reasons']) if item['reasons'] else 'no info'
+                    lines.append(f"  • {item['name']}")
+                    lines.append(f"      → {reasons_str}")
+    
+    lines.append("")
+    
+    # Write to file
+    summary_text = '\n'.join(lines)
+    summary_file = out_dir / f"{base_name}_confidence_summary.txt"
+    summary_file.write_text(summary_text, encoding='utf-8')
+    
+    return summary_text
+
+
 def get_default_output_dir() -> Path:
     """Get default output directory for analysis results."""
     return Path.cwd() / "mcp_dumpbin_out"
@@ -260,10 +384,20 @@ def main():
     summary_md = out_dir / f"{base_name}_tiers.md"
     write_tier_summary(summary_md, tier_entries)
 
+    # Phase 5: Generate confidence summary
+    confidence_summary = generate_confidence_summary(
+        exports, matches, is_signed, forwarding_chain, base_name, out_dir
+    )
+
     logger.info(f"Analysis complete. Results in: {out_dir}")
     logger.info(f"Exports found: {len(exports)}")
     logger.info(f"Matched to headers: {sum(1 for e in exports if e.name in matches)}")
     logger.info(f"Demangled: {sum(1 for e in exports if e.demangled)}")
+    
+    # Print confidence summary to console
+    print("\n" + "=" * 60)
+    print(confidence_summary)
+    print("=" * 60)
 
     return 0
 

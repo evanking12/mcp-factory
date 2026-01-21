@@ -565,6 +565,146 @@ def write_tier_summary(path: Path, entries: List[str]) -> None:
             f.write(line + "\n")
 
 
+def generate_confidence_summary(
+    exports: List,  # List[ExportedFunc]
+    matches: Dict,
+    out_dir: Path,
+    dll_path: Path,
+    tag: str = ""
+) -> str:
+    """Generate human-readable confidence summary and write to file."""
+    
+    # Score all exports based on their characteristics
+    confidence_data = {'high': [], 'medium': [], 'low': []}
+    reason_counts = {}
+    
+    for exp in exports:
+        # Determine confidence level based on available information
+        score = 0
+        reasons = []
+        
+        # Base score: has export
+        score += 2
+        reasons.append('exported from DLL')
+        
+        # Header match: +3
+        if exp.name in matches:
+            score += 3
+            reasons.append('matched to header prototype')
+        
+        # Demangled: +1
+        if exp.demangled:
+            score += 1
+            reasons.append('demangled C++ name')
+        
+        # Forwarded: +1
+        if exp.forwarded_to and exp.forwarded_to != exp.name:
+            score += 1
+            reasons.append('forwarded reference')
+        
+        # Assign confidence level
+        if score >= 6:
+            confidence = 'high'
+        elif score >= 4:
+            confidence = 'medium'
+        else:
+            confidence = 'low'
+        
+        confidence_data[confidence].append({
+            'name': exp.name,
+            'reasons': reasons
+        })
+        
+        # Track reason frequency
+        for reason in reasons:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    
+    # Calculate percentages
+    total = len(exports)
+    high_pct = (len(confidence_data['high']) / total * 100) if total > 0 else 0
+    med_pct = (len(confidence_data['medium']) / total * 100) if total > 0 else 0
+    low_pct = (len(confidence_data['low']) / total * 100) if total > 0 else 0
+    
+    # Generate summary text
+    lines = [
+        "CONFIDENCE ANALYSIS SUMMARY",
+        "=" * 60,
+        "",
+        f"DLL: {dll_path.name}",
+        f"Total Exports: {total}",
+        f"Analysis Date: {datetime.now().isoformat()}",
+        "",
+        "CONFIDENCE BREAKDOWN",
+        "-" * 60,
+        f"HIGH    Confidence: {len(confidence_data['high']):3d} exports ({high_pct:5.1f}%)",
+        f"MEDIUM  Confidence: {len(confidence_data['medium']):3d} exports ({med_pct:5.1f}%)",
+        f"LOW     Confidence: {len(confidence_data['low']):3d} exports ({low_pct:5.1f}%)",
+        "",
+    ]
+    
+    # Add reason breakdown
+    if reason_counts:
+        lines.extend([
+            "CONFIDENCE FACTORS (by frequency)",
+            "-" * 60,
+        ])
+        for reason, count in sorted(reason_counts.items(), key=lambda x: -x[1]):
+            pct = (count / total * 100) if total > 0 else 0
+            lines.append(f"  * {reason:<40s} {count:3d} ({pct:5.1f}%)")
+        lines.append("")
+    
+    # Add improvement opportunities
+    lines.extend([
+        "WAYS TO IMPROVE CONFIDENCE",
+        "-" * 60,
+    ])
+    
+    improvements = []
+    if len(matches) < total:
+        improvements.append(f"  * Provide header files (.h/.hpp): Would match function prototypes")
+        improvements.append(f"    and increase HIGH confidence exports (currently {len(matches)}/{total})")
+    if 'demangled C++ name' not in reason_counts:
+        improvements.append(f"  * Ensure undname.exe is available: Helps identify C++ mangled names")
+    
+    if improvements:
+        for imp in improvements:
+            lines.append(imp)
+    else:
+        lines.append("  * All major confidence factors are present!")
+    
+    lines.extend([
+        "",
+        "EXPORT SAMPLES BY CONFIDENCE LEVEL",
+        "-" * 60,
+    ])
+    
+    # Add sample exports from each tier
+    for level in ['high', 'medium', 'low']:
+        data = confidence_data[level]
+        lines.append(f"\n{level.upper()} CONFIDENCE ({len(data)} exports):")
+        
+        if data:
+            # Show first 5 and last 2 if more than 7
+            shown = data[:5] if len(data) <= 7 else data[:5] + [{'name': '...', 'reasons': []}] + data[-2:]
+            for item in shown:
+                if item['name'] == '...':
+                    lines.append(f"  ... ({len(data) - 7} more)")
+                else:
+                    reasons_str = ', '.join(item['reasons']) if item['reasons'] else 'no info'
+                    lines.append(f"  * {item['name']}")
+                    lines.append(f"      -> {reasons_str}")
+    
+    lines.append("")
+    
+    # Write to file
+    summary_text = '\n'.join(lines)
+    tag_str = f"_{tag}" if tag else ""
+    summary_file = out_dir / f"{dll_path.stem}_confidence_summary{tag_str}.txt"
+    summary_file.write_text(summary_text, encoding='utf-8')
+    
+    return summary_text
+
+
 def get_default_output_dir() -> Path:
     """Get default output directory."""
     return Path.cwd() / "mcp_dumpbin_out"
@@ -867,12 +1007,19 @@ Note: This script must be run from Visual Studio x64 Native Tools Command Prompt
     summary_path = out_dir / f"{dll_path.stem}_tiers{tag}.md"
     write_tier_summary(summary_path, tier_entries)
     
+    # Generate and display confidence summary
+    confidence_summary = generate_confidence_summary(exports, matches, out_dir, dll_path, args.tag)
+    
     print(f"\n{'='*60}")
+    print(confidence_summary)
+    print(f"{'='*60}")
+    
     print("Completed successfully!")
     print(f"{'='*60}")
     if raw_written:
         print(f"Raw exports: {out_dir / f'{dll_path.stem}_exports_raw.txt'}")
     print(f"Tier summary: {summary_path}")
+    print(f"Confidence summary: {out_dir / f'{dll_path.stem}_confidence_summary{tag}.txt'}")
     print(f"\nAll outputs saved to: {out_dir}")
     
     return 0
