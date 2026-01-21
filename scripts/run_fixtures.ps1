@@ -415,13 +415,17 @@ function Resolve-VcpkgExePath {
         return $DownloadsVcpkg
     }
 
-    # 4. Check repo-local vcpkg
+    # 4. Check repo-local vcpkg (only if repo root is determined)
     Write-Host "[Detection] Checking for repo-local vcpkg..." -ForegroundColor Gray
-    $RepoParent = Split-Path -Parent $RepoRoot
-    $RepoLocalVcpkg = Join-Path $RepoParent "vcpkg\vcpkg.exe"
-    if (Test-Path $RepoLocalVcpkg) {
-        Write-Host "[Detection] Found repo-local vcpkg: $RepoLocalVcpkg" -ForegroundColor Cyan
-        return $RepoLocalVcpkg
+    if ($RepoRoot -and (Test-Path $RepoRoot)) {
+        $RepoParent = Split-Path -Parent $RepoRoot
+        $RepoLocalVcpkg = Join-Path $RepoParent "vcpkg\vcpkg.exe"
+        if (Test-Path $RepoLocalVcpkg) {
+            Write-Host "[Detection] Found repo-local vcpkg: $RepoLocalVcpkg" -ForegroundColor Cyan
+            return $RepoLocalVcpkg
+        }
+    } else {
+        Write-Host "[Detection] Skipping repo-local vcpkg check (repo root not yet determined)" -ForegroundColor Gray
     }
 
     Write-Host "[Detection] vcpkg.exe not found by any method" -ForegroundColor Yellow
