@@ -32,13 +32,14 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 **Required (install manually):**
 - **PowerShell** 5.1+ (built into Windows 10+)
+- **Python** 3.8+ — Download from [python.org](https://www.python.org/downloads/)
+  - Add Python to PATH during installation (checked by default)
 - **Git** — Download from [git-scm.com](https://git-scm.com)
 - **Visual Studio Build Tools 2022** — Download from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/downloads/)
   - During installation, **select the "Desktop development with C++" workload**
   - This installs `dumpbin.exe` and development tools (required for binary analysis)
 
 **Auto-installed by setup script:**
-- Python 3.8+ (auto-detects existing installation)
 - vcpkg (~100 MB, one-time download to `$env:USERPROFILE\Downloads\vcpkg`)
 - zstd + sqlite3 test libraries
 
