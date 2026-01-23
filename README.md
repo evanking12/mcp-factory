@@ -67,15 +67,6 @@ python src\discovery\cli_analyzer.py "C:\Windows\System32\whoami.exe"
 
 **What you'll see:** Extracted flags, options, and subcommands with evidence of which help format worked.
 
-### Validate Analysis Pipeline ⚡ (Debug Suite)
-
-```powershell
-# Run validation suite on your DLL exports
-python src\discovery\debug_suite.py --file "artifacts\zstd_exports_raw.txt"
-```
-
-**What you'll see:** PASS/WARN/ERROR status for each pipeline module with timing analysis and evidence ledger.
-
 ### Batch Validation ⚡ (Production-Ready Testing)
 
 ```powershell

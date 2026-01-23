@@ -273,23 +273,47 @@ def analyze_multiple_exes(exe_paths: List[str]) -> Dict[str, CLIInvocable]:
 
 
 if __name__ == "__main__":
-    # Quick test
-    test_exes = [
-        "C:\\Windows\\System32\\tasklist.exe",
-        "C:\\Windows\\System32\\ipconfig.exe",
-    ]
+    import argparse
+    import sys
     
-    results = analyze_multiple_exes(test_exes)
+    parser = argparse.ArgumentParser(description="CLI Analyzer - Extract arguments from Windows executables")
+    parser.add_argument("exe_path", help="Path to executable to analyze")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--timeout", type=int, default=5, help="Timeout for help commands (seconds)")
     
-    for name, invocable in results.items():
+    args = parser.parse_args()
+    
+    # Analyze single executable
+    analyzer = CLIAnalyzer(args.exe_path, timeout=args.timeout)
+    invocable = analyzer.analyze()
+    
+    if args.json:
+        import json
+        print(json.dumps(invocable.to_dict(), indent=2))
+    else:
         print(f"\n{'='*60}")
-        print(f"EXE: {name}")
+        print(f"EXE: {invocable.exe_name}")
+        print(f"Path: {invocable.exe_path}")
         print(f"{'='*60}")
         print(f"Arguments found: {len(invocable.arguments)}")
         print(f"Subcommands found: {len(invocable.subcommands)}")
         print(f"Evidence sources: {invocable.evidence_sources}")
         
+        if invocable.description:
+            print(f"Description: {invocable.description}")
+        
         if invocable.arguments:
-            print("\nSample arguments:")
-            for arg in invocable.arguments[:5]:
-                print(f"  - {arg.long_form or arg.short_form}: {arg.description[:50]}")
+            print("\nArguments:")
+            for arg in invocable.arguments:
+                forms = []
+                if arg.short_form:
+                    forms.append(arg.short_form)
+                if arg.long_form:
+                    forms.append(arg.long_form)
+                form_str = ", ".join(forms) if forms else arg.name
+                print(f"  {form_str:20} {arg.description}")
+        
+        if invocable.subcommands:
+            print(f"\nSubcommands: {', '.join(invocable.subcommands)}")
+        
+        print()
