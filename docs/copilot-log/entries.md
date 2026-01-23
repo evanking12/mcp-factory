@@ -257,3 +257,54 @@ Outputs:
 - Confidence analysis signals production-quality thinking
 - Unblocks Section 4 with standardized, scored exports
 
+
+---
+
+## 2026-01-22 — Experiments Folder: Advanced Research Spikes
+
+**Task:** Establish experiments/ folder for WIP features ahead of main branch. Implement CLI analyzer, debug suite, string extractor, and comprehensive testing infrastructure.
+
+**Context:** experiments/ serves as research sandbox for features not yet merged to src/discovery/. Maintains feature parity tracking via FEATURES_AHEAD.md and detailed roadmap. Origin differences documented to show progression from baseline discovery to advanced multi-surface extraction.
+
+**Copilot Prompts Used:**
+- "Create cli_analyzer.py that parses --help, /?, -h, and /help output from Windows EXE files. Extract flags, options, positional arguments, and subcommands. Track evidence (which help format succeeded). Test on git.exe, ipconfig.exe, tasklist.exe, robocopy.exe."
+- "Create debug_suite.py: execution gatekeeper with 9 validation breakpoints. Show PASS/WARN/SKIP/ERROR/CRITICAL status for each module. Provide evidence ledger (every claim cites source). Include timing analysis and error summary with actionable recommendations."
+- "Create string_extractor.py: fallback mining when exports unavailable. Extract function-like strings from binary. Detect Windows API patterns (Create*, Get*, Set*). Handle ASCII and UTF-16LE. Rank confidence: HIGH (API prefix), MEDIUM (PascalCase), LOW (weak pattern)."
+- "Create test_cli_analyzer.py: comprehensive test harness for CLI analyzer. Test on multiple Windows tools, generate JSON + Markdown results, validate argument extraction accuracy."
+- "Create FEATURES_AHEAD.md comparing experiments/ features to src/discovery/. Include: feature status (✅ Working, 🔶 Planned), location, test results, integration readiness, module parity table."
+- "Create ROADMAP.md with 10-tier feature roadmap (Tier 1: Core Infrastructure → Tier 10: Advanced). Map each tier to Section 2 or Section 3 requirements. Include evidence-first philosophy, current status, next steps with phased checkboxes."
+
+**Output Accepted:**
+- cli_analyzer.py (215 lines): Parses 4 help formats, extracts arguments/subcommands
+- debug_suite.py (290 lines): 9-breakpoint validation, evidence ledger, timing analysis
+- string_extractor.py (180 lines): Binary string mining, Windows API pattern detection
+- test_cli_analyzer.py (160 lines): Automated test harness for CLI analyzer
+- FEATURES_AHEAD.md: Feature comparison table, readiness assessment, integration status
+- ROADMAP.md: 10-tier roadmap with Section 2-3 progress tracker, phased next steps
+
+
+**Test Results:**
+- CLI Analyzer: 7 Windows tools tested (git, ipconfig, tasklist, robocopy, sfc, whoami, systeminfo)
+  - 76 total arguments extracted
+  - 35 subcommands found
+  - 100% success rate
+- Debug Suite: Validated on kernel32.dll (1481 exports), git.exe, ipconfig.exe, tasklist.exe
+  - 0 critical failures, 1 expected warning (SDK headers)
+- String Extractor: Tested as fallback on binaries with missing exports
+  - Detects Windows API patterns (Create*, Get*, Set*, etc.)
+  - Handles ASCII + UTF-16LE encoding
+
+
+**Origin Differences (FEATURES_AHEAD.md tracking):**
+- **Origin (src/discovery/):** DLL export extraction, header matching (98% accuracy), confidence scoring, tiered CSV/Markdown output
+- **Experiments Ahead:** + CLI argument extraction, debug suite validation, string mining fallback, comprehensive test harness
+- **Module Parity:** classify.py, pe_parse.py, exports.py, headers_scan.py identical between src/ and experiments/
+- **Integration Status:** cli_analyzer.py and string_extractor.py ready to merge (no breaking changes), debug_suite.py usable immediately as validation tool
+
+**Strategic Value:**
+- ✅ Sandbox for advanced features without destabilizing main pipeline
+- ✅ Feature parity tracking prevents drift
+- ✅ Evidence-first philosophy maintained (10-tier roadmap explicitly maps to sponsor requirements)
+- ✅ Demonstrates research depth (CLI extraction, debug validation, string mining)
+- ✅ Clear integration path (FEATURES_AHEAD.md shows what's ready to merge)
+

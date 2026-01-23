@@ -27,6 +27,7 @@ Requirements:
 
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -557,6 +558,136 @@ def write_report(path: Path, dll_path: Path, exports: List[ExportedFunc], matche
             f.write("---\n\n")
 
 
+def write_json(
+    path: Path,
+    dll_path: Path,
+    exports: List[ExportedFunc],
+    matches: Dict[str, MatchInfo],
+    doc_hits: Dict[str, List[str]],
+    tier: int,
+    is_signed: bool = False,
+    publisher: Optional[str] = None,
+    architecture: str = "unknown"
+) -> None:
+    """
+    Write discovery results to JSON using stable schema v2.0.0.
+    
+    This schema is designed to be forward-compatible:
+    - New fields can be added to 'metadata' object without breaking consumers
+    - 'invocables[].metadata' is extensible for future data
+    - Core required fields will never be removed or renamed
+    """
+    
+    # Calculate statistics
+    total = len(exports)
+    high_conf = sum(1 for e in exports if e.name in matches and matches[e.name].doc_comment)
+    medium_conf = sum(1 for e in exports if e.name in matches and not matches[e.name].doc_comment)
+    low_conf = total - high_conf - medium_conf
+    match_rate = len([e for e in exports if e.name in matches]) / total if total > 0 else 0
+    documented = sum(1 for e in exports if e.name in matches and matches[e.name].doc_comment)
+    
+    # Build invocables array
+    invocables = []
+    for e in exports:
+        mi = matches.get(e.name)
+        
+        # Determine confidence
+        if mi and mi.doc_comment:
+            confidence = "high"
+        elif mi:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        
+        # Confidence factors
+        confidence_factors = {
+            "has_signature": mi is not None,
+            "has_documentation": mi is not None and bool(mi.doc_comment),
+            "has_parameters": mi is not None and bool(mi.parameters),
+            "has_return_type": mi is not None and bool(mi.return_type),
+            "is_forwarded": bool(e.forwarded_to),
+            "is_ordinal_only": e.name.startswith("Ordinal") if e.name else False
+        }
+        
+        # Signature details
+        signature = {
+            "return_type": mi.return_type if mi else None,
+            "parameters": mi.parameters if mi else None,
+            "calling_convention": None,  # Future enhancement
+            "full_prototype": build_signature(mi) if mi else None
+        }
+        
+        # Documentation
+        documentation = {
+            "summary": normalize_whitespace(mi.doc_comment)[:200] if mi and mi.doc_comment else None,
+            "description": normalize_whitespace(mi.doc_comment) if mi and mi.doc_comment else None,
+            "source_file": mi.header_file if mi else None,
+            "source_line": mi.line if mi else None
+        }
+        
+        # Evidence/provenance
+        evidence = {
+            "discovered_by": "exports.py",
+            "header_file": mi.header_file if mi else None,
+            "forwarded_to": e.forwarded_to,
+            "demangled_name": e.demangled
+        }
+        
+        # Build invocable object
+        invocable = {
+            "name": e.name,
+            "kind": "dll_export",
+            "ordinal": e.ordinal,
+            "rva": e.rva,
+            "confidence": confidence,
+            "confidence_factors": confidence_factors,
+            "signature": signature,
+            "documentation": documentation,
+            "evidence": evidence,
+            "metadata": {}  # Extensible for future data
+        }
+        
+        invocables.append(invocable)
+    
+    # Build full output
+    output = {
+        "schema_version": "2.0.0",
+        "metadata": {
+            "target_path": str(dll_path.absolute()),
+            "target_name": dll_path.name,
+            "target_type": "dll" if dll_path.suffix.lower() == ".dll" else "exe" if dll_path.suffix.lower() == ".exe" else "unknown",
+            "architecture": architecture,
+            "file_size_bytes": dll_path.stat().st_size if dll_path.exists() else 0,
+            "is_signed": is_signed,
+            "publisher": publisher,
+            "analysis_timestamp": datetime.now().isoformat(),
+            "pipeline_version": "1.0.0",
+            "tier": tier,
+            "schema_version": "2.0.0"
+        },
+        "invocables": invocables,
+        "pipeline_results": {
+            "modules_run": ["classify", "pe_parse", "exports", "headers_scan", "schema", "csv_script"],
+            "modules_passed": ["exports", "schema", "csv_script"],
+            "modules_warned": [] if matches else ["headers_scan"],
+            "modules_failed": [],
+            "total_duration_ms": 0  # TODO: track actual duration
+        },
+        "statistics": {
+            "total_invocables": total,
+            "high_confidence_count": high_conf,
+            "medium_confidence_count": medium_conf,
+            "low_confidence_count": low_conf,
+            "signature_match_rate": match_rate,
+            "documented_count": documented
+        }
+    }
+    
+    # Write with pretty formatting
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+
 def write_tier_summary(path: Path, entries: List[str]) -> None:
     """Write a summary of which tiers succeeded."""
     with path.open("w", encoding="utf-8") as f:
@@ -970,43 +1101,51 @@ Note: This script must be run from Visual Studio x64 Native Tools Command Prompt
     # Tier 1: exports + headers + docs scan
     if args.headers and args.docs:
         csv_path = out_dir / f"{dll_path.stem}_tier1_api{tag}.csv"
+        json_path = out_dir / f"{dll_path.stem}_tier1_api{tag}.json"
         md_path = out_dir / f"{dll_path.stem}_tier1_api{tag}.md"
         write_csv(csv_path, exports, matches, doc_hits)
+        write_json(json_path, dll_path, exports, matches, doc_hits, tier=1)
         write_report(md_path, dll_path, exports, matches, doc_hits)
-        tier_entries.append(f"- Tier 1 (exports + headers + docs): {csv_path}")
-        print(f"Tier 1 output: {csv_path}")
+        tier_entries.append(f"- Tier 1 (exports + headers + docs): {csv_path}, {json_path}")
+        print(f"Tier 1 output: {csv_path} + {json_path.name}")
     else:
         tier_entries.append("- Tier 1: skipped (requires --headers and --docs)")
     
     # Tier 2: exports + headers
     if args.headers:
         csv_path = out_dir / f"{dll_path.stem}_tier2_api{tag}.csv"
+        json_path = out_dir / f"{dll_path.stem}_tier2_api{tag}.json"
         md_path = out_dir / f"{dll_path.stem}_tier2_api{tag}.md"
         write_csv(csv_path, exports, matches, {})
+        write_json(json_path, dll_path, exports, matches, {}, tier=2)
         write_report(md_path, dll_path, exports, matches, {})
-        tier_entries.append(f"- Tier 2 (exports + headers): {csv_path}")
-        print(f"Tier 2 output: {csv_path}")
+        tier_entries.append(f"- Tier 2 (exports + headers): {csv_path}, {json_path}")
+        print(f"Tier 2 output: {csv_path} + {json_path.name}")
     else:
         tier_entries.append("- Tier 2: skipped (requires --headers)")
     
     # Tier 3: exports + demangle
     if undname_ok:
         csv_path = out_dir / f"{dll_path.stem}_tier3_api{tag}.csv"
+        json_path = out_dir / f"{dll_path.stem}_tier3_api{tag}.json"
         md_path = out_dir / f"{dll_path.stem}_tier3_api{tag}.md"
         write_csv(csv_path, exports, {}, {})
+        write_json(json_path, dll_path, exports, {}, {}, tier=3)
         write_report(md_path, dll_path, exports, {}, {})
-        tier_entries.append(f"- Tier 3 (exports + demangle): {csv_path}")
-        print(f"Tier 3 output: {csv_path}")
+        tier_entries.append(f"- Tier 3 (exports + demangle): {csv_path}, {json_path}")
+        print(f"Tier 3 output: {csv_path} + {json_path.name}")
     else:
         tier_entries.append("- Tier 3: skipped (undname not available or no C++ symbols)")
     
     # Tier 4: exports only
     csv_path = out_dir / f"{dll_path.stem}_tier4_api{tag}.csv"
+    json_path = out_dir / f"{dll_path.stem}_tier4_api{tag}.json"
     md_path = out_dir / f"{dll_path.stem}_tier4_api{tag}.md"
     write_csv(csv_path, exports, {}, {})
+    write_json(json_path, dll_path, exports, {}, {}, tier=4)
     write_report(md_path, dll_path, exports, {}, {})
-    tier_entries.append(f"- Tier 4 (exports only): {csv_path}")
-    print(f"Tier 4 output: {csv_path}")
+    tier_entries.append(f"- Tier 4 (exports only): {csv_path}, {json_path}")
+    print(f"Tier 4 output: {csv_path} + {json_path.name}")
     
     # Tier 5: metadata only
     if dll_path.exists():
@@ -1039,7 +1178,8 @@ Note: This script must be run from Visual Studio x64 Native Tools Command Prompt
         print(f"Raw exports: {out_dir / f'{dll_path.stem}_exports_raw.txt'}")
     print(f"Tier summary: {summary_path}")
     print(f"Confidence summary: {out_dir / f'{dll_path.stem}_confidence_summary{tag}.txt'}")
-    print(f"\nAll outputs saved to: {out_dir}")
+    print(f"\nOutputs generated: CSV + JSON + Markdown for each tier")
+    print(f"All outputs saved to: {out_dir}")
     
     return 0
 

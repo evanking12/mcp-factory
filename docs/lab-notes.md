@@ -115,3 +115,65 @@
 - Week 2: Begin .NET reflection analysis (Section 2, Item 2)
 - Coordinate with Section 4 on consuming confidence metadata
 
+---
+
+## 2026-01-22: Experiments Folder Strategy — Research Sandbox for Advanced Features
+
+**Goal:** Establish a structured research environment for WIP features without destabilizing the production-ready src/discovery/ pipeline. Create clear tracking between experimental work and integration roadmap.
+
+**Why We Went This Route:**
+
+1. **Risk Management**
+   - Main pipeline (src/discovery/) is working, tested, and reproducible
+   - Experimentation could introduce regressions or breaking changes
+   - Needed a sandbox to iterate on advanced features (CLI extraction, .NET reflection, PDB parsing)
+   - Separating experiments/ from src/ protects the demo-ready foundation
+
+2. **Team Coordination**
+   - Section 4 (MCP Generation) depends on stable CSV/JSON output from src/discovery/
+   - If teammates start contributing, experiments/ won't block their integration work
+   - Clear contract: src/discovery/ is the stable API, experiments/ is forward-looking R&D
+   - Feature parity tracking (FEATURES_AHEAD.md) shows what's ready to merge vs. what's still WIP
+
+3. **Evidence-First Expansion**
+   - DLL exports (src/) are well-understood: dumpbin → headers → confidence scoring
+   - EXE CLI extraction requires new evidence sources: --help output, argument parsing heuristics
+   - .NET reflection, COM type libraries, PDB symbols all need separate validation
+   - Each new "invocable surface" gets prototyped in experiments/ with its own test harness before merging
+
+**Work Done:**
+
+1. **CLI Analyzer** (experiments/cli_analyzer.py)
+   - Parses 4 help formats: `--help`, `/help`, `-h`, `/?`
+   - Tested on 7 Windows tools (git, ipconfig, tasklist, robocopy, sfc, whoami, systeminfo)
+   - Extracts 76 arguments + 35 subcommands with 100% success rate
+   - Evidence: Which help format succeeded, exact output captured
+   - Ready to merge: No breaking changes, just needs `--exe` flag in main.py
+
+2. **Debug Suite** (experiments/debug_suite.py)
+   - 9-breakpoint validation pipeline (classify → pe_parse → exports → headers → confidence)
+   - PASS/WARN/SKIP/ERROR/CRITICAL status per module
+   - Evidence ledger: Every claim cites source file + line number
+   - Timing analysis: Identifies slow modules
+   - Tested on kernel32.dll (1481 exports), git.exe, ipconfig.exe
+   - Purpose: Catch regressions before they reach src/, validate integration candidates
+
+3. **String Extractor** (experiments/string_extractor.py)
+   - Fallback for binaries with no exports (packed/obfuscated DLLs)
+   - Mines ASCII + UTF-16LE strings, detects Windows API patterns (Create*, Get*, Set*)
+   - Confidence: HIGH (API prefix), MEDIUM (PascalCase), LOW (weak pattern)
+   - Evidence: Byte offset in binary, encoding detected, pattern matched
+   - Use case: When dumpbin returns zero exports, try string mining
+
+4. **Feature Tracking** (FEATURES_AHEAD.md, ROADMAP.md)
+   - FEATURES_AHEAD.md: Feature comparison table (experiments vs. src/)
+     - Shows what's ready to merge (cli_analyzer, string_extractor, debug_suite)
+     - Module parity table (classify, pe_parse, exports identical between folders)
+     - Integration status per feature
+   - ROADMAP.md: 10-tier roadmap with Section 2-3 progress tracker
+     - Maps every sponsor requirement to implementation status (✅ DONE, 🔶 Planned)
+     - Visual progress bars: 67% Section 2, 80% Section 3
+     - Phased next steps: Week 2 (DLL+EXE), Weeks 3-4 (COM/.NET/PDB), Weeks 4-5 (Folder intake), Weeks 5-6 (Interactive UI)
+
+
+

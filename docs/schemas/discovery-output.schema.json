@@ -1,0 +1,273 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MCP Factory Discovery Output",
+  "version": "2.0.0",
+  "description": "Stable JSON schema for binary discovery pipeline output. Consumed by Section 4 (MCP generation) and Section 5 (verification UI). This schema is designed to be forward-compatible - new fields can be added without breaking existing consumers.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version for compatibility tracking",
+      "const": "2.0.0"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Information about the analyzed binary and pipeline execution",
+      "properties": {
+        "target_path": {
+          "type": "string",
+          "description": "Full path to analyzed binary"
+        },
+        "target_name": {
+          "type": "string",
+          "description": "Filename (e.g., 'kernel32.dll')"
+        },
+        "target_type": {
+          "type": "string",
+          "enum": ["dll", "exe", "sys", "ocx", "unknown"],
+          "description": "Binary type"
+        },
+        "architecture": {
+          "type": "string",
+          "enum": ["x86", "x64", "arm64", "unknown"],
+          "description": "Target architecture"
+        },
+        "file_size_bytes": {
+          "type": "integer",
+          "description": "Binary size in bytes"
+        },
+        "is_signed": {
+          "type": "boolean",
+          "description": "Whether binary has valid digital signature"
+        },
+        "publisher": {
+          "type": ["string", "null"],
+          "description": "Publisher from digital certificate (null if unsigned)"
+        },
+        "analysis_timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When analysis was performed (ISO 8601)"
+        },
+        "pipeline_version": {
+          "type": "string",
+          "description": "Discovery pipeline version (for debugging)"
+        },
+        "tier": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Analysis tier achieved (1=best, 5=metadata only)"
+        }
+      },
+      "required": ["target_path", "target_name", "target_type", "analysis_timestamp", "schema_version", "tier"]
+    },
+    "invocables": {
+      "type": "array",
+      "description": "List of discovered invocable functions/commands",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Function/command name (mangled or unmangled)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["dll_export", "cli_command", "com_method", "dotnet_method", "unknown"],
+            "description": "Type of invocable"
+          },
+          "ordinal": {
+            "type": ["integer", "null"],
+            "description": "Export ordinal (DLL exports only, 1-based)"
+          },
+          "rva": {
+            "type": ["string", "null"],
+            "pattern": "^(0x[0-9a-fA-F]+)?$",
+            "description": "Relative Virtual Address (DLL exports only)"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Invokability confidence based on available metadata"
+          },
+          "confidence_factors": {
+            "type": "object",
+            "description": "Breakdown of what contributed to confidence score",
+            "properties": {
+              "has_signature": {
+                "type": "boolean",
+                "description": "Function signature found in headers"
+              },
+              "has_documentation": {
+                "type": "boolean",
+                "description": "Documentation comment found"
+              },
+              "has_parameters": {
+                "type": "boolean",
+                "description": "Parameter types known"
+              },
+              "has_return_type": {
+                "type": "boolean",
+                "description": "Return type known"
+              },
+              "is_forwarded": {
+                "type": "boolean",
+                "description": "Export forwarded to another DLL"
+              },
+              "is_ordinal_only": {
+                "type": "boolean",
+                "description": "Export by ordinal with no name"
+              }
+            }
+          },
+          "signature": {
+            "type": "object",
+            "description": "Function signature details (if available)",
+            "properties": {
+              "return_type": {
+                "type": ["string", "null"],
+                "description": "Return type (e.g., 'int', 'HANDLE', 'void')"
+              },
+              "parameters": {
+                "type": ["string", "null"],
+                "description": "Parameter list as string (e.g., 'int x, char* str')"
+              },
+              "calling_convention": {
+                "type": ["string", "null"],
+                "description": "Calling convention (e.g., '__stdcall', '__cdecl')"
+              },
+              "full_prototype": {
+                "type": ["string", "null"],
+                "description": "Complete C/C++ prototype"
+              }
+            }
+          },
+          "documentation": {
+            "type": "object",
+            "description": "Documentation extracted from headers/help text",
+            "properties": {
+              "summary": {
+                "type": ["string", "null"],
+                "description": "Brief one-line description"
+              },
+              "description": {
+                "type": ["string", "null"],
+                "description": "Full documentation text"
+              },
+              "source_file": {
+                "type": ["string", "null"],
+                "description": "Header file where documentation was found"
+              },
+              "source_line": {
+                "type": ["integer", "null"],
+                "description": "Line number in source file"
+              }
+            }
+          },
+          "evidence": {
+            "type": "object",
+            "description": "Provenance - where each fact came from",
+            "properties": {
+              "discovered_by": {
+                "type": "string",
+                "description": "Module that found this invocable (e.g., 'exports.py', 'cli_analyzer.py')"
+              },
+              "header_file": {
+                "type": ["string", "null"],
+                "description": "Header file containing prototype (if matched)"
+              },
+              "forwarded_to": {
+                "type": ["string", "null"],
+                "description": "Target DLL.Function if forwarded"
+              },
+              "demangled_name": {
+                "type": ["string", "null"],
+                "description": "Unmangled C++ name (if applicable)"
+              }
+            },
+            "required": ["discovered_by"]
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional metadata (extensible - add fields here without breaking schema)",
+            "additionalProperties": true
+          }
+        },
+        "required": ["name", "kind", "confidence", "evidence"]
+      }
+    },
+    "pipeline_results": {
+      "type": "object",
+      "description": "Details of pipeline execution (for debugging/validation)",
+      "properties": {
+        "modules_run": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of modules that executed"
+        },
+        "modules_passed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Modules that completed successfully"
+        },
+        "modules_warned": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Modules with degraded functionality"
+        },
+        "modules_failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Modules that failed"
+        },
+        "total_duration_ms": {
+          "type": "number",
+          "description": "Total analysis time in milliseconds"
+        }
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "description": "Summary statistics for quick assessment",
+      "properties": {
+        "total_invocables": {
+          "type": "integer",
+          "description": "Total number of invocables found"
+        },
+        "high_confidence_count": {
+          "type": "integer",
+          "description": "Count with high confidence"
+        },
+        "medium_confidence_count": {
+          "type": "integer",
+          "description": "Count with medium confidence"
+        },
+        "low_confidence_count": {
+          "type": "integer",
+          "description": "Count with low confidence"
+        },
+        "signature_match_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Percentage of exports matched to headers (0.0 to 1.0)"
+        },
+        "documented_count": {
+          "type": "integer",
+          "description": "Count with documentation found"
+        }
+      }
+    }
+  },
+  "required": ["schema_version", "metadata", "invocables"],
+  "additionalProperties": false
+}

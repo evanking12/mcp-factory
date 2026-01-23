@@ -57,6 +57,49 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 **Not working?** See [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions.
 
+### Analyze Windows EXE Tools ⚡ (CLI Argument Extraction)
+
+```powershell
+# Extract arguments from any Windows command-line tool
+python src\discovery\cli_analyzer.py "C:\Windows\System32\ipconfig.exe"
+python src\discovery\cli_analyzer.py "C:\Windows\System32\whoami.exe"
+```
+
+**What you'll see:** Extracted flags, options, and subcommands with evidence of which help format worked.
+
+### Validate Analysis Pipeline ⚡ (Debug Suite)
+
+```powershell
+# Run validation suite on your DLL exports
+python src\discovery\debug_suite.py --file "artifacts\zstd_exports_raw.txt"
+```
+
+**What you'll see:** PASS/WARN/ERROR status for each pipeline module with timing analysis and evidence ledger.
+
+### Batch Validation ⚡ (Production-Ready Testing)
+
+```powershell
+# Quick smoke test (~30 DLLs from system, ~4 seconds)
+.\scripts\run_batch_validation.ps1 -Mode smoke
+
+# Core validation (~200 DLLs, ~20 seconds) - recommended for demos
+.\scripts\run_batch_validation.ps1 -Mode core
+
+# Full validation (~466 DLLs, ~53 seconds) - comprehensive testing
+.\scripts\run_batch_validation.ps1 -Mode full
+```
+
+**What you'll see:** Color-coded PASS/WARN/ERROR counts, metrics (files/second, avg time/file), and top 5 slowest files.
+
+**Status meanings:**
+- **[PASS]** = File successfully analyzed by debug_suite.py (all critical pipeline modules ran)
+- **[WARN]** = File analyzed but with degraded functionality (e.g., no headers found, falls back to exports-only)
+- **[ERROR]** = File analysis failed (corrupted binary, parsing error, pipeline crash)
+- **[SKIPPED]** = File inaccessible (permission denied, locked by process)
+
+**Note:** PASS means "pipeline ran successfully", not "functions are invokable". Invokability is determined by confidence scoring within the pipeline.
+This is important going into future iterations -- before we can have a successful confidence summary, we must first ensure the code is not broken!
+
 **The script handles everything:**
 - ✅ Detects Python 3.8+ (or uses existing installation)
 - ✅ Auto-detects/bootstraps vcpkg (~100 MB download, one-time)
@@ -64,7 +107,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 - ✅ Installs zstd + sqlite3 test libraries
 - ✅ Runs DLL export analysis on both
 - ✅ **Shows confidence analysis with color-coded output** 🔴🟡🟢
-- ✅ Generates detailed CSV/Markdown reports
+- ✅ Generates detailed CSV + **JSON** + Markdown reports (see [schemas docs](docs/schemas/README.md))
 
 ### What You'll See
 
@@ -85,12 +128,18 @@ Plus sample exports showing WHY each confidence level was assigned.
 All results saved to `artifacts/`:
 
 **ZSTD (187 exports):**
-- `zstd_tier2_api_zstd_fixture.csv` - Full analysis with headers (119 KB)
+- `zstd_tier2_api_zstd_fixture.csv` - Tabular data (119 KB)
+- `zstd_tier2_api_zstd_fixture.json` - **Structured JSON for Section 4** (320 KB)
+- `zstd_tier2_api_zstd_fixture.md` - Human-readable report
 - `zstd_confidence_summary_zstd_fixture.txt` - Confidence breakdown
 
 **SQLite3 (294 exports):**
-- `sqlite3_tier2_api_sqlite3_fixture.csv` - Full analysis with headers (89 KB)
+- `sqlite3_tier2_api_sqlite3_fixture.csv` - Tabular data (89 KB)
+- `sqlite3_tier2_api_sqlite3_fixture.json` - **Structured JSON for Section 4** (375 KB)
+- `sqlite3_tier2_api_sqlite3_fixture.md` - Human-readable report
 - `sqlite3_confidence_summary_sqlite3_fixture.txt` - Confidence breakdown
+
+**JSON Schema:** See [docs/schemas/discovery-output.schema.json](docs/schemas/discovery-output.schema.json) for the stable v2.0.0 schema consumed by Section 4 (MCP generation).
 
 ## Advanced Usage
 
@@ -102,23 +151,6 @@ python src/discovery/csv_script.py --dll path/to/your_library.dll --headers path
 
 See `python src/discovery/csv_script.py --help` for all options.
 
-## What This Iteration Covers
-
-This is Iteration 1: a discovery prototype that covers DLL export inventory + header matching. Full Section 2–3 support (EXE/COM/RPC/registry scanning, richer hints, and interactive selection UX) is planned for later iterations.
-
-This release implements **Sections 2–3** of the project requirements:
-
-- **Section 2: Target Binary Selection**
-  - Accepts user-specified DLL paths (`--dll` parameter)
-  - Supports vcpkg-installed dependencies for testing
-  - Auto-detects dumpbin.exe from Visual Studio Build Tools
-
-- **Section 3: Function Discovery & Display**
-  - Extracts all exported functions via `dumpbin /exports`
-  - Matches exports to header file prototypes (return types, parameters)
-  - Parses Doxygen-style documentation comments
-  - Generates tiered CSV/Markdown reports (5 levels: full → metadata only)
-  - Captures function metadata: ordinal, hint, RVA, forwarding info
 
 ## Sample Output (for Section 4)
 
@@ -280,11 +312,15 @@ Questions? Contact via GitHub issues or @evanking12.
 
 ## Documentation
 
-- Architecture: `docs/architecture.md`
-- Product flow (Sections 2–5): `docs/product-flow.md`
-- Schemas: `docs/schemas/`
-- Compliance/Security/Cost: `docs/`
-- References: `docs/references.md`
+| Document | Description |
+|----------|-------------|
+| [Project Description](docs/project_description.md) | Original sponsor requirements (Sections 1-7) |
+| [Architecture](docs/architecture.md) | System design and component overview |
+| [Sections 2-3 Details](docs/sections-2-3.md) | Binary discovery implementation |
+| [Product Flow](docs/product-flow.md) | Full pipeline (Sections 2-5) |
+| [Schemas](docs/schemas/) | JSON schema contracts for Section 4 |
+| [ADRs](docs/adr/) | Architecture decision records |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 
 ---
 

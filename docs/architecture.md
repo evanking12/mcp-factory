@@ -15,13 +15,13 @@ Generate an MCP server/tool schema from existing binaries (DLL/EXE/CLI/repo) by 
 ## Components
 
 ### Discovery Layer
-- **DLL Export Analysis** (Sections 2)
+- **DLL Export Analysis** (Section 2-3)
   - `pe_parse.py`: dumpbin wrapper + export parser
   - `exports.py`: Demangling, forwarding, deduplication
   - `headers_scan.py`: Prototype extraction from C/C++ headers (98% match rate)
-  - Outputs: CSV (Tier 2), JSON (Tier 3), Markdown (Tier 4), Metadata (Tier 5)
+  - Outputs: CSV (Tier 2), Exports-only (Tier 4), Metadata (Tier 5)
   
-- **.NET Reflection Analysis** (Section 3, future)
+- **.NET Reflection Analysis** (Future)
   - Type discovery via System.Reflection
   - Public method extraction
   - Signature normalization
