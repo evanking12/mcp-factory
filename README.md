@@ -62,7 +62,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```powershell
 # Extract arguments from any Windows command-line tool
 python src\discovery\cli_analyzer.py "C:\Windows\System32\ipconfig.exe"
-python src\discovery\cli_analyzer.py "C:\Windows\System32\whoami.exe"
+python src\discovery\cli_analyzer.py "C:\Windows\System32\netstat.exe"
 ```
 
 **What you'll see:** Extracted flags, options, and subcommands with evidence of which help format worked.

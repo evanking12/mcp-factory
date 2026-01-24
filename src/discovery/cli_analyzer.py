@@ -124,8 +124,8 @@ class CLIAnalyzer:
     def analyze(self) -> CLIInvocable:
         """Main analysis: try multiple help flags, parse output, extract arguments"""
         
-        # Try different help flags in order (Unix first, then Windows)
-        help_flags = ["--help", "-h", "-?", "/?", "/help", "--usage", "-usage"]
+        # Try Windows-style help flags first, then Unix-style
+        help_flags = ["/?", "/help", "-?", "--help", "-h", "--usage", "-usage"]
         
         for flag in help_flags:
             help_text = self.run_help(flag)
