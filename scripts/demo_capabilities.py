@@ -8,6 +8,7 @@ Analyzes Native, .NET, and COM binaries with color-coded confidence metrics.
 import sys
 import json
 import logging
+import io  # Added
 from pathlib import Path
 from contextlib import redirect_stdout, redirect_stderr
 import os
@@ -135,10 +136,18 @@ def run_demo():
         ]
         
         try:
-            with open(os.devnull, 'w') as devnull:
-                with redirect_stdout(devnull), redirect_stderr(devnull):
-                    analyze_main()
-            
+            # Silence output unless error occurs
+            # We capture stdout/stderr to print only on failure
+            capture_io = io.StringIO()
+            with redirect_stdout(capture_io), redirect_stderr(capture_io):
+                try:
+                    exit_code = analyze_main()
+                except SystemExit as e:
+                    exit_code = e.code
+                except Exception as e:
+                    print(f"Exception: {e}")
+                    raise
+
             # Read results
             json_files = list(output_dir.glob("*_mcp.json"))
             if json_files:
@@ -153,7 +162,14 @@ def run_demo():
                 print(f"{target['name']:<20} | {target['type']:<20} | {count:<8} | {conf_color}{conf_label:<12}{Colors.ENDC}")
 
             else:
+                # Print captured output to help debug "FAILED" state
                 print(f"{target['name']:<20} | {Colors.RED}FAILED{Colors.ENDC}")
+                # Indent error output for readability
+                error_log = capture_io.getvalue().strip()
+                if error_log:
+                    print(f"{Colors.RED}  Error Log:{Colors.ENDC}")
+                    for line in error_log.splitlines()[-5:]: # Show last 5 lines
+                        print(f"    {line}")
                 
         except Exception as e:
             print(f"{Colors.RED}ERROR: {e}{Colors.ENDC}")

@@ -50,7 +50,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 # Clone and run the demo
 git clone https://github.com/evanking12/mcp-factory.git
 cd mcp-factory
-Set-ExecutionPolicy -Scope Process Bypass
+pip install -r requirements.txt
 python scripts/demo_capabilities.py
 ```
 
