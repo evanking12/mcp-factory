@@ -35,6 +35,10 @@ def classify_file(file_path: Path) -> FileType:
 
     ext = file_path.suffix.lower()
 
+    # Explicit override for .tlb files - they are always COM/TypeLibraries
+    if ext in ['.tlb', '.olb']:
+        return FileType.COM_OBJECT
+
     # Script files
     if ext in ['.ps1', '.py', '.vbs', '.bat', '.cmd', '.sh']:
         return FileType.SCRIPT
@@ -74,6 +78,9 @@ def classify_file(file_path: Path) -> FileType:
                                 characteristics = int.from_bytes(chars, 'little')
                                 # 0x2000 = DLL characteristic
                                 if characteristics & 0x2000:
+                                    # Check if it's a COM object
+                                    if _is_com_object(file_path):
+                                        return FileType.COM_OBJECT
                                     return FileType.PE_DLL
                                 else:
                                     return FileType.PE_EXE
@@ -89,36 +96,101 @@ def classify_file(file_path: Path) -> FileType:
 
     # Extension-based fallback
     if ext in ['.dll']:
+        # If we failed to detect COM/NET via PE, check name
+        if _is_com_object(file_path):
+             return FileType.COM_OBJECT
         return FileType.PE_DLL
     elif ext in ['.exe', '.com']:
         return FileType.PE_EXE
     elif ext in ['.tlb', '.olb']:
+        return FileType.COM_OBJECT
+    
+    # Pre-check: TLB files often have "MSFT" magic or others, but extension is reliable enough
+    if ext in ['.tlb', '.olb']:
         return FileType.COM_OBJECT
 
     return FileType.UNKNOWN
 
 
 def _has_dotnet_metadata(file_path: Path) -> bool:
-    """Check if PE file contains .NET metadata (CLR header)."""
+    """Check if PE file contains .NET metadata (CLR header).
+    
+    Reads PE data directory 14 (CLR Runtime Header).
+    If RVA > 0 and Size > 0, the binary contains .NET code.
+    """
     try:
         with open(file_path, 'rb') as f:
-            # Read PE offset
+            # Read DOS header -> PE offset
             f.seek(0x3c)
-            pe_offset = int.from_bytes(f.read(4), 'little')
-
-            # Check for CLR Runtime Header in data directories
-            # (This is a simplified check; full check would parse data directories)
-            f.seek(pe_offset + 4)
-            machine = f.read(2)
-
-            # For now, assume .NET if has .NET file extension pattern
-            # Full implementation would parse CLR header
-            return str(file_path).lower().endswith(('.dll', '.exe'))
-
+            pe_offset_bytes = f.read(4)
+            if len(pe_offset_bytes) != 4:
+                return False
+            pe_offset = int.from_bytes(pe_offset_bytes, 'little')
+            
+            # Validate PE signature
+            f.seek(pe_offset)
+            pe_sig = f.read(4)
+            if pe_sig != b'PE\x00\x00':
+                return False
+            
+            # Read magic (determines bitness)
+            # Magic is 2 bytes after PE signature + COFF header (20 bytes)
+            f.seek(pe_offset + 24)
+            magic_bytes = f.read(2)
+            if len(magic_bytes) != 2:
+                return False
+            magic = int.from_bytes(magic_bytes, 'little')
+            
+            is_64bit = (magic == 0x20B)  # 0x20B = PE32+, 0x10B = PE32
+            
+            # Data directories start AFTER NumberOfRvaAndSizes field:
+            # PE+24 (Optional Header start) + 108 (x64) or + 92 (x86) = NumberOfRvaAndSizes offset
+            # Then +4 to skip NumberOfRvaAndSizes itself = First data directory
+            num_dirs_offset = pe_offset + 24 + (108 if is_64bit else 92)
+            
+            # CLR Runtime Header is directory 14
+            # Each directory = 8 bytes (RVA + Size)
+            clr_dir_offset = num_dirs_offset + 4 + (14 * 8)
+            
+            f.seek(clr_dir_offset)
+            clr_rva_bytes = f.read(4)
+            clr_size_bytes = f.read(4)
+            
+            if len(clr_rva_bytes) != 4 or len(clr_size_bytes) != 4:
+                return False
+            
+            clr_rva = int.from_bytes(clr_rva_bytes, 'little')
+            clr_size = int.from_bytes(clr_size_bytes, 'little')
+            
+            return clr_rva > 0 and clr_size > 0
+    
     except (OSError, ValueError):
         return False
 
-    return False
+
+def _is_com_object(file_path: Path, dumpbin_exe: str = "dumpbin") -> bool:
+    """Detect if PE DLL is a COM object by checking imports.
+    
+    COM objects typically import ole32.dll or oleaut32.dll.
+    Also checks if file itself is a core COM DLL.
+    """
+    try:
+        # Check if file itself is a core COM DLL (they don't import themselves)
+        com_core_dlls = {'ole32.dll', 'oleaut32.dll'}
+        if file_path.name.lower() in com_core_dlls:
+            return True
+        
+        from pe_parse import get_pe_imports
+        imports, success = get_pe_imports(file_path, dumpbin_exe)
+        
+        if not success or not imports:
+            return False
+        
+        # Check for COM indicator DLLs in imports
+        return any(imp in com_core_dlls for imp in imports)
+    
+    except Exception:
+        return False
 
 
 def get_architecture(file_path: Path) -> Optional[str]:
@@ -159,6 +231,8 @@ def get_architecture(file_path: Path) -> Optional[str]:
 def extract_signature(pe_path: Path) -> Tuple[bool, Optional[str]]:
     """Extract digital signature and publisher info from PE file.
     
+    Parses Security Directory[4] via PowerShell Get-AuthenticodeSignature.
+    
     Args:
         pe_path: Path to PE file
         
@@ -166,23 +240,28 @@ def extract_signature(pe_path: Path) -> Tuple[bool, Optional[str]]:
         (is_signed, publisher_name)
     """
     try:
-        # Use wmic to extract file description/publisher
-        result = subprocess.run(
-            ['wmic', 'datafile', 'where',
-             f'name="{str(pe_path).replace(chr(92), chr(92)+chr(92))}"',
-             'get', 'Description,Version', '/format:list'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
-        if result.returncode == 0:
-            output = result.stdout.strip()
-            if 'Description=' in output:
-                publisher = output.split('Description=')[1].split('\n')[0].strip()
-                return True, publisher if publisher else "Unknown"
-        
-        return False, None
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False, None
+        from signature import get_signature_info
+        return get_signature_info(pe_path)
+    except ImportError:
+        # Fallback to old method if signature module not available
+        try:
+            # Use wmic to extract file description/publisher
+            result = subprocess.run(
+                ['wmic', 'datafile', 'where',
+                 f'name="{str(pe_path).replace(chr(92), chr(92)+chr(92))}"',
+                 'get', 'Description,Version', '/format:list'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if 'Description=' in output:
+                    publisher = output.split('Description=')[1].split('\n')[0].strip()
+                    return True, publisher if publisher else "Unknown"
+            
+            return False, None
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False, None
 

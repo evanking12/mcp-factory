@@ -67,6 +67,47 @@ def read_pe_exports(dll_path: Path) -> Tuple[List[ExportedFunc], bool]:
         return [], False
 
 
+def get_pe_imports(dll_path: Path, dumpbin_exe: str = "dumpbin") -> Tuple[List[str], bool]:
+    """Extract list of imported DLLs using dumpbin /imports.
+    
+    Args:
+        dll_path: Path to PE file
+        dumpbin_exe: Path to dumpbin executable (default searches PATH)
+        
+    Returns:
+        (list of lowercase DLL names, success_bool)
+    """
+    try:
+        cmd = [dumpbin_exe, "/imports", str(dll_path)]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return [], False
+        
+        imports = []
+        for line in result.stdout.split('\n'):
+            # Parse lines like "  kernel32.dll"
+            # Format: whitespace + dll_name.dll + optional whitespace
+            match = re.match(r'^\s+([a-z0-9_.]+\.dll)\s*$', line, re.IGNORECASE)
+            if match:
+                dll_name = match.group(1).lower()
+                # Ensure we extract just the string, not a group object
+                if isinstance(dll_name, str) and dll_name not in imports:
+                    imports.append(dll_name)
+        
+        return imports, len(imports) > 0
+    
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return [], False
+
+
 def run_dumpbin(dll_path: Path, dumpbin_exe: str) -> Tuple[int, str]:
     """Run dumpbin /exports on a DLL.
     

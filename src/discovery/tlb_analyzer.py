@@ -1,0 +1,108 @@
+"""
+tlb_analyzer.py - Extract COM interface definitions from Type Libraries.
+
+Uses pywin32 (pythoncom) to parse embedded Type Libraries (.tlb) 
+within DLLs/EXEs to extract Interface and Method definitions.
+"""
+import logging
+import pythoncom
+from pathlib import Path
+from typing import List, Dict, Optional, Any
+
+logger = logging.getLogger(__name__)
+
+def scan_type_library(dll_path: Path) -> List[Dict[str, Any]]:
+    """
+    Load and parse the Type Library embedded in the given file.
+    Returns a list of parsed interfaces/coclasses with their methods.
+    """
+    results = []
+    try:
+        # Load the Type Library
+        # This will raise pythoncom.com_error if no TLB is present
+        tlb = pythoncom.LoadTypeLib(str(dll_path))
+        count = tlb.GetTypeInfoCount()
+        
+        logger.info(f"Common Type Library found: {count} type infos")
+        
+        for i in range(count):
+            try:
+                # Get basic info
+                type_info = tlb.GetTypeInfo(i)
+                # GetDocumentation returns (name, docString, helpContext, helpFile)
+                doc_tuple = tlb.GetDocumentation(i)
+                type_name = doc_tuple[0]
+                type_doc = doc_tuple[1]
+                
+                # Get Type Attributes
+                attr = type_info.GetTypeAttr()
+                # TypeKind enum:
+                # TKIND_ENUM=0, TKIND_RECORD=1, TKIND_MODULE=2, TKIND_INTERFACE=3, 
+                # TKIND_DISPATCH=4, TKIND_COCLASS=5, TKIND_ALIAS=6, TKIND_UNION=7
+                kind = attr.typekind
+                guid = str(attr.iid)
+                
+                if kind in (3, 4): # Interface or Dispatch
+                    methods = []
+                    # Iterate functions
+                    for j in range(attr.cFuncs):
+                        try:
+                            # GetFuncDesc returns keys like memid, scodeArray, etc.
+                            func_desc = type_info.GetFuncDesc(j)
+                            
+                            # GetNames returns list of [funcName, paramName1, paramName2...]
+                            # This is the most reliable way to get readable signatures
+                            names = type_info.GetNames(func_desc.memid)
+                            func_name = names[0]
+                            params = names[1:]
+                            
+                            # Determine return type (heuristic, analyzing ELEMDESC would be better but complex)
+                            # For now, we capture the shape
+                            
+                            methods.append({
+                                'name': func_name,
+                                'parameters': params,
+                                'memid': func_desc.memid,
+                                'invkind': func_desc.invkind # 1=Func, 2=PropGet, 4=PropPut
+                            })
+                        except Exception as e:
+                            # Some functions might fail to resolve names
+                            pass
+                    
+                    if methods:
+                        results.append({
+                            'name': type_name,
+                            'guid': guid,
+                            'kind': 'interface' if kind == 3 else 'dispatch',
+                            'description': type_doc,
+                            'methods': methods,
+                            'confidence': 'guaranteed' # TLB info is authoritative
+                        })
+                        
+                elif kind == 5: # CoClass (The actual object class)
+                    # CoClasses don't usually have methods directly, they implement interfaces
+                    results.append({
+                        'name': type_name,
+                        'guid': guid,
+                        'kind': 'coclass',
+                        'description': type_doc,
+                        'methods': [],
+                        'confidence': 'guaranteed'
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Error inspecting TypeInfo {i} in {dll_path.name}: {e}")
+                continue
+                
+    except pythoncom.com_error:
+        # Expected for many DLLs that aren't COM servers
+        pass
+    except Exception as e:
+        logger.error(f"Error scanning TypeLib for {dll_path}: {e}")
+         
+    return results
+
+def format_tlb_signature(method_name: str, params: List[str]) -> str:
+    """Format a display string for a TLB method."""
+    param_str = ", ".join(params)
+    return f"HRESULT {method_name}({param_str})"

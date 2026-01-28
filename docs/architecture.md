@@ -4,27 +4,35 @@
 Generate an MCP server/tool schema from existing binaries (DLL/EXE/CLI/repo) by discovering invocable surfaces, normalizing them, enriching metadata, and generating deployable MCP components.
 
 ## Pipeline (high level)
-1. Acquire target (file upload or installed path) + free-text hints
-2. Discover invocable surfaces (exports/help/registry/etc.)
-3. **Score confidence** in each surface (6-factor analysis)
-4. Normalize into `inventory.json` (provenance + confidence)
-5. User selects subset -> `selection.json`
-6. Generate MCP tools/server + deploy verification instance
-7. Verify via chat UI + downloadable outputs
+1. Acquire target (file upload or installed path)
+2. **Hybrid Classification & Routing**
+   - Detects all capabilities: Native Exports (`.dll`), COM Server (`HKCR`), .NET Assembly (`CLR`), CLI Tool (`.exe`)
+   - Supports multi-paradigm files (e.g., `shell32.dll` = COM + Native)
+3. Discover invocable surfaces (exports/help/registry/etc.)
+4. **Score confidence** in each surface (6-factor analysis)
+5. **Strict Artifact Generation**
+   - Output normalized MCP JSON v2.0 (`*_mcp.json`)
+   - Suppress empty/invalid outputs ("Silence is Golden")
+6. User selects subset -> `selection.json`
+7. Generate MCP tools/server + deploy verification instance
+8. Verify via chat UI + downloadable outputs
 
 ## Components
 
 ### Discovery Layer
-- **DLL Export Analysis** (Section 2-3)
+- **Hybrid Routing Engine** (Section 2-3)
+  - `main.py`: Capabilities-based router (Fall-through logic)
+  - Handles `hybrid` files (e.g., `notepad.exe` as CLI + COM, `shell32.dll` as Native + COM)
+  
+- **DLL Export Analysis**
   - `pe_parse.py`: dumpbin wrapper + export parser
   - `exports.py`: Demangling, forwarding, deduplication
   - `headers_scan.py`: Prototype extraction from C/C++ headers (98% match rate)
-  - Outputs: CSV (Tier 2), Exports-only (Tier 4), Metadata (Tier 5)
-  
-- **.NET Reflection Analysis** (Future)
-  - Type discovery via System.Reflection
-  - Public method extraction
-  - Signature normalization
+  - Outputs: MCP JSON (Tier 2-4), Metadata (Tier 5)
+
+- **COM & .NET Analysis**
+  - `com_scan.py`: Recursively scans registry for CLSIDs/TypeLibs
+  - .NET reflection (System.Reflection) for managed assemblies (future)
   
 - **CLI Help Scraper** (future)
   - Parse --help / -h output
@@ -35,8 +43,11 @@ Generate an MCP server/tool schema from existing binaries (DLL/EXE/CLI/repo) by 
   - `score_confidence(export, matches, is_signed, forwarded) -> (level, reasons)`
   - 6 factors: header_match, doc_comment, signature_complete, parameter_count, return_type, non_forwarded
   - Tiers: HIGH (≥6), MEDIUM (≥4), LOW (<4)
-  - `generate_confidence_summary()`: Color-coded output (RED/YELLOW/GREEN) + suggestions
-  - Enables downstream prioritization (Section 4 auto-wraps HIGH confidence exports)
+
+- **Strict Artifact Hygiene** (new, 2026-01-27)
+  - **Noise Suppression**: Files with 0 found features generate NO output
+  - **Redundancy Removal**: Deprecated legacy `.json`, standardized on `*_mcp.json`
+  - Ensures downstream tools never encounter "Ghost Tools"
 
 ### Setup & Automation Layer
 - **Boot Checks** (new, 2026-01-21)

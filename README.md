@@ -18,15 +18,17 @@
 
 Enterprise organizations need AI-powered customer service that can invoke existing internal tools lacking API documentation or modern integration points. MCP Factory bridges this gap by automatically analyzing Windows binaries and generating standards-compliant Model Context Protocol servers.
 
-## Current Status (Week 1)
+## Current Status (Week 3)
 
-- [x] **Sections 2-3: Binary Discovery** (Evan) - DLL export analysis with header matching - **WORKING**
-  - ✅ 5/5 tests passing (zstd: 98.4% match, sqlite3: 95.9% match)
-- [ ] **Section 4: MCP Generation** (Team) - JSON schema output
-- [ ] **Section 5: Verification UI** (Team) - Interactive validation
-- [ ] **Section 6: Deployment** (Team) - Azure integration
+- [x] **Sections 2-3: Hybrid Discovery Engine** - **COMPLETE**
+  - ✅ **Hybrid Analysis**: Correctly identifying multi-paradigm files (`shell32.dll` = COM + Native)
+  - ✅ **Strict Artifact Hygiene**: No empty "ghost" files, redundancy removed (ADR-0005)
+  - ✅ **Feature Validation**: 11/11 tests passing across Native, .NET, COM, CLI, and RPC
+- [ ] **Section 4: MCP Generation** - JSON schema integration
+- [ ] **Section 5: Verification UI** - Interactive validation
+- [ ] **Section 6: Deployment** - Azure integration
 
-**Approach:** Phased delivery across 6 sections. Section 2-3 (binary discovery) is the foundation—extract what's callable, who calls it, how to invoke it. Sections 4-6 (MCP generation, verification UI, Azure deployment) consume this foundation in parallel.
+**Approach:** We have moved from a simple batch analyzer to a **Hybrid Discovery Engine**. The pipeline now intelligently routes files based on capabilities (Native, COM, .NET, CLI) and enforces strict quality standards for generated MCP artifacts.
 
 ## Prerequisites
 
@@ -39,245 +41,148 @@ Enterprise organizations need AI-powered customer service that can invoke existi
   - During installation, **select the "Desktop development with C++" workload**
   - This installs `dumpbin.exe` and development tools (required for binary analysis)
 
-**Auto-installed by setup script:**
-- vcpkg (~100 MB, one-time download to `$env:USERPROFILE\Downloads\vcpkg`)
-- zstd + sqlite3 test libraries
 
-## Quick Start
+## Installation
 
-### One-Command Setup ⚡ (Just Works)
+**Prerequisites:** Git, Python 3.8+, and Visual Studio Build Tools (for `dumpbin.exe`).
 
 ```powershell
-# Clone, set execution policy, run setup - that's it!
+# Clone and run the demo
 git clone https://github.com/evanking12/mcp-factory.git
 cd mcp-factory
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup-dev.ps1
+python scripts/demo_capabilities.py
 ```
 
-**Not working?** See [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions.
+## Quick Start
 
-### Analyze Windows EXE Tools ⚡ (CLI Argument Extraction)
+### 1. Verification Suite ⚡ (The "It Works" Demo)
+
+**What you'll see:**
+
+The **Capabilities Demo** runs a live analysis and prints a real-time confidence dashboard:
+
+```text
+MCP FACTORY CAPABILITIES DEMO
+=============================
+
+Target           | Type              | Count  | Confidence
+-----------------|-------------------|--------|-----------
+kernel32.dll     | System API        | 1491   | HIGH
+user32.dll       | UI System API     | 1037   | HIGH
+System.dll       | .NET Assembly     | 9424   | GUARANTEED
+oleaut32.dll     | COM Server        | 12     | HIGH
+stdole2.tlb      | Type Library      | 50     | GUARANTEED
+ws2_32.dll       | Network API       | 205    | HIGH
+shell32.dll      | Hybrid COM/Native | 961    | GUARANTEED
+```
+
+**Why this matters:**
+- **Guaranteed:** Extracted from explicit metadata (.NET Reflection, Type Libraries).
+- **High:** Verified against known System APIs or Header hashes.
+- **Medium:** Found via pattern matching (best effort).
+- **Low:** Minimal symbols (standard export table only).
+
+### 2. Analyze a Specific File
+
+To analyze a specific binary and generate MCP artifacts:
+
+```powershell
+python src/discovery/main.py --dll "C:\Windows\System32\notepad.exe" --out "artifacts"
+```
+
+### 3. Analyze Windows CLI Tools
 
 ```powershell
 # Extract arguments from any Windows command-line tool
-python src\discovery\cli_analyzer.py "C:\Windows\System32\ipconfig.exe"
-python src\discovery\cli_analyzer.py "C:\Windows\System32\netstat.exe"
+python src/discovery/cli_analyzer.py "C:\Windows\System32\ipconfig.exe"
 ```
 
-**What you'll see:** Extracted flags, options, and subcommands with evidence of which help format worked.
+## validation_output/ Structure (Strict Hygiene)
 
-### Batch Validation ⚡ (Production-Ready Testing)
+The pipeline enforces **Strict Artifact Hygiene** (ADR-0005). We only generate files if features are *actually present*.
 
-```powershell
-# Quick smoke test (~30 DLLs from system, ~4 seconds)
-.\scripts\run_batch_validation.ps1 -Mode smoke
-
-# Core validation (~200 DLLs, ~20 seconds) - recommended for demos
-.\scripts\run_batch_validation.ps1 -Mode core
-
-# Full validation (~466 DLLs, ~53 seconds) - comprehensive testing
-.\scripts\run_batch_validation.ps1 -Mode full
+```
+validation_output/
+├── CLI/
+│   └── ipconfig.exe/
+│       └── ipconfig_cli_mcp.json       # ✅ CLI args found
+├── COM/
+│   └── ole32.dll/
+│       └── ole32_com_objects_mcp.json  # ✅ COM objects found
+│   └── kernel32.dll/
+│       └── (NO FILE)                   # ✅ Correct: kernel32 has no COM objects
+├── DOTNET/
+│   └── System.dll/
+│       └── System_dotnet_methods_mcp.json
+└── NATIVE_DLL/
+    └── zstd.dll/
+        └── zstd_exports_mcp.json
 ```
 
-**What you'll see:** Color-coded PASS/WARN/ERROR counts, metrics (files/second, avg time/file), and top 5 slowest files.
-
-**Status meanings:**
-- **[PASS]** = File successfully analyzed by debug_suite.py (all critical pipeline modules ran)
-- **[WARN]** = File analyzed but with degraded functionality (e.g., no headers found, falls back to exports-only)
-- **[ERROR]** = File analysis failed (corrupted binary, parsing error, pipeline crash)
-- **[SKIPPED]** = File inaccessible (permission denied, locked by process)
-
-**Note:** PASS means "pipeline ran successfully", not "functions are invokable". Invokability is determined by confidence scoring within the pipeline.
-This is important going into future iterations -- before we can have a successful confidence summary, we must first ensure the code is not broken!
-
-**The script handles everything:**
-- ✅ Detects Python 3.8+ (or uses existing installation)
-- ✅ Auto-detects/bootstraps vcpkg (~100 MB download, one-time)
-- ✅ Auto-detects dumpbin from Visual Studio
-- ✅ Installs zstd + sqlite3 test libraries
-- ✅ Runs DLL export analysis on both
-- ✅ **Shows confidence analysis with color-coded output** 🔴🟡🟢
+**No more "empty success" files.** If a JSON exists, it contains usable tools for the AI agent.
 - ✅ Generates detailed CSV + **JSON** + Markdown reports (see [schemas docs](docs/schemas/README.md))
 
-### What You'll See
 
-After running, you'll see colored confidence summaries like:
 
+### Output Files (Demo Mode)
+
+All results from the demo are saved to `demo_output/`. The file format matches the **Stable v2.0.0 MCP JSON Schema**.
+
+**Example structure:**
 ```
-CONFIDENCE BREAKDOWN
-------------------------------------------------------------
-LOW     Confidence:   3 exports (  1.6%)
-MEDIUM  Confidence: 176 exports ( 94.1%)
-HIGH    Confidence:   8 exports (  4.3%)
+demo_output/
+├── kernel32.dll/
+│   └── kernel32_exports_mcp.json       # System APIs
+├── shell32.dll/
+│   ├── shell32_exports_mcp.json        # Native Exports
+│   └── shell32_com_objects_mcp.json    # COM Objects
+└── System.dll/
+    └── System_dotnet_methods_mcp.json  # .NET Methods
 ```
 
-Plus sample exports showing WHY each confidence level was assigned.
-
-### Output Files
-
-All results saved to `artifacts/`:
-
-**ZSTD (187 exports):**
-- `zstd_tier2_api_zstd_fixture.csv` - Tabular data (119 KB)
-- `zstd_tier2_api_zstd_fixture.json` - **Structured JSON for Section 4** (320 KB)
-- `zstd_tier2_api_zstd_fixture.md` - Human-readable report
-- `zstd_confidence_summary_zstd_fixture.txt` - Confidence breakdown
-
-**SQLite3 (294 exports):**
-- `sqlite3_tier2_api_sqlite3_fixture.csv` - Tabular data (89 KB)
-- `sqlite3_tier2_api_sqlite3_fixture.json` - **Structured JSON for Section 4** (375 KB)
-- `sqlite3_tier2_api_sqlite3_fixture.md` - Human-readable report
-- `sqlite3_confidence_summary_sqlite3_fixture.txt` - Confidence breakdown
-
-**JSON Schema:** See [docs/schemas/discovery-output.schema.json](docs/schemas/discovery-output.schema.json) for the stable v2.0.0 schema consumed by Section 4 (MCP generation).
+**JSON Schema:** See [docs/schemas/discovery-output.schema.json](docs/schemas/discovery-output.schema.json) for the formal schema definition consumed by Section 4 (MCP generation).
 
 ## Advanced Usage
 
-### Analyze Your Own DLL
+### Analyze Any DLL/EXE
+
+Use `main.py` to target any file. The system will auto-detect if it's a Native DLL, COM Server, .NET Assembly, or CLI Tool (or a mix!).
 
 ```powershell
-python src/discovery/csv_script.py --dll path/to/your_library.dll --headers path/to/include/ --out ./results
+# Basic analysis
+python src/discovery/main.py --dll "path/to/file.dll" --out "custom_output"
+
+# With C++ Headers (for higher confidence)
+python src/discovery/main.py --dll "mylib.dll" --headers "include/" --out "out"
 ```
 
-See `python src/discovery/csv_script.py --help` for all options.
+### CLI Tool Analysis
 
-
-## Sample Output (for Section 4)
-
-One exported function from discovery, in both formats:
-
-**CSV row:**
-```
-function,ordinal,rva,confidence,is_signed,publisher,is_forwarded
-ZSTD_compress,1,0x12345,High,True,Zstandard Project,False
-```
-
-**JSON object:**
-```json
-{"function":"ZSTD_compress","ordinal":1,"rva":"0x12345","confidence":"High","is_signed":true,"publisher":"Zstandard Project","is_forwarded":false}
-```
-
-Full sample outputs are generated during `setup-dev.ps1` in `artifacts/` directory (created at runtime). **Schema reference:** [docs/schemas/v1.0.json](docs/schemas/v1.0.json)
-
-## Next Steps (Iteration 2+)
-
-### High Priority (Weeks 2-3)
-- **Section 4 Prep:** JSON schema generation foundation for MCP tool definitions
-- **.NET Reflection:** Analyze .NET assemblies (CLR metadata, type information)
-- **Type Library Parsing:** COM type information extraction from TLBs
-
-### Medium Priority (Weeks 4-5)
-- **Interactive UI:** Checkbox interface for excluding functions before schema generation
-- **PDB Parsing:** Enhanced type information from program databases
-- **Safety Annotations:** Automatic detection of thread safety, error codes, ownership
-
-### Future (Weeks 6-8)
-- **Section 5:** MCP schema to interactive validation chat UI
-- **Azure Integration:** Deployment to Azure Container Instances
-- **CLI Tools:** EXE command-line argument extraction and analysis
-- **RPC/Registry:** Windows RPC endpoint and registry scanning
-
-## Advanced Usage
-
-### Direct Python Script
-
-Analyze any DLL directly:
+Specifically target command-line arguments:
 
 ```powershell
-# Basic analysis (exports only)
-python src\discovery\main.py --dll "C:\path\to\your.dll" --out "output"
-
-# Full analysis with header matching
-python src\discovery\main.py --dll "C:\path\to\your.dll" --headers "C:\path\to\headers" --out "detailed_output"
-
-# With documentation extraction
-python src\discovery\main.py --dll "C:\path\to\your.dll" --headers "C:\path\to\headers" --docs "C:\path\to\docs" --out "full_output"
-
-# Custom dumpbin path
-python src\discovery\main.py --dll "C:\path\to\your.dll" --dumpbin "C:\custom\path\dumpbin.exe" --out "output"
-
-# Show all options
-python src\discovery\main.py --help
+python src/discovery/cli_analyzer.py "C:\Program Files\Git\bin\git.exe"
 ```
-
-### Fixture Script Options
-
-```powershell
-# With auto-detection (recommended)
-.\scripts\run_fixtures.ps1
-
-# Explicit vcpkg path
-.\scripts\run_fixtures.ps1 -VcpkgExe "$env:USERPROFILE\Downloads\vcpkg\vcpkg.exe"
-
-# Custom output directory
-.\scripts\run_fixtures.ps1 -OutDir "test_output"
-
-# Different triplet (e.g., static linking)
-.\scripts\run_fixtures.ps1 -Triplet "x64-windows-static"
-
-# Specify dumpbin location
-.\scripts\run_fixtures.ps1 -DumpbinExe "C:\Path\To\dumpbin.exe"
-```
-
-## One-Command Demo
-
-For a completely automated setup from scratch:
-
-```powershell
-# Clone, setup, and run - everything is auto-detected
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\run_fixtures.ps1 -BootstrapVcpkg
-```
-
-Expected completion time: ~5 minutes (vcpkg clone/build + analysis).
-Verify success: See 8 files in `artifacts/` directory matching the "What Success Looks Like" section above.
-
-## Next Iteration Preview
-
-**Planned for Iteration 2:**
-- Interactive deselection UI (checkbox interface for excluding functions)
-- JSON schema generation for MCP tool definitions
-- PDB parsing for additional type information
-- Safety wrapper annotations (error codes, ownership, thread safety)
 
 ## Repository Structure
-
 ```
 mcp-factory/
 ├── scripts/                      # PowerShell automation
-│   ├── run_fixtures.ps1         # Main fixture test runner
-│   └── smoke_test.ps1           # Output verification
-├── src/discovery/               # Section 2-3: Discovery pipeline
-│   ├── main.py                  # CLI orchestrator
-│   ├── schema.py                # Data models and CSV/JSON writers
-│   ├── pe_parse.py              # PE header parsing
-│   ├── classify.py              # File type detection
-│   ├── exports.py               # Export enrichment (demangle, forwarding)
-│   ├── headers_scan.py          # Header prototype matching
-│   ├── docs_scan.py             # Documentation correlation
-│   └── com_scan.py              # COM analysis (plugin registry)
-├── tests/fixtures/              # Test dependencies
-│   └── vcpkg.json               # vcpkg manifest (zstd, sqlite3)
-├── artifacts/                   # Generated outputs (gitignored)
-└── docs/
-    ├── sections-2-3.md          # Current iteration scope
-    └── copilot-log.md           # Development log
-```
-
-### Sanity Check Commands
-
-Verify the CSVs contain expected exports:
-
-```powershell
-# Check for ZSTD_ functions (should find 180+ entries)
-Select-String -Path "artifacts\zstd_tier2_api_zstd_fixture.csv" -Pattern "ZSTD_" | Measure-Object
-
-# Check for sqlite3_ functions (should find 280+ entries)
-Select-String -Path "artifacts\sqlite3_tier2_api_sqlite3_fixture.csv" -Pattern "sqlite3_" | Measure-Object
-
-# View first 10 exports
-Get-Content "artifacts\zstd_tier2_api_zstd_fixture.csv" | Select-Object -First 11
+│   ├── demo_capabilities.py      # Main demo runner
+│   ├── validate_features.py      # Feature validation suite
+│   ├── analyze_json_anomalies.py # Hygiene verification
+│   └── run_fixtures.ps1          # (Legacy) Fixture runner
+├── src/discovery/                # Section 2-3: Discovery pipeline
+│   ├── main.py                   # CLI orchestrator
+│   ├── analyze_dots.py           # .NET Reflection
+│   ├── cli_analyzer.py           # CLI Argument parsing
+│   ├── com_scan.py               # COM Registry scanning
+│   ├── exports.py                # Native Exports
+│   └── rpc_scan.py               # RPC Interface scanning
+├── demo_output/                  # Generated demo artifacts
+├── artifacts/                    # Legacy test artifacts
+└── docs/                         # Documentation
 ```
 
 ## Team Responsibilities
@@ -291,15 +196,13 @@ Get-Content "artifacts\zstd_tier2_api_zstd_fixture.csv" | Select-Object -First 1
 
 Section 2-3 produces a stable JSON schema that Section 4 teams depend on:
 
-- **Schema:** [docs/schemas/v1.0.json](docs/schemas/v1.0.json) - Formal JSON Schema with required fields, types, and constraints
+- **Schema:** [docs/schemas/discovery-output.schema.json](docs/schemas/discovery-output.schema.json) - Formal JSON Schema
 - **Versioning:** Breaking changes → v2.0. See [CHANGELOG.md](CHANGELOG.md)
 - **For Section 4 teams:** Pin schema version in MCP generation to prevent drift
 
 ## Contributing
 
 This is an active capstone project. For development setup and workflow guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-Questions? Contact via GitHub issues or @evanking12.
 
 ## Documentation
 

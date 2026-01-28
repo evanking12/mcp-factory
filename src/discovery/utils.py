@@ -38,6 +38,16 @@ class Spinner:
             return
         print(f"\r[*] {self.message}... {result}")
 
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.done("✗")
+        else:
+            self.done("✓")
+
 
 def format_verbose_header(stage: str, details: str = ""):
     """Format a verbose pipeline stage header."""

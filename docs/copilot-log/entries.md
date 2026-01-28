@@ -308,3 +308,39 @@ Outputs:
 - ✅ Demonstrates research depth (CLI extraction, debug validation, string mining)
 - ✅ Clear integration path (FEATURES_AHEAD.md shows what's ready to merge)
 
+
+## 2026-01-27  Validation Suite Noise Reduction & Legacy Cleanup
+
+**Task/Issue:**
+The validation suite (`scripts/validate_features.py` and `comprehensive_validation_safe.ps1`) was achieving high accuracy but producing generated artifacts that contained "Noise" (empty COM reports for non-COM files like `kernel32.dll`) and "Redundancy" (duplicate legacy JSON files for .NET assemblies). We needed to enforce strict artifact hygiene to prevent downstream ingestion of invalid or empty data.
+
+**Copilot Prompts Used:**
+- "run comprehensive_validation_safe.ps1... why is this... medium confidence?" (Initial diagnosis of validation mismatch)
+- "do we have other mismatches... realistically scan all those files?" (Led to `main.py` routing review)
+- "go through each .json file and try to see if there are any anomalies" (Led to creation of `scripts/analyze_json_anomalies.py`)
+- "do both of these solutions" (instruction to modify `main.py` to fix Noise and Redundancy)
+- "add demo_output to git ignore"
+
+**Output Accepted:**
+- `scripts/analyze_json_anomalies.py`: A new utility to audit the `validation_output/` directory for schema compliance and empty files.
+- Refactored `src/discovery/main.py`: Logic changes to suppress empty COM JSON generation and remove legacy `.json` dumps.
+- `scripts/comprehensive_validation_safe.ps1`: Updated validation logic to use `get_exports_from_dumpbin`, fixing the "Medium Confidence" issue with `shell32.dll`.
+
+**Manual Changes:**
+1.  **Modified `src/discovery/main.py` (Validation Routing):**
+    - Implemented "Fall-through" logic: files classified as `COM_OBJECT` (like `shell32.dll`) now *also* undergo Native Export analysis.
+    - Updated `PE_EXE` handling to explicitly check for COM registration (fixing "Siloed" analysis).
+2.  **Modified `src/discovery/main.py` (Artifact Cleanup):**
+    - **Legacy Removal:** Deleted the code block in `analyze_dotnet_assembly` that wrote `_dotnet_methods.json`. Now only `_mcp.json` is generated.
+    - **Noise Suppression:** Added a check `if not invocables: return 0` in `analyze_com_object`. The pipeline now silently skips generating COM reports for files with 0 registered objects (e.g., CLI tools, pure kernels).
+3.  **Deleted Ad-Hoc Scripts:** Removed `check_confidence.py`, `check_lsass_confidence.py`, `quick_test_prefix.py`, and `test_library_prefix.py` to clean the workspace.
+4.  **Gitignore:** Added `demo_output/` to `.gitignore`.
+
+**Result:**
+- **Validation Suite:** `python scripts/validate_features.py` now passes **11/11** tests across all 5 categories (Native, .NET, COM, CLI, RPC).
+- **Artifact Quality:** `python scripts/analyze_json_anomalies.py` reports **"No anomalies found"**. The `validation_output/` directory contains exactly one valid MCP JSON per valid feature, with no 0-byte or empty-array "ghost" files.
+
+**Notes:**
+- **Hybrid Analysis:** The system now correctly identifies files that define multiple interfaces. `shell32.dll` is correctly identified as having *both* COM objects and Native Exports, generating two distinct MCP artifacts.
+- **Strict Mode:** The pipeline effectively runs in "Strict Mode" nowif a feature isn't found, no file is created. This differs from the previous behavior of creating empty "placeholder" files.
+

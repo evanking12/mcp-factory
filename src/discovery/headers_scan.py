@@ -75,18 +75,33 @@ def in_comment_spans(idx: int, spans: List[Tuple[int, int]], starts: List[int]) 
 
 
 def extract_doc_comment_above(text: str, start_index: int) -> str:
-    """Extract documentation comment appearing immediately before the given index."""
+    """Extract documentation comment appearing immediately before the given index.
+    
+    Robustly handles blank lines between comment definition and function.
+    """
+    # Look at text before the function
     before = text[:start_index]
     lines = before.splitlines()
     if not lines:
         return ""
-    if not lines[-1].strip():
-        return ""
-
+    
+    # 1. Look backwards for the first non-empty line
     i = len(lines) - 1
+    blank_limit = 5 # Allow up to N blank lines
+    blanks_seen = 0
+    
+    while i >= 0:
+        if lines[i].strip():
+            break # Found content
+        blanks_seen += 1
+        i -= 1
+        
+    if i < 0 or blanks_seen > blank_limit:
+        return "" # No comment found within range
+
     line = lines[i].lstrip()
 
-    # Doxygen-style single-line comments (/// or //!)
+    # 2. Check for Single-line Doxygen (/// or //!)
     if line.startswith("///") or line.startswith("//!"):
         block = []
         while i >= 0:
@@ -99,25 +114,42 @@ def extract_doc_comment_above(text: str, start_index: int) -> str:
         block.reverse()
         return "\n".join(block).strip()
 
-    # Doxygen-style multi-line comments (/** or /*!)
-    if "*/" in lines[i]:
+    # 3. Check for Multi-line Doxygen (ends with */)
+    if lines[i].strip().endswith("*/"):
         block_lines = []
+        
+        # Scan backwards to find /* or /**
         while i >= 0:
             block_lines.append(lines[i])
             if "/*" in lines[i]:
                 break
             i -= 1
+            
+        if i < 0: return "" # Never found start
+        
         block_lines.reverse()
+        
+        # Check if it starts with Doxygen marker
         opening = block_lines[0].lstrip()
         if not (opening.startswith("/**") or opening.startswith("/*!")):
+            # Standard C comment, but maybe we treat it as doc?
+            # For now, stick to Doxygen
             return ""
+            
         block_text = "\n".join(block_lines)
-        block_text = re.sub(r"^\s*/\*\*?\s?", "", block_text)
-        block_text = re.sub(r"\s?\*/\s*$", "", block_text)
+        
+        # Clean up the Doxygen block
+        # Remove opening /**
+        block_text = re.sub(r"^\s*/\*\*?\s?", "", block_text.lstrip())
+        # Remove closing */
+        block_text = re.sub(r"\s?\*/\s*$", "", block_text.rstrip())
+        
+        # Remove leading * on each line
         cleaned = []
         for l in block_text.splitlines():
             l = re.sub(r"^\s*\*\s?", "", l)
             cleaned.append(l.rstrip())
+            
         return "\n".join(cleaned).strip()
 
     return ""
@@ -282,3 +314,48 @@ def scan_headers(
                 break
 
     return matches
+
+
+def scan_docs_for_exports(
+    docs_root: Path, exports: List[ExportedFunc], max_hits: int = 2
+) -> Dict[str, List[str]]:
+    """Scan documentation directory for mentions of exported functions.
+    
+    Searches documentation files for mentions of exported functions
+    and links them back to the exports.
+    
+    Args:
+        docs_root: Root directory to search for documentation
+        exports: List of exported functions to search for
+        max_hits: Maximum number of documentation files to link per export
+        
+    Returns:
+        Dict mapping export name to list of documentation file paths
+    """
+    results: Dict[str, List[str]] = {}
+
+    doc_extensions = {".md", ".txt", ".rst", ".adoc", ".htm", ".html"}
+    doc_files = [
+        p
+        for p in docs_root.rglob("*")
+        if p.is_file() and p.suffix.lower() in doc_extensions
+    ]
+
+    for exp in exports:
+        hits = []
+
+        for doc_file in doc_files:
+            if len(hits) >= max_hits:
+                break
+
+            try:
+                content = doc_file.read_text(encoding="utf-8", errors="ignore")
+                if exp.name in content:
+                    hits.append(str(doc_file.relative_to(docs_root)))
+            except Exception:
+                continue
+
+        if hits:
+            results[exp.name] = hits
+
+    return results

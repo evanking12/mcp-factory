@@ -177,3 +177,37 @@
 
 
 
+
+---
+
+## 2026-01-27: Hybrid Analysis & Production Hardening
+
+**Goal:** Address "Siloed Analysis" limitations (missing features in hybrid files like `shell32.dll`) and fix "Artifact Noise" (empty reports for invalid features).
+
+**Work done:**
+- **Hybrid Routing Implementation:**
+    - Refactored `main.py` to use "Capabilities Fall-through" logic.
+    - `COM_OBJECT` files now fall through to `analyze_native_dll` if applicable.
+    - `PE_EXE` files now explicitly attempt `analyze_com_object` (e.g., for GUI apps with registered interfaces).
+- **Strict Artifact Hygiene (ADR-0005):**
+    - **Noise Suppression:** Logic added to `analyze_com_object` to silently abort if 0 objects are found.
+    - **Redundancy Removal:** Deleted code generating legacy _dotnet_methods.json duplicates.
+- **Validation Suite Hardening:**
+    - Updated `comprehensive_validation_safe.ps1` expectations for hybrid files.
+    - Created `analyze_json_anomalies.py` for automated schema auditing.
+    - Cleaned up ad-hoc test scripts to keep workspace strictly focused on the pipeline.
+
+**Test Results:**
+- **Validation Suite:** 11/11 tests passed across Native, .NET, COM, CLI, and RPC categories.
+- **Hybrid verification:** `shell32.dll` correctly generates TWO artifacts (one for COM, one for Native).
+- **Hygiene verification:** `kernel32.dll` generates ZERO COM artifacts (correctly).
+- **Anomaly Check:** Scanned 30+ generated JSONs with 0 errors found.
+
+**Files Modified:**
+- `src/discovery/main.py`: +30 lines (routing logic), -15 lines (legacy removal)
+- `scripts/comprehensive_validation_safe.ps1`: Updated test expectations
+- `scripts/analyze_json_anomalies.py`: New utility
+
+**Design Documentation:**
+- **ADR-0005:** Hybrid Analysis & Strict Artifact Hygiene
+
