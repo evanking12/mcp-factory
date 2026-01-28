@@ -8,10 +8,37 @@ without relying on dumpbin.exe. Supports both direct parsing and dumpbin fallbac
 import re
 import struct
 import subprocess
+import glob
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from schema import ExportedFunc
+
+def find_dumpbin() -> str:
+    """Auto-locate dumpbin.exe in standard Visual Studio directories."""
+    # check if on path first
+    try:
+        subprocess.run(['dumpbin', '/?'], capture_output=True)
+        return 'dumpbin'
+    except FileNotFoundError:
+        pass
+
+    # Common search patterns for VS 2022/2019/BuildTools
+    patterns = [
+        r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe"
+    ]
+
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            # Return the latest version found (glob usually sorts by name, and version numbers sort correctly)
+            return matches[-1]
+
+    return 'dumpbin' # Fallback to hoping it's in PATH later
 
 
 # Regex for parsing dumpbin export lines
