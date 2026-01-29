@@ -344,3 +344,40 @@ The validation suite (`scripts/validate_features.py` and `comprehensive_validati
 - **Hybrid Analysis:** The system now correctly identifies files that define multiple interfaces. `shell32.dll` is correctly identified as having *both* COM objects and Native Exports, generating two distinct MCP artifacts.
 - **Strict Mode:** The pipeline effectively runs in "Strict Mode" nowif a feature isn't found, no file is created. This differs from the previous behavior of creating empty "placeholder" files.
 
+
+## 2026-01-29  Architecture Shift: Pure Python Extraction (pefile)
+
+**Task/Issue:** Remove dependency on Visual Studio Build Tools (dumpbin.exe) to allow the CLI to run on any OS (Mac/Linux) and faster on Windows.
+
+**Copilot Prompts Used:**
+- "Refactor `pe_parse.py` to replace `dumpbin.exe` dependency with `pefile`. iterate through the Export Directory Table directly to extract function names, ordinals, and RVAs. Handle forwarded exports and ordinal-only functions without spawning a subprocess."
+- "Update `import_analyzer.py` to use `pefile` for Import Table analysis. Scan imported DLLs to detect capabilities (e.g. `Ole32.dll` -> COM, `Rpcrt4.dll` -> RPC) using pure Python logic."
+- "Make the discovery pipeline cross-platform (Mac/Linux compatible). Update `requirements.txt` to make `pywin32` generic or Windows-only, and wrap COM/TLB analysis in `tlb_analyzer.py` with platform checks to prevent crashes on non-Windows systems."
+
+**Output Accepted:**
+- Replaced dumpbin.exe dependency with pefile library (pure Python)
+- Rewrote pe_parse.py to parse Export directory using pefile
+- Rewrote import_analyzer.py to parse Import directory using pefile
+- Updated main.py pipeline to prefer pefile path
+- Updated 
+equirements.txt to include pefile and conditional pywin32
+- Updated 	lb_analyzer.py to handle missing pythoncom gracefully on non-Windows
+
+**Manual Changes:**
+- Fixed docstring quote escaping issue in pe_parse.py and import_analyzer.py using ix_quotes.py
+- Moved ix_quotes.py to src/discovery/
+- Added platform check for pywin32 in requirements.txt (sys_platform == 'win32')
+
+**Result:**
+`powershell
+python scripts/demo_capabilities.py
+`
+- kernel32.dll: 1692 exports (HIGH Confidence)
+- shell32.dll: 961 exports (GUARANTEED Confidence)
+- No dumpbin.exe required
+- Mac/Linux compatible
+
+**Notes:**
+- Analysis is now CPU-bound instead of I/O-bound (spawning processes)
+- pefile provides direct access to memory offsets, removing the need for text scraping dumpbin output
+- "Ordinal Only" exports and string decoding (Latin-1 vs UTF-8) are now handled explicitly in Python

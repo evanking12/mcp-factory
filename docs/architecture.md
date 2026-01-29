@@ -25,7 +25,7 @@ Generate an MCP server/tool schema from existing binaries (DLL/EXE/CLI/repo) by 
   - Handles `hybrid` files (e.g., `notepad.exe` as CLI + COM, `shell32.dll` as Native + COM)
   
 - **DLL Export Analysis**
-  - `pe_parse.py`: dumpbin wrapper + export parser
+  - `pe_parse.py`: Pure Python import/export extraction (via `pefile`)
   - `exports.py`: Demangling, forwarding, deduplication
   - `headers_scan.py`: Prototype extraction from C/C++ headers (98% match rate)
   - Outputs: MCP JSON (Tier 2-4), Metadata (Tier 5)

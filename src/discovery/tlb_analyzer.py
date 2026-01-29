@@ -5,9 +5,13 @@ Uses pywin32 (pythoncom) to parse embedded Type Libraries (.tlb)
 within DLLs/EXEs to extract Interface and Method definitions.
 """
 import logging
-import pythoncom
 from pathlib import Path
 from typing import List, Dict, Optional, Any
+
+try:
+    import pythoncom
+except ImportError:
+    pythoncom = None
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +21,11 @@ def scan_type_library(dll_path: Path) -> List[Dict[str, Any]]:
     Returns a list of parsed interfaces/coclasses with their methods.
     """
     results = []
+    
+    if pythoncom is None:
+        logger.warning("pythoncom (pywin32) not installed, skipping Type Library scan")
+        return []
+
     try:
         # Load the Type Library
         # This will raise pythoncom.com_error if no TLB is present

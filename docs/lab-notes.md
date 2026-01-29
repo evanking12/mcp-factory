@@ -211,3 +211,24 @@
 **Design Documentation:**
 - **ADR-0005:** Hybrid Analysis & Strict Artifact Hygiene
 
+
+## 2026-01-29: Architecture Shift: Pure Python PE Parsing
+**Goal:** Remove strict dependency on Visual Studio Build Tools (dumpbin.exe) to enable portability and CI/CD compatibility.
+
+**Work done:**
+- Replaced dumpbin.exe dependency with pefile library (pure Python)
+- Rewrote pe_parse.py to parse Export directory using pefile
+- Rewrote import_analyzer.py to parse Import directory using pefile
+- Updated main.py pipeline to prefer pefile path
+- Verified parity with existing outputs via demo_capabilities.py
+
+**Impact:**
+- No longer requires 6GB+ VS Build Tools installation
+- Faster analysis (no subprocess overhead)
+- OS-agnostic capability (preparing for cross-platform support)
+
+**Files Modified:**
+- pe_parse.py: Replaced dumpbin wrapper with pefile logic
+- import_analyzer.py: Replaced dumpbin wrapper with pefile logic
+- main.py: Updated pipeline orchestration
+- docs/architecture.md: Updated component documentation

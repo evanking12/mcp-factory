@@ -13,6 +13,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Set, Optional
+import pefile
 
 logger = logging.getLogger(__name__)
 
@@ -93,90 +94,47 @@ COM_FUNCTIONS = {
 }
 
 
-def parse_imports_dumpbin(dll_path: Path, dumpbin_path: str = "dumpbin") -> Dict[str, List[str]]:
-    """Parse imports using dumpbin /IMPORTS.
+def get_imports_pe(dll_path: Path) -> Dict[str, List[str]]:
+    """Parse imports using pefile.
     
     Args:
         dll_path: Path to PE file
-        dumpbin_path: Path to dumpbin.exe
         
     Returns:
         Dict mapping DLL names to list of imported functions
     """
-    try:
-        result = subprocess.run(
-            [dumpbin_path, "/IMPORTS", str(dll_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            encoding='utf-8',
-            errors='ignore'
-        )
-        
-        if result.returncode != 0:
-            logger.warning(f"dumpbin failed with code {result.returncode}")
-            return {}
-        
-        return _parse_dumpbin_imports(result.stdout)
-        
-    except FileNotFoundError:
-        logger.warning(f"dumpbin not found at: {dumpbin_path}")
-        return {}
-    except subprocess.TimeoutExpired:
-        logger.warning(f"dumpbin timeout for {dll_path}")
-        return {}
-    except Exception as e:
-        logger.warning(f"Error parsing imports: {e}")
-        return {}
-
-
-def _parse_dumpbin_imports(output: str) -> Dict[str, List[str]]:
-    """Parse dumpbin /IMPORTS output.
-    
-    Expected format:
-        Section contains the following imports:
-        
-        KERNEL32.dll
-                   402070 Import Address Table
-                   402208 Import Name Table
-                        0 time date stamp
-                        0 Index of first forwarder reference
-        
-              14F CreateFileW
-              1A3 GetLastError
-    """
     imports = {}
-    current_dll = None
-    
-    lines = output.split('\n')
-    
-    for line in lines:
-        line = line.strip()
+    try:
+        pe = pefile.PE(str(dll_path))
         
-        # DLL name line (e.g., "KERNEL32.dll")
-        if line.endswith('.dll') and not line.startswith('Dump of file'):
-            current_dll = line.lower()
-            if current_dll not in imports:
-                imports[current_dll] = []
+        if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
+            for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                if entry.dll:
+                    try:
+                        dll_name = entry.dll.decode('utf-8').lower()
+                    except UnicodeDecodeError:
+                        dll_name = str(entry.dll)
+                        
+                    func_list = []
+                    for imp in entry.imports:
+                        if imp.name:
+                            try:
+                                func_list.append(imp.name.decode('utf-8'))
+                            except UnicodeDecodeError:
+                                func_list.append(str(imp.name))
+                        else:
+                            # Ordinal import
+                            func_list.append(f"#{imp.ordinal}")
+                    imports[dll_name] = func_list
+                    
+    except Exception as e:
+        logger.error(f"Error parsing imports with pefile: {e}")
         
-        # Function import (starts with hex number or whitespace + hex)
-        elif current_dll and line:
-            # Format: "14F CreateFileW" or just "CreateFileW"
-            parts = line.split(maxsplit=1)
-            if len(parts) >= 1:
-                # Last part is function name
-                func_name = parts[-1].strip()
-                # Skip obvious non-function lines
-                if func_name and not func_name.startswith('0x') and \
-                   not func_name.isdigit() and \
-                   'Import Address Table' not in func_name:
-                    imports[current_dll].append(func_name)
-    
     return imports
 
 
-def detect_capabilities(imports: Dict[str, List[str]]) -> Dict[str, Dict]:
-    """Detect binary capabilities from imports.
+def detect_capabilities(imports: Dict[str, List[str]]) -> Dict:
+    """Detect capabilities based on imported functions and DLLs.
     
     Args:
         imports: Dict mapping DLL names to imported functions
@@ -246,85 +204,46 @@ def analyze_imports(dll_path: Path, dumpbin_path: str = "dumpbin") -> Dict:
     
     Args:
         dll_path: Path to PE file
-        dumpbin_path: Path to dumpbin.exe
+        dumpbin_path: Deprecated, ignored.
         
     Returns:
-        Dict with imports and detected capabilities
+        Dict with import summary and capabilities
     """
-    logger.info(f"Analyzing imports for {dll_path.name}")
-    
-    imports = parse_imports_dumpbin(dll_path, dumpbin_path)
-    
-    if not imports:
-        logger.warning(f"No imports found for {dll_path.name}")
-        return {
-            'imports': {},
-            'capabilities': {},
-            'summary': {
-                'total_dlls': 0,
-                'total_functions': 0,
-                'has_networking': False,
-                'has_rpc': False,
-                'has_com': False
-            }
-        }
+    # Use pure python pefile implementation
+    imports = get_imports_pe(dll_path)
     
     capabilities = detect_capabilities(imports)
     
-    # Generate summary
-    total_funcs = sum(len(funcs) for funcs in imports.values())
-    
-    summary = {
-        'total_dlls': len(imports),
-        'total_functions': total_funcs,
-        'has_networking': 'networking' in capabilities,
-        'has_rpc': 'rpc' in capabilities,
-        'has_com': 'com' in capabilities,
-        'has_crypto': 'crypto' in capabilities,
-        'has_registry': 'registry' in capabilities,
-    }
-    
-    logger.info(f"Import analysis complete: {total_funcs} functions from {len(imports)} DLLs")
-    
     return {
         'imports': imports,
-        'capabilities': capabilities,
-        'summary': summary
+        'summary': {
+            'total_dlls': len(imports),
+            'total_functions': sum(len(f) for f in imports.values()),
+            'has_networking': 'networking' in capabilities,
+            'has_rpc': 'rpc' in capabilities,
+            'has_com': 'com' in capabilities
+        },
+        'capabilities': capabilities
     }
 
-
-def format_capabilities_summary(capabilities: Dict[str, Dict]) -> str:
-    """Format capabilities as human-readable summary."""
-    if not capabilities:
-        return "No special capabilities detected"
-    
+def format_capabilities_summary(analysis: Dict) -> str:
+    """Format capabilities analysis into a human-readable string."""
+    summary = analysis.get('summary', {})
     lines = []
+    lines.append("Capabilities Summary:")
+    lines.append(f"  Total Imported DLLs: {summary.get('total_dlls', 0)}")
+    lines.append(f"  Total Imported Functions: {summary.get('total_functions', 0)}")
     
-    for category, info in sorted(capabilities.items()):
-        if not info.get('detected'):
-            continue
+    if summary.get('has_networking'):
+        lines.append("\\n  [+] Networking Detected:")
+        net_cap = analysis.get('capabilities', {}).get('networking', {})
+        for proto in net_cap.get('protocols', []):
+            lines.append(f"      - {proto}")
+            
+    if summary.get('has_rpc'):
+        lines.append("\\n  [+] RPC Detected")
         
-        lines.append(f"\n{category.upper()}:")
-        lines.append(f"  DLLs: {', '.join(info['dlls'])}")
+    if summary.get('has_com'):
+        lines.append("\\n  [+] COM Detected")
         
-        if 'functions' in info and info['functions']:
-            func_count = len(info['functions'])
-            lines.append(f"  Functions: {func_count} detected")
-            if func_count <= 10:
-                for func in info['functions']:
-                    lines.append(f"    - {func}")
-            else:
-                for func in info['functions'][:5]:
-                    lines.append(f"    - {func}")
-                lines.append(f"    ... and {func_count - 5} more")
-        
-        if category == 'networking' and 'protocols' in info:
-            lines.append(f"  Protocols: {', '.join(info['protocols'])}")
-        
-        if category == 'rpc':
-            if info.get('is_server'):
-                lines.append(f"  Mode: RPC Server")
-            if info.get('is_client'):
-                lines.append(f"  Mode: RPC Client")
-    
-    return '\n'.join(lines)
+    return "\\n".join(lines)

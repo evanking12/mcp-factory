@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from classify import classify_file, FileType, extract_signature, get_architecture
 from headers_scan import scan_headers, scan_docs_for_exports
 from exports import demangle_with_undname, deduplicate_exports, resolve_forwarders
-from pe_parse import get_exports_from_dumpbin, find_dumpbin
+from pe_parse import get_exports_from_pe, get_exports_from_dumpbin, find_dumpbin
 from schema import ExportedFunc, Invocable, MatchInfo, write_csv, write_json, write_markdown, write_tier_summary, write_invocables_json, exports_to_invocables
 from utils import Spinner, format_verbose_header, format_verbose_result
 from dotnet_analyzer import get_dotnet_methods, get_dotnet_metadata
@@ -611,42 +611,21 @@ def main():
             logger.error(f"Error reading exports-raw file: {e}")
             return 1
     elif args.dll:
-        # Run dumpbin
-        raw_path = out_dir / f"{base_name}_exports_raw.txt"
-
-        # Auto-detect dumpbin if default is used
-        dumpbin_cmd = args.dumpbin
-        if dumpbin_cmd == 'dumpbin':
-            found_dumpbin = find_dumpbin()
-            if found_dumpbin != 'dumpbin':
-                logger.info(f"Auto-located dumpbin: {found_dumpbin}")
-                dumpbin_cmd = found_dumpbin
+        # Use pefile to extract exports (Primary Method)
+        logger.info(f"Extracting exports from {args.dll} (using pefile)...")
+        exports = get_exports_from_pe(args.dll)
         
-        exports, success = get_exports_from_dumpbin(args.dll, dumpbin_cmd, raw_path)
-
-        if not success:
-            logger.error(f"Could not extract exports from {args.dll}")
-            # If allowed to have no exports (e.g. valid EXE), don't fail, just continue to import analysis
+        # Log result
+        if exports:
+            logger.info(f"Found {len(exports)} exports")
+        else:
             if not allow_no_exports:
-                if raw_path.exists():
-                     try:
-                        raw_content = raw_path.read_text()
-                        if not raw_content.strip():
-                            print("  (dumpbin produced empty output)", file=sys.stderr)
-                            print(f"  (Using dumpbin: {dumpbin_cmd})", file=sys.stderr)
-                        else:
-                            print("  (First 50 lines of dumpbin output:)", file=sys.stderr)
-                            for i, line in enumerate(raw_content.split("\n")[:50]):
-                                print(f"    {line}", file=sys.stderr)
-                     except Exception:
-                        pass
-                else:
-                    print(f"  (Using dumpbin: {dumpbin_cmd})", file=sys.stderr)
-                    print("  (Make sure Visual Studio Build Tools C++ workload is installed)", file=sys.stderr)
-
-                return 1
+                logger.warning(f"No exports found in {args.dll} (and file is classified as PE_DLL)")
+                # We can try legacy dumpbin if pefile yields 0 but that probably means 0 exports.
             else:
-                 logger.warning("Continuing without exports (might be EXE or pure internal DLL)")
+                logger.info("No exports found (expected for EXE/Internal DLL)")
+
+
 
     if not exports:
         logger.warning("No exports found")
