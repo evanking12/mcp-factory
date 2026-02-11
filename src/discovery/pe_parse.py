@@ -19,72 +19,76 @@ from schema import ExportedFunc
 
 logger = logging.getLogger(__name__)
 
-def get_exports_from_pe(dll_path: Path) -> List[ExportedFunc]:
-    """Extract exports using pefile library.
-    
-    Args:
-        dll_path: Path to PE DLL file
-        
-    Returns:
-        List of ExportedFunc objects
+def read_pe_exports(dll_path: Path) -> Tuple[List[ExportedFunc], bool]:
+    """Read PE export table directly from DLL without dumpbin using `pefile`.
+
+    Returns (exports_list, success_bool).
     """
-    exports = []
-    
     try:
-        pe = pefile.PE(str(dll_path))
-        
-        # Check if export directory exists
-        if not hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
-            # It is common for DLLs to not have exports (e.g. resource DLLs)
-            # logger.debug(f"No export directory found in {dll_path.name}")
-            return []
-            
-        for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
-            # Decode name (it's bytes in pefile)
+        import pefile
+    except Exception:
+        return [], False
+
+    try:
+        pe = pefile.PE(str(dll_path), fast_load=True)
+        try:
+            pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXPORT']])
+        except Exception:
+            pass
+
+        if not hasattr(pe, 'DIRECTORY_ENTRY_EXPORT') or not pe.DIRECTORY_ENTRY_EXPORT:
+            try:
+                pe.close()
+            except Exception:
+                pass
+            return [], False
+
+        exports: List[ExportedFunc] = []
+        for sym in pe.DIRECTORY_ENTRY_EXPORT.symbols:
             name = None
-            if exp.name:
+            if getattr(sym, 'name', None):
                 try:
-                    name = exp.name.decode('utf-8')
-                except UnicodeDecodeError:
-                    try:
-                        name = exp.name.decode('latin-1')
-                    except:
-                        name = str(exp.name)
-            
-            # Check for forwarding
-            forwarded_to = None
-            if exp.forwarder:
-                try:
-                    forwarded_to = exp.forwarder.decode('utf-8')
-                except UnicodeDecodeError:
-                    try:
-                        forwarded_to = exp.forwarder.decode('latin-1')
-                    except:
-                        pass
-            
-            # Create object
-            # pefile symbols have .ordinal, .address (RVA relative to image base usually, or just RVA)
-            
-            # If name is None (ordinal-only export)
+                    name = sym.name.decode('utf-8', errors='replace')
+                except Exception:
+                    name = str(sym.name)
+
+            ordinal = getattr(sym, 'ordinal', None)
             if not name:
-                logger.debug(f"Ordinal-only export found: {exp.ordinal}")
-                continue
-                
+                name = f"#{ordinal}" if ordinal is not None else "<unknown>"
+
+            rva = None
+            if hasattr(sym, 'address') and sym.address is not None:
+                try:
+                    rva = hex(sym.address)
+                except Exception:
+                    rva = str(sym.address)
+
+            hint = str(ordinal) if ordinal is not None else None
+
+            forwarded = None
+            if getattr(sym, 'forwarder', None):
+                try:
+                    forwarded = sym.forwarder.decode('utf-8', errors='replace')
+                except Exception:
+                    forwarded = str(sym.forwarder)
+
             exports.append(ExportedFunc(
                 name=name,
-                ordinal=exp.ordinal,
-                rva=f"{exp.address:08X}",
-                forwarded_to=forwarded_to
+                ordinal=ordinal,
+                hint=hint,
+                rva=rva,
+                forwarded_to=forwarded
             ))
-            
-    except pefile.PEFormatError as e:
-        logger.error(f"Error parsing PE file {dll_path}: {e}")
-        return []
-    except Exception as e:
-        logger.error(f"Unexpected error analyzing {dll_path}: {e}")
-        return []
-        
-    return exports
+
+        try:
+            pe.close()
+        except Exception:
+            pass
+
+        return exports, len(exports) > 0
+
+    except Exception:
+        return [], False
 
 
 def get_pe_imports(dll_path: Path) -> Tuple[List[str], bool]:

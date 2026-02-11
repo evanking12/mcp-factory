@@ -615,9 +615,8 @@ def write_invocables_json(
     
     path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Build metadata
+    # Build metadata (do not emit schema_version at top-level)
     metadata = {
-        "schema_version": schema_version,
         "tier": tier,
         "analysis_timestamp": datetime.now().isoformat(),
         "pipeline_version": "1.0.0"
@@ -634,9 +633,8 @@ def write_invocables_json(
     # Convert invocables to dicts
     invocable_dicts = [inv.to_dict() for inv in invocables]
     
-    # Build final structure
+    # Build final structure (omit top-level schema_version to match demo outputs)
     output = {
-        "schema_version": schema_version,
         "metadata": metadata,
         "invocables": invocable_dicts,
         "summary": {
