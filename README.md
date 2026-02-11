@@ -30,16 +30,26 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 **Approach:** We have moved from a simple batch analyzer to a **Hybrid Discovery Engine**. The pipeline now intelligently routes files based on capabilities (Native, COM, .NET, CLI) and enforces strict quality standards for generated MCP artifacts.
 
+## Platform Requirements
+
+**⚠️ Windows Only:** This tool is designed exclusively for Windows due to dependencies on:
+- **PowerShell** (for .NET reflection and signature verification)
+- **Windows Registry** (for COM object discovery)
+- **pywin32** (pythoncom for Type Library parsing)
+- **PE/COFF** Windows executable format
+
+Mac/Linux support is not feasible without significant feature loss.
+
 ## Prerequisites
 
-**Required (install manually):**
+**Required (install manually on Windows 10/11):**
 - **PowerShell** 5.1+ (built into Windows 10+)
 - **Python** 3.8+ — Download from [python.org](https://www.python.org/downloads/)
   - Add Python to PATH during installation (checked by default)
 - **Git** — Download from [git-scm.com](https://git-scm.com)
 - **Visual Studio Build Tools 2022** — Download from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/downloads/)
   - During installation, **select the "Desktop development with C++" workload**
-  - This installs `dumpbin.exe` and development tools (required for binary analysis)
+  - This installs development tools (for binary analysis)
 
 
 ## Installation
@@ -52,6 +62,12 @@ git clone https://github.com/evanking12/mcp-factory.git
 cd mcp-factory
 pip install -r requirements.txt
 python scripts/demo_capabilities.py
+```
+
+**Troubleshooting:** If you have multiple Python versions installed and `python` points to Python 2.x, use:
+```powershell
+py -3 -m pip install -r requirements.txt
+py -3 scripts/demo_capabilities.py
 ```
 
 ## Quick Start

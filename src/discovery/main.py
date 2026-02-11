@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from classify import classify_file, FileType, extract_signature, get_architecture
 from headers_scan import scan_headers, scan_docs_for_exports
 from exports import demangle_with_undname, deduplicate_exports, resolve_forwarders
-from pe_parse import get_exports_from_pe, get_exports_from_dumpbin, find_dumpbin
+from pe_parse import read_pe_exports, get_exports_from_dumpbin, find_dumpbin
 from schema import ExportedFunc, Invocable, MatchInfo, write_csv, write_json, write_markdown, write_tier_summary, write_invocables_json, exports_to_invocables
 from utils import Spinner, format_verbose_header, format_verbose_result
 from dotnet_analyzer import get_dotnet_methods, get_dotnet_metadata
@@ -613,7 +613,7 @@ def main():
     elif args.dll:
         # Use pefile to extract exports (Primary Method)
         logger.info(f"Extracting exports from {args.dll} (using pefile)...")
-        exports = get_exports_from_pe(args.dll)
+        exports, success = read_pe_exports(args.dll)
         
         # Log result
         if exports:
