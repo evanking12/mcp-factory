@@ -208,6 +208,14 @@ mcp-factory/
 - **Section 5 (Verification):** Thinh Nguyen - Interactive UI, LLM-based validation
 - **Integration & Deployment:** Team effort - Azure deployment, CI/CD, documentation
 
+##Section 4:
+- run python src/generation/section4_select_tools.py
+- It will print your invocables list (reads discovery-output.json)
+You optionally remove some by number (user selects which tools are allowed)
+You enter a component name
+It writes: (saves selected-invocables.json) which is the filtered tool list
+artifacts/selected-invocables.json
+
 ## Data Contract Stability (for Section 4)
 
 Section 2-3 produces a stable JSON schema that Section 4 teams depend on:
