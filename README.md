@@ -210,11 +210,23 @@ mcp-factory/
 
 ##Section 4:
 - run python src/generation/section4_select_tools.py
-- It will print your invocables list (reads discovery-output.json)
+- It will print your invocables list (reads discovery-output.json which is a description of what a program can do)
 You optionally remove some by number (user selects which tools are allowed)
 You enter a component name
 It writes: (saves selected-invocables.json) which is the filtered tool list
-artifacts/selected-invocables.json
+artifacts/selected-invocables.json this is the approved list of tools AI is allowed to call, without it section 4 doesnt know what to generate.
+-the command: python3 src/generation/section4_generate_server.py generates runnable wrapper MCP server. satisfies requirement 4b
+  Discovered tools
+• Selected tools
+• Generated MCP architecture
+• Wrapped the executable
+• Launched the server
+test it with curl http://127.0.0.1:5000/tools
+or curl -X POST http://127.0.0.1:5000/invoke \
+-H "Content-Type: application/json" \
+-d '{"tool":"get-account-balance","args":{"accountNumber":"12345"}}'
+in a new terminal window
+
 
 ## Data Contract Stability (for Section 4)
 
