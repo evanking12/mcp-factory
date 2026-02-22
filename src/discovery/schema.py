@@ -59,7 +59,7 @@ class Invocable:
             "kind": self.source_type,
             "confidence": self.confidence,
             "description": self.doc_comment or "",
-            "return_type": self.return_type,
+            "return_type": self.return_type or "unknown",
             "parameters": self._parse_parameters_to_list(),
             "execution": self._get_execution_metadata(),
         }
@@ -176,35 +176,55 @@ class Invocable:
         return result
     
     def _parse_single_parameter(self, param: str, index: int) -> Optional[dict]:
-        """Parse a single parameter into name and type."""
+        """Parse a single parameter into name and type.
+
+        Handles three calling conventions:
+          - C/C++:   ``type name``  or  ``type* name``  (last token = name)
+          - Python:  ``name: type`` or  ``name: type = default``
+          - SQL:     ``@name TYPE`` or  ``name TYPE(n)``  (first token = name)
+        """
         import re
-        
-        # Pattern: type name or type* name or type& name
-        # Examples: "int x", "char* str", "const DWORD& flags"
+
         param = param.strip()
-        
+        if not param:
+            return None
+
         # Remove const, volatile, etc.
-        param = re.sub(r'\b(const|volatile|static|extern)\s+', '', param)
-        
-        # Split into tokens
-        tokens = param.split()
-        if len(tokens) < 2:
-            # No name, or malformed - use positional
-            name = f"arg{index}"
-            c_type = param
-        else:
-            # Last token is typically the name
-            name = tokens[-1].strip('*&')
-            c_type = ' '.join(tokens[:-1])
-        
-        # Map C type to JSON Schema type
-        json_type = self._c_type_to_json_type(c_type)
-        
-        return {
-            "name": name,
-            "c_type": c_type,
-            "json_type": json_type
-        }
+        param = re.sub(r'\b(const|volatile|static|extern)\s+', '', param).strip()
+
+        # Strip default value for name/type extraction only
+        base = param.split('=')[0].strip()
+
+        # ── Python-style: "name: type" ────────────────────────────────────
+        colon_m = re.match(r'^(\w+)\s*:\s*(.+)$', base)
+        if colon_m:
+            name = colon_m.group(1).strip()
+            c_type = colon_m.group(2).strip()
+            return {"name": name, "c_type": c_type, "json_type": self._c_type_to_json_type(c_type)}
+
+        tokens = base.split()
+        if not tokens:
+            return None
+        if len(tokens) == 1:
+            return {"name": f"arg{index}", "c_type": tokens[0],
+                    "json_type": self._c_type_to_json_type(tokens[0])}
+
+        # ── SQL @-prefixed: "@name TYPE" ──────────────────────────────────
+        if tokens[0].startswith('@'):
+            name = tokens[0].lstrip('@')
+            c_type = ' '.join(tokens[1:])
+            return {"name": name, "c_type": c_type, "json_type": self._c_type_to_json_type(c_type)}
+
+        # ── SQL size-constraint: "name TYPE(n)" — last token has parens ───
+        if '(' in tokens[-1]:
+            name = tokens[0].strip('*&')
+            c_type = ' '.join(tokens[1:])
+            return {"name": name, "c_type": c_type, "json_type": self._c_type_to_json_type(c_type)}
+
+        # ── Default: C-style "type name" ──────────────────────────────────
+        name = tokens[-1].strip('*&') or f"arg{index}"
+        c_type = ' '.join(tokens[:-1])
+        return {"name": name, "c_type": c_type, "json_type": self._c_type_to_json_type(c_type)}
     
     def _c_type_to_json_type(self, c_type: str) -> str:
         """Map C/C++ type to JSON Schema type."""
@@ -294,6 +314,184 @@ class Invocable:
                 "endpoint": self.parameters,
                 "interface_uuid": self.signature.split(": ")[-1] if "UUID:" in (self.signature or "") else None,
                 "dll_path": self.dll_path,
+            }
+
+        elif self.source_type == "python_function":
+            return {
+                "method": "python_subprocess",
+                "module_path": self.dll_path,
+                "function_name": self.name,
+                "example": (
+                    f"python -c \""
+                    f"import importlib.util; spec=importlib.util.spec_from_file_location('m',r'{self.dll_path}'); "
+                    f"m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+                    f"print(m.{self.name}(...))\""
+                ),
+            }
+
+        elif self.source_type == "powershell_function":
+            return {
+                "method": "powershell",
+                "script_path": self.dll_path,
+                "function_name": self.name,
+                "example": f"powershell -NoProfile -File \"{self.dll_path}\" # then call {self.name}",
+            }
+
+        elif self.source_type == "batch_label":
+            return {
+                "method": "cmd_call",
+                "script_path": self.dll_path,
+                "label": self.name,
+                "example": f"cmd /c call \"{self.dll_path}\" :{self.name}",
+            }
+
+        elif self.source_type == "shell_function":
+            return {
+                "method": "bash",
+                "script_path": self.dll_path,
+                "function_name": self.name,
+                "example": f"bash -c 'source \"{self.dll_path}\"; {self.name} ...'",
+            }
+
+        elif self.source_type == "ruby_method":
+            return {
+                "method": "ruby",
+                "script_path": self.dll_path,
+                "method_name": self.name,
+                "example": f"ruby -r '{self.dll_path}' -e 'puts {self.name}(...)'",
+            }
+
+        elif self.source_type == "php_function":
+            return {
+                "method": "php",
+                "script_path": self.dll_path,
+                "function_name": self.name,
+                "example": f"php -r \"require '{self.dll_path}'; echo {self.name}(...);\"",
+            }
+
+        elif self.source_type in ("js_function", "js_arrow", "js_module", "cjs_export"):
+            return {
+                "method": "node",
+                "script_path": self.dll_path,
+                "function_name": self.name,
+                "example": f"node -e \"const m=require('{self.dll_path}'); console.log(m.{self.name}(...))\"",
+            }
+
+        elif self.source_type == "js_cli":
+            return {
+                "method": "node",
+                "script_path": self.dll_path,
+                "example": f"node \"{self.dll_path}\" --help",
+            }
+
+        elif self.source_type == "ts_method":
+            return {
+                "method": "ts-node",
+                "script_path": self.dll_path,
+                "function_name": self.name,
+                "example": f"ts-node -e \"const m=require('{self.dll_path}'); console.log(m.{self.name}(...))\"",
+            }
+
+        elif self.source_type in ("vbscript_function", "vbscript_sub"):
+            return {
+                "method": "cscript",
+                "script_path": self.dll_path,
+                "function_name": self.name,
+                "example": f"cscript //nologo \"{self.dll_path}\"",
+            }
+
+        elif self.source_type == "shell_script":
+            return {
+                "method": "bash",
+                "script_path": self.dll_path,
+                "example": f"bash \"{self.dll_path}\"",
+            }
+
+        elif self.source_type == "batch_script":
+            return {
+                "method": "cmd",
+                "script_path": self.dll_path,
+                "example": f"cmd /c \"{self.dll_path}\"",
+            }
+
+        elif self.source_type in ("sql_procedure", "sql_function", "sql_view",
+                                   "sql_table", "sql_trigger"):
+            sql_kind = self.source_type.replace("sql_", "")
+            if sql_kind == "procedure":
+                stmt = self.signature or f"EXEC {self.name}"
+            elif sql_kind == "function":
+                stmt = self.signature or f"SELECT {self.name}(...)"
+            else:
+                stmt = f"SELECT * FROM {self.name}"
+            return {
+                "method": "sql_exec",
+                "connection_required": True,
+                "object_type": sql_kind,
+                "source_file": self.dll_path,
+                "statement": stmt,
+            }
+
+        elif self.source_type == "openapi_operation":
+            # Extract HTTP method + path from signature like "GET /customers({...})"
+            sig = self.signature or ""
+            import re as _re
+            m = _re.match(r'^(?P<http>[A-Z]+)\s+(?P<path>[^(]+)', sig)
+            http_method = m.group("http").lower() if m else "get"
+            path = m.group("path").strip() if m else "/"
+            return {
+                "method": "http_request",
+                "http_method": http_method,
+                "path": path,
+                "content_type": "application/json",
+                "notes": "Call via HTTP against the OpenAPI server base URL",
+            }
+
+        elif self.source_type == "jsonrpc_method":
+            return {
+                "method": "jsonrpc",
+                "rpc_version": "2.0",
+                "method_name": self.name,
+                "transport": "http",
+                "content_type": "application/json",
+                "notes": 'POST {"jsonrpc":"2.0","method":"%s","params":[...],"id":1}' % self.name,
+            }
+
+        elif self.source_type == "soap_operation":
+            interface = self.type_name or ""
+            return {
+                "method": "soap",
+                "transport": "http",
+                "action": self.name,
+                "interface": interface,
+                "content_type": "text/xml; charset=utf-8",
+                "notes": f"SOAP 1.1 document/literal — SOAPAction: {self.name}",
+            }
+
+        elif self.source_type == "corba_method":
+            iface = self.type_name or self.name
+            return {
+                "method": "corba_iiop",
+                "interface": iface,
+                "operation": self.name,
+                "transport": "iiop",
+                "notes": "Invoke via CORBA ORB (e.g. omniORB, JacORB) over IIOP",
+            }
+
+        elif self.source_type.startswith("jndi"):
+            return {
+                "method": "jndi_lookup",
+                "lookup_name": (self.parameters or self.name),
+                "initial_context_factory": "javax.naming.InitialContext",
+                "notes": "Requires a running JNDI provider (LDAP/RMI/IIOP)",
+            }
+
+        elif self.source_type == "pdb_symbol":
+            return {
+                "method": "dll_import",
+                "dll_path": self.dll_path,
+                "function_name": self.name,
+                "source": "pdb_symbols",
+                "notes": "Function resolved from PDB debug symbols",
             }
 
         else:

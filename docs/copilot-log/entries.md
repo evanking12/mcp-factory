@@ -1,5 +1,36 @@
 # Copilot Log Entries
 
+## 2026-02-22 — §2.a Directory Walk — Installed-Instance Target
+
+**Task/Issue:** §2.a required "an installed instance" as a valid input (e.g. `c:\Program Files\AppD\`). `main.py` only accepted a single file. This was the only remaining §2-3 compliance gap.
+
+**Copilot Prompts Used:**
+- "Implement directory scanning in main.py. When --target is a directory, rglob for all files with recognized extensions, classify each, run discovery on each, and aggregate results. Surface it in select_invocables.py. Add a demo target to demo_all_capabilities.py pointing at a directory. Update sections-2-3.md and entries.md, and create ADR-0007."
+
+**Output Accepted:**
+- `RECOGNIZED_EXTENSIONS` frozenset — canonical list of extensions that `classify_file()` handles; used as fast pre-screen before the authoritative content-sniff classification.
+- `analyze_directory(dir_path, out_dir, args)` in `main.py` — rglobs tree, classifies files, calls `main()` recursively (with `sys.argv` swap + `finally` restore) for each file, harvests individual `*_mcp.json` artifacts, writes aggregate `<dir>_scan_mcp.json`.
+- Six-line directory check in `main()` — added immediately after base-name resolution so the existing single-file path is untouched.
+- `select_invocables.py` — changed `--dll` to `--target` in subprocess command; updated `--target` help text to include "or installed directory (e.g. C:\Program Files\AppD\)"; softened "File not found" to "Target not found".
+- `demo_all_capabilities.py` — Section 10 "Directory Scan (§2.a)" passes `tests/fixtures/scripts/` (13 files) as target; aggregate invocable count proves the walk works end-to-end.
+- `docs/sections-2-3.md` — §2.a status updated to ✅, target count 28→29, demo and test-results rows updated.
+- `docs/adr/0007-directory-scan-installed-instance-target.md` — ADR documenting design choices (rglob + RECOGNIZED_EXTENSIONS + classify_file arbitration + recursive main() pattern + per-file sub-dirs + aggregate JSON).
+
+**Manual Changes:**
+- None required — all changes applied cleanly.
+
+**Result:**
+```powershell
+python scripts/demo_all_capabilities.py
+```
+Section 10 "Directory Scan" now appears in the output table.  Aggregate `scripts_scan_mcp.json` is written to `demo_output/unified/scripts/`.
+
+**References:**
+- ADR-0007: `docs/adr/0007-directory-scan-installed-instance-target.md`
+- §2.a spec: "Users must be able to provide the system a copy of the target file or an installed instance."
+
+---
+
 ## 2026-01-19 — Fixture Harness + Robust Parser
 
 **Task/Issue:** Complete discovery pipeline with automated testing, dumpbin auto-detection, robust export parsing, header matching, and tiered outputs.
@@ -385,7 +416,6 @@ python scripts/demo_capabilities.py
 ---
 
 ## 2026-02-22 — Flat Invocable Contract + Selection UI (Sessions 1-4)
-
 **Task/Issue:** Four related issues resolved in one working session:
 1. `discovery-output.json` had too many pipeline-internal fields with no value for Section 4 or LLM invocation
 2. Confidence scoring set the label *before* measuring data — shell32 showed `confidence: "high"` with all four factors `false`
@@ -427,3 +457,116 @@ python -c "from select_invocables import _load_and_merge; ..."  # shell32 hybrid
 - `demo_output/` artifacts are stale (written 2026-01-27 with old schema). Delete and re-run `scripts/demo_capabilities.py` before next demo
 - `calling_convention: "stdcall"` is technically wrong on x64 (single ABI) — low priority, Section 4 ignores it
 - Section 2.b description hint highlights rows but does not yet feed back into confidence scoring — deferred post-MVP
+
+---
+
+## 2026-02-22 — Multi-Language Binary Support (Sections 2 & 3 expansion)
+
+**Task/Issue:** The pipeline only handled PE DLL/EXE, .NET, and COM targets. Scripting-language files (.py, .ps1, .bat, .vbs, .sh) were classified as `SCRIPT` by `classify.py` but had **no analyzer wired in `main.py`** — they fell through to PE export extraction and produced zero output. SQL, JavaScript, TypeScript, Ruby, and PHP were completely absent from both the classifier and the pipeline.
+
+**Copilot Prompts Used:**
+- "Read entries.md and the project description. Identify every binary/file type required by the spec that the current pipeline does not yet handle. Propose a phased implementation plan that gets Section 2 (target acceptance) and Section 3 (invocable display) working for all types. Defer the EXE GUI scanner to last because of complexity."
+- "Extend the FileType enum in classify.py with dedicated variants for PYTHON_SCRIPT, POWERSHELL_SCRIPT, BATCH_SCRIPT, VBSCRIPT, SHELL_SCRIPT, JAVASCRIPT, TYPESCRIPT, RUBY_SCRIPT, PHP_SCRIPT, SQL_FILE. Update classify_file() to perform extension-based routing for all new types before the PE magic-byte check."
+- "Create script_analyzer.py. Python: AST-based extraction of public def functions and async functions, skipping _private helpers. Extract type annotations, default values, docstrings. PowerShell: regex for function Verb-Noun declarations with param() blocks and .SYNOPSIS comment-based help. Batch/CMD: :label targets with leading REM comments. VBScript: Sub and Function declarations. Shell: function declarations from .sh/.bash/.zsh files with leading # comments. Ruby: def method_name patterns with comment docs. PHP: function/method declarations with PHPDoc blocks and return type hints."
+- "Create sql_analyzer.py. Regex-based extraction of CREATE PROCEDURE, FUNCTION, VIEW, TABLE, TRIGGER from T-SQL (SQL Server), PL/pgSQL (Postgres), and ANSI SQL. Handle parenthesised params (ANSI/PL/pgSQL) AND T-SQL bare @param TYPE style (before AS/BEGIN). Support nested types like VARCHAR(20) and DECIMAL(10,2). Extract -- line comments and /* */ block comments as doc strings."
+- "Create js_analyzer.py for JavaScript and TypeScript. Extract: named function declarations, const/let arrow functions, TypeScript class methods with visibility modifiers, CommonJS module.exports. Parse JSDoc blocks (/** */) for @param and @returns. Detect CLI entry-points via shebang, process.argv, or commander/yargs imports. Assign confidence: guaranteed (exported+JSDoc+return type), high, medium, low."
+- "Wire all new analyzers into main.py. Add analyze_scripting_language() shared pipeline function that calls the right sub-analyzer, writes Markdown + MCP JSON, and prints a summary. Add _SCRIPT_DISPATCH dict mapping each new FileType to (label, analyzer_fn, source_type). Update routing in main() to route any FileType in _SCRIPT_DISPATCH to analyze_scripting_language(). Rename --dll argument to --dll/--target (dest=dll) so users can supply any file type."
+
+**Output Accepted:**
+- `src/discovery/classify.py` — 11 new `FileType` enum variants; extension dispatch before PE magic check
+- `src/discovery/script_analyzer.py` — NEW (350 lines): Python/AST, PowerShell, Batch, VBScript, Shell, Ruby, PHP analyzers
+- `src/discovery/sql_analyzer.py` — NEW (200 lines): T-SQL + PL/pgSQL + ANSI SQL; depth-counted paren balancer; T-SQL bare @param style
+- `src/discovery/js_analyzer.py` — NEW (290 lines): JS/TS function/arrow/method extraction; JSDoc parser; CLI detection
+- `src/discovery/main.py` — `_SCRIPT_DISPATCH` dict; `analyze_scripting_language()` function; `--dll/--target` alias; updated ANALYZER_REGISTRY
+
+**Manual Changes:**
+- None — all output accepted after smoke testing
+
+**Smoke Test Results:**
+```
+Python:  2 invocables — compress() [guaranteed], decompress() [guaranteed]
+SQL:     4 objects   — GetCustomerById EXEC (T-SQL params correct), FormatPhone SELECT (VARCHAR(20) correct),
+                       GetOrders (DECIMAL(10,2) correct), ActiveOrders VIEW
+JS:      2 invocables — greet() [guaranteed, JSDoc+export], add() [medium]
+```
+- Python `_internal_helper` correctly excluded (leading `_`)
+- SQL cross-object param contamination fixed with `next_ddl` window constraint
+- SQL nested-paren types fixed with depth-counting `_extract_balanced_parens()`
+
+**Notes:**
+- PE EXE GUI scanner (Windows message loop enumeration for invocable menus/dialogs) intentionally deferred — highest complexity, lowest ROI for current milestone
+- Ruby and PHP analyzers are regex-based (no AST); sufficient for invocable discovery but won't handle metaprogramming
+- TypeScript is routed to `analyze_js` — same JS analyzer handles both; `.ts`/`.tsx` files get an `is_ts=True` flag that enables class-method extraction
+
+**Files Created:**
+- `src/discovery/script_analyzer.py` (350 lines)
+- `src/discovery/sql_analyzer.py` (200 lines)
+- `src/discovery/js_analyzer.py` (290 lines)
+
+**Files Modified:**
+- `src/discovery/classify.py`: +13 FileType variants, +15 extension dispatch lines
+- `src/discovery/main.py`: +100 lines (`_SCRIPT_DISPATCH`, `analyze_scripting_language`, `--target` alias, import additions)
+
+---
+
+## 2026-02-22 — Spec-Gap Closure: Legacy Protocol & Spec-Format Analyzers
+
+**Task/Issue:** Five invocable source types required by the project specification (§1) had no analyzer: JNDI, SOAP/WSDL, CORBA IDL, OpenAPI/JSON-RPC, and PDB symbols. `sections-2-3.md` explicitly listed them under "What's Not Supported Yet". Additionally `notepad.exe` — a zero-invocable GUI EXE — was still present in `demo_all_capabilities.py`, violating ADR-0005 Strict Hygiene. Also fixed a JS param-naming bug where positional fallback names (`arg0`/`arg1`) were emitted instead of JSDoc `@param` names.
+
+**Copilot Prompts Used:**
+- "The pipeline is missing five invocable surface types required by spec §1: JNDI, SOAP/WSDL, CORBA IDL, OpenAPI/JSON-RPC, and PDB symbols. Do all of them. For each: create a new analyzer module in src/discovery/, add the corresponding FileType variant(s) to classify.py, wire the analyzer into the _SCRIPT_DISPATCH dict in main.py, add execution metadata branches to schema.py._get_execution_metadata(), and create a realistic fixture file under tests/fixtures/scripts/. The analyzers should follow the same public-API pattern as script_analyzer.py: a single analyze_X(path: Path) -> List[Invocable] function."
+- "Create a standalone demo script scripts/demo_legacy_protocols.py that runs all six new targets (sample_openapi.yaml, sample_jsonrpc.json, sample.wsdl, sample.idl, sample.jndi, zstd.pdb), validates each JSON output for correct structure (invocables[] present, all key fields populated, no execution.method='unknown'), prints a pass/fail table, and exits non-zero on any failure. Once that passes 6/6, integrate all six targets into demo_all_capabilities.py as a new Section 9 titled 'Legacy Protocols & Spec Formats'. Also remove notepad.exe from the PE EXEs section — it is a zero-invocable GUI binary and violates ADR-0005 hygiene policy."
+- "Audit the JSON output for each new analyzer. Verify that every invocable has a non-empty description, real parameter names (not arg0/arg1), a concrete execution.method value, and the correct source_type tag. Also check select_invocables.py to ensure _KIND_LABELS has human-readable entries for all six new file-type suffixes so the interactive UI displays them correctly rather than falling through to the raw key."
+
+**Output Accepted:**
+- `src/discovery/openapi_analyzer.py` — NEW: OpenAPI 3.x/Swagger 2.x YAML+JSON and JSON-RPC 2.0; emits `openapi_operation` and `jsonrpc_method`
+- `src/discovery/wsdl_analyzer.py` — NEW: SOAP/WSDL 1.1 XML via lxml; emits `soap_operation`
+- `src/discovery/idl_analyzer.py` — NEW: CORBA IDL regex parser with module/interface namespacing, oneway, in/out/inout params, doc-comment extraction via line-number alignment; emits `corba_method`
+- `src/discovery/jndi_analyzer.py` — NEW: JNDI `.properties`/`.jndi` and Spring XML; 8 binding subtypes; emits `jndi_*`
+- `src/discovery/pdb_analyzer.py` — NEW: `dbghelp.dll` ctypes enumeration of PDB public symbols; emits `pdb_symbol`
+- `tests/fixtures/scripts/sample_openapi.yaml` — 9 operations (Customer CRUD + Orders + Support + Analytics)
+- `tests/fixtures/scripts/sample_jsonrpc.json` — 5 JSON-RPC methods (calculator/currency)
+- `tests/fixtures/scripts/sample.wsdl` — 7 WSDL 1.1 operations (ContosoCustomerService)
+- `tests/fixtures/scripts/sample.idl` — 3 CORBA interfaces × 4–5 methods = 12 total
+- `tests/fixtures/scripts/sample.jndi` — 12 JNDI bindings (JDBC, JMS, mail, RMI, EJB, LDAP)
+- `scripts/demo_legacy_protocols.py` — Standalone 6-target verification suite
+- `src/discovery/classify.py` — 6 new FileType enum values + detection logic
+- `src/discovery/main.py` — 5 new imports, 6 `_SCRIPT_DISPATCH` entries, 5 `ANALYZER_REGISTRY` entries
+- `src/discovery/schema.py` — 6 new `_get_execution_metadata()` branches (no `method=unknown` for any new type)
+- `src/ui/select_invocables.py` — `_KIND_LABELS` extended for all 6 new file type suffixes
+- `scripts/demo_all_capabilities.py` — `notepad.exe` removed; Section 9 "Legacy Protocols & Spec Formats" added
+- `src/discovery/js_analyzer.py` — Fixed `_JSDOC_PARAM_RE` to capture `type` group and handle `[name=default]`; `_make_invocable` now uses JSDoc param names instead of positional `arg0/arg1` fallback
+
+**Manual Changes:**
+- None — all output accepted after smoke testing and bug fixes within session
+
+**Bug Fixes Applied During Session:**
+1. **f-string backslash** (`openapi_analyzer.py`): Python <3.12 disallows `\W` inside f-strings — extracted as module constant `_NON_WORD = re.compile(r'\W')`
+2. **lxml Comment node crash** (`wsdl_analyzer.py`): `_local(tag)` called `in` on a callable when the lxml node was a Comment/PI — added `isinstance(tag, str)` guard
+3. **Demo validator key** (`demo_legacy_protocols.py`): Was checking `tools[]` instead of `invocables[]` in JSON output
+4. **IDL IndentationError** (`idl_analyzer.py`): Last edit of the session introduced wrong indentation; fixed by restoring `ret_type`/`params_str`/`sig` assignments at correct indent level inside the method loop
+
+**Result:**
+```
+python scripts/demo_legacy_protocols.py
+→ 6/6 PASS
+   sample_openapi.yaml   |  9 invocables | GUARANTEED
+   sample_jsonrpc.json   |  5 invocables | GUARANTEED
+   sample.wsdl           |  7 invocables | GUARANTEED
+   sample.idl            | 12 invocables | GUARANTEED
+   sample.jndi           | 12 invocables | HIGH
+   zstd.pdb              | 871 invocables | LOW
+
+python scripts/demo_all_capabilities.py
+→ 28/28 PASS across 9 sections (up from 23/23 across 8 sections)
+```
+
+**Notes:**
+- PDB confidence is `low` by design — C public symbols carry no type decorations; filtering to `SymTagFunction` tag=5 would reduce count but not improve confidence
+- CORBA IDL doc extraction uses line-number alignment between clean (comment-stripped) and original source, relying on `_strip_comments()` preserving newline counts
+- `sections-2-3.md` updated: "What's Not Supported Yet" section cleared; demo count updated to 28/28
+- ADR-0006 documents all design decisions for this session
+
+**References:**
+- ADR-0006: `docs/adr/0006-spec-gap-closure-legacy-protocol-analyzers.md`
+- dbghelp SymEnumSymbols: https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symenumsymbols

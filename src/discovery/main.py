@@ -24,14 +24,30 @@ from com_scan import scan_com_registry, com_objects_to_invocables
 from import_analyzer import analyze_imports, format_capabilities_summary
 from rpc_analyzer import analyze_rpc, rpc_to_invocables, format_rpc_summary
 from cli_analyzer import analyze_cli
+from script_analyzer import analyze_script
+from sql_analyzer import analyze_sql
+from js_analyzer import analyze_js
+from openapi_analyzer import analyze_openapi
+from wsdl_analyzer import analyze_wsdl
+from idl_analyzer import analyze_idl
+from jndi_analyzer import analyze_jndi
+from pdb_analyzer import analyze_pdb
 
 # Plugin-based analyzer registry
 ANALYZER_REGISTRY = {
-    'pe_dll': {'name': 'PE DLL Analyzer', 'enabled': True},
-    'pe_exe': {'name': 'PE EXE Analyzer', 'enabled': True},
-    'dotnet': {'name': '.NET Assembly Analyzer', 'enabled': True},
-    'com': {'name': 'COM Registry Analyzer', 'enabled': True},
-    'cli': {'name': 'CLI Tool Analyzer', 'enabled': True},
+    'pe_dll':   {'name': 'PE DLL Analyzer',        'enabled': True},
+    'pe_exe':   {'name': 'PE EXE Analyzer',         'enabled': True},
+    'dotnet':   {'name': '.NET Assembly Analyzer',  'enabled': True},
+    'com':      {'name': 'COM Registry Analyzer',   'enabled': True},
+    'cli':      {'name': 'CLI Tool Analyzer',        'enabled': True},
+    'script':   {'name': 'Script Analyzer',          'enabled': True},
+    'sql':      {'name': 'SQL Analyzer',             'enabled': True},
+    'js':       {'name': 'JavaScript Analyzer',      'enabled': True},
+    'openapi':  {'name': 'OpenAPI/JSON-RPC Analyzer','enabled': True},
+    'wsdl':     {'name': 'SOAP/WSDL Analyzer',       'enabled': True},
+    'idl':      {'name': 'CORBA IDL Analyzer',       'enabled': True},
+    'jndi':     {'name': 'JNDI Config Analyzer',     'enabled': True},
+    'pdb':      {'name': 'PDB Symbol Analyzer',      'enabled': True},
 }
 
 
@@ -430,6 +446,242 @@ def analyze_com_object(dll_path: Path, out_dir: Path, base_name: str, args) -> i
     return 0
 
 
+# -------------------------------------------------------------------------
+# JIT / scripting language pipeline  (Python, PS1, Batch, VBS, Shell,
+#                                     SQL, JavaScript, TypeScript)
+# -------------------------------------------------------------------------
+
+# Map FileType → (human label, analyzer function, source_type tag)
+_SCRIPT_DISPATCH = {
+    FileType.PYTHON_SCRIPT:      ('Python script',       analyze_script, 'python_function'),
+    FileType.POWERSHELL_SCRIPT:  ('PowerShell script',   analyze_script, 'powershell_function'),
+    FileType.BATCH_SCRIPT:       ('Batch script',        analyze_script, 'batch_label'),
+    FileType.VBSCRIPT:           ('VBScript',            analyze_script, 'vbscript_function'),
+    FileType.SHELL_SCRIPT:       ('Shell script',        analyze_script, 'shell_function'),
+    FileType.JAVASCRIPT:         ('JavaScript module',   analyze_js,     'js_function'),
+    FileType.TYPESCRIPT:         ('TypeScript module',   analyze_js,     'ts_method'),
+    FileType.RUBY_SCRIPT:        ('Ruby script',         analyze_script, 'ruby_function'),
+    FileType.PHP_SCRIPT:         ('PHP script',          analyze_script, 'php_function'),
+    FileType.SQL_FILE:           ('SQL source file',     analyze_sql,    'sql_procedure'),
+    FileType.OPENAPI_SPEC:       ('OpenAPI spec',        analyze_openapi,'openapi_operation'),
+    FileType.JSONRPC_SPEC:       ('JSON-RPC descriptor', analyze_openapi,'jsonrpc_method'),
+    FileType.WSDL_FILE:          ('WSDL service desc.',  analyze_wsdl,   'soap_operation'),
+    FileType.CORBA_IDL:          ('CORBA IDL file',      analyze_idl,    'corba_method'),
+    FileType.JNDI_CONFIG:        ('JNDI config file',    analyze_jndi,   'jndi_lookup'),
+    FileType.PDB_FILE:           ('PDB symbols file',    analyze_pdb,    'pdb_symbol'),
+}
+
+# ── Directory scan ────────────────────────────────────────────────────────────
+# Extensions for which classify_file() returns something other than UNKNOWN.
+# Used to filter rglob results when the --target is a directory.
+RECOGNIZED_EXTENSIONS: frozenset = frozenset({
+    # PE binaries / type libraries
+    '.dll', '.exe', '.tlb', '.olb',
+    # JIT / scripting languages
+    '.py', '.ps1', '.bat', '.cmd', '.vbs',
+    '.sh', '.bash', '.zsh',
+    '.js', '.mjs', '.cjs', '.ts', '.tsx', '.mts',
+    '.rb', '.php', '.sql',
+    # Protocol / spec descriptors
+    '.yaml', '.yml', '.wsdl', '.idl', '.jndi', '.properties', '.pdb',
+    # Content-sniffed types — classify_file() peeks inside these
+    '.json', '.xml',
+})
+
+
+def analyze_directory(dir_path: Path, out_dir: Path, args) -> int:
+    """Walk *dir_path*, analyze every recognized file, and write an aggregate
+    ``<dir>_scan_mcp.json`` that merges all discovered invocables.
+
+    Each file is analyzed in its own sub-directory under *out_dir* so
+    individual artifacts are preserved.  The combined output lets
+    ``select_invocables.py`` work on the entire directory at once.
+
+    §2.a compliance — "Users must be able to provide the system a copy of
+    the target file **or an installed instance**."  This function handles
+    the installed-instance (directory) case.
+    """
+    import json as _json
+    from datetime import datetime as _dt
+
+    logger.info("Directory scan: %s", dir_path)
+    print(f"\n{'='*60}")
+    print(f"  Directory Scan: {dir_path}")
+    print(f"{'='*60}\n")
+
+    # ── Collect recognized files ──────────────────────────────────────────────
+    candidates: list = []
+    for f in sorted(dir_path.rglob('*')):
+        if not f.is_file():
+            continue
+        if f.suffix.lower() not in RECOGNIZED_EXTENSIONS:
+            continue
+        ft = classify_file(f)
+        if ft == FileType.UNKNOWN:
+            continue
+        candidates.append((f, ft))
+
+    if not candidates:
+        print(f"  No recognized files found in {dir_path}")
+        return 0
+
+    print(f"  Found {len(candidates)} recognized file(s):\n")
+    for fp, ft in candidates:
+        print(f"    {fp.name}  [{ft.value}]")
+    print()
+
+    dir_base = dir_path.name   # e.g. "scripts" or "AppD"
+    all_invocables: list = []
+    source_files: list = []
+
+    # ── Per-file sub-analysis ─────────────────────────────────────────────────
+    for file_path, file_type in candidates:
+        # Unique sub-dir per file; use stem to keep names readable
+        sub_out = out_dir / file_path.stem
+        sub_out.mkdir(parents=True, exist_ok=True)
+
+        try:
+            rel = file_path.relative_to(dir_path)
+        except ValueError:
+            rel = Path(file_path.name)
+        print(f"  \u27a4 {rel}  ({file_type.value})")
+
+        # Re-invoke main() with sys.argv targeting this individual file
+        saved_argv = sys.argv[:]
+        try:
+            sys.argv = [
+                "main.py",
+                "--target", str(file_path),
+                "--out",    str(sub_out),
+            ]
+            main()
+        except SystemExit:
+            pass
+        except Exception as exc:
+            logger.warning("Analysis failed for %s: %s", file_path.name, exc)
+            print(f"    [WARN] {exc}")
+        finally:
+            sys.argv = saved_argv
+
+        # Harvest all *_mcp.json written in sub_out
+        file_invocables: list = []
+        for mcp_json in sorted(sub_out.glob('*_mcp.json')):
+            try:
+                with open(mcp_json, encoding='utf-8') as fh:
+                    data = _json.load(fh)
+                file_invocables.extend(data.get('invocables', []))
+            except Exception:
+                pass
+
+        all_invocables.extend(file_invocables)
+        source_files.append({
+            'file':          str(file_path.name),
+            'relative_path': str(rel),
+            'type':          file_type.value,
+            'count':         len(file_invocables),
+        })
+
+    # ── Write aggregate MCP JSON ──────────────────────────────────────────────
+    agg_path = out_dir / f"{dir_base}_scan_mcp.json"
+    agg_payload = {
+        "metadata": {
+            "target_name":   dir_path.name,
+            "target_path":   str(dir_path),
+            "analysis_type": "directory_scan",
+            "generated_at":  _dt.utcnow().isoformat() + "Z",
+            "file_count":    len(candidates),
+            "source_files":  source_files,
+        },
+        "invocables": all_invocables,
+        "summary": {
+            "total_invocables":      len(all_invocables),
+            "files_analyzed":        len(candidates),
+            "files_with_invocables": sum(1 for s in source_files if s['count'] > 0),
+            "confidence_breakdown":  {
+                level: sum(
+                    1 for inv in all_invocables
+                    if inv.get('confidence') == level
+                )
+                for level in ('guaranteed', 'high', 'medium', 'low')
+            },
+        },
+    }
+    with open(agg_path, 'w', encoding='utf-8') as fh:
+        _json.dump(agg_payload, fh, indent=2, ensure_ascii=False)
+
+    print(f"\n  Directory Scan Complete")
+    print(f"  Files analysed:      {len(candidates)}")
+    print(f"  Total invocables:    {len(all_invocables)}")
+    print(f"  Aggregate MCP JSON:  {agg_path}")
+    return 0
+
+
+def analyze_scripting_language(target: Path, out_dir: Path, base_name: str,
+                               file_type: FileType) -> int:
+    """Shared pipeline for all JIT / scripting / query file types.
+
+    Calls the appropriate sub-analyzer, writes Markdown + MCP JSON output,
+    and prints a summary.  Returns 0 on success, 1 on failure.
+    """
+    label, analyzer_fn, _ = _SCRIPT_DISPATCH[file_type]
+    logger.info("Analyzing %s: %s", label, target.name)
+
+    with Spinner(f"Analyzing {label} capabilities"):
+        invocables = analyzer_fn(target)
+
+    if not invocables:
+        logger.warning("No invocables detected in %s", target.name)
+        print(f"\nNo invocables found in {target.name}")
+        return 0
+
+    # --- Markdown report ---
+    md_path = out_dir / f"{base_name}_{file_type.value.lower()}.md"
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write(f"# {label} Analysis: {target.name}\n\n")
+        f.write(f"Total invocables detected: {len(invocables)}\n\n")
+        # Confidence breakdown
+        by_conf: dict = {}
+        for inv in invocables:
+            by_conf.setdefault(inv.confidence, []).append(inv)
+        for lvl in ('guaranteed', 'high', 'medium', 'low'):
+            if lvl in by_conf:
+                f.write(f"| Confidence | Count |\n|---|---|\n")
+                break
+        for lvl in ('guaranteed', 'high', 'medium', 'low'):
+            if lvl in by_conf:
+                f.write(f"| {lvl.capitalize()} | {len(by_conf[lvl])} |\n")
+        f.write("\n")
+
+        # Invocable detail
+        for inv in invocables:
+            f.write(f"## {inv.name}\n\n")
+            f.write(f"**Signature:** `{inv.signature}`\n\n")
+            if inv.doc_comment:
+                f.write(f"**Description:** {inv.doc_comment}\n\n")
+            if inv.parameters:
+                f.write(f"**Parameters:** `{inv.parameters}`\n\n")
+            if inv.return_type:
+                f.write(f"**Returns:** `{inv.return_type}`\n\n")
+            f.write(f"**Confidence:** {inv.confidence}\n\n")
+
+    # --- MCP JSON ---
+    mcp_path = out_dir / f"{base_name}_{file_type.value.lower()}_mcp.json"
+    write_invocables_json(
+        mcp_path,
+        invocables,
+        dll_path=target,
+        tier=4,
+        schema_version="2.0.0",
+    )
+
+    logger.info("Results written to %s", out_dir)
+    print(f"\n{label} Analysis Complete")
+    print(f"Invocables found: {len(invocables)}")
+    print(f"Markdown: {md_path}")
+    print(f"MCP JSON: {mcp_path}")
+    return 0
+
+
 def analyze_cli_tool(exe_path: Path, out_dir: Path, base_name: str, args) -> int:
     """CLI tool analysis pipeline."""
     with Spinner("Analyzing CLI capabilities"):
@@ -480,13 +732,22 @@ def main():
     """Main entry point."""
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
     parser = argparse.ArgumentParser(
-        description="Advanced DLL Export Analyzer - Generate MCP schemas from Windows binaries"
+        description=(
+            "MCP Factory — Binary/Executable/Script Analyzer. "
+            "Accepts DLLs, EXEs, .NET assemblies, COM objects, SQL files, "
+            "Python, PowerShell, JavaScript, TypeScript, Batch, VBScript, "
+            "Shell scripts, and more."
+        )
     )
 
     # Required arguments (one of)
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument(
-        "--dll", type=Path, help="Path to DLL file to analyze"
+        "--dll", "--target",
+        dest="dll",
+        type=Path,
+        metavar="TARGET",
+        help="Path to any target file to analyze (DLL, EXE, .py, .ps1, .sql, .js, .ts, etc.)",
     )
     input_group.add_argument(
         "--exports-raw",
@@ -566,6 +827,11 @@ def main():
     if args.tag:
         base_name = f"{base_name}_{args.tag}"
 
+    # ── §2.a: Accept installed directory (c:\Program Files\AppD\) ────────────
+    if dll_path and dll_path.is_dir():
+        return analyze_directory(dll_path, out_dir, args)
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Detect file type and route to appropriate analyzer
     file_type = None
     if dll_path and dll_path.exists():
@@ -584,15 +850,18 @@ def main():
         elif file_type == FileType.PE_EXE:
             logger.info("Analyzing PE executable (try CLI)...")
             analyze_cli_tool(dll_path, out_dir, base_name, args)
-            
+        elif file_type in _SCRIPT_DISPATCH:
+            # JIT / scripting / query file — route to language-specific analyzer
+            logger.info("Routing to scripting language analyzer: %s", file_type.value)
+            return analyze_scripting_language(dll_path, out_dir, base_name, file_type)
+
         # For PE files (DLL or EXE) that weren't classified as COM_OBJECT,
         # still check if they are registered as COM servers (InProc or LocalServer).
         if file_type in [FileType.PE_DLL, FileType.PE_EXE]:
-             # We use a try-except block or just call it, but verify checks to avoid double-logging
              # analyze_com_object is safe to call, it checks registry
              logger.info("Checking for associated COM objects (Registry)...")
              analyze_com_object(dll_path, out_dir, base_name, args)
-             
+
         # Otherwise fall through to native DLL analysis
 
     # Phase 1: Get raw exports

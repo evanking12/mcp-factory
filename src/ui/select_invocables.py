@@ -66,11 +66,21 @@ console = Console()
 
 # Friendly label for each output file suffix that main.py produces
 _KIND_LABELS = {
-    "exports":     "native exports",
-    "com_objects": "COM interfaces",
-    "cli":         "CLI commands",
-    "dotnet_methods": ".NET methods",
-    "rpc":         "RPC interfaces",
+    "exports":          "native exports",
+    "com_objects":      "COM interfaces",
+    "cli":              "CLI commands",
+    "dotnet_methods":   ".NET methods",
+    "rpc":              "RPC interfaces",
+    # Legacy protocol / spec analyzers
+    "openapi_spec":              "OpenAPI operations",
+    "openapi_openapi_spec":      "OpenAPI operations",
+    "jsonrpc_spec":              "JSON-RPC methods",
+    "jsonrpc_jsonrpc_spec":      "JSON-RPC methods",
+    "sample_jsonrpc_jsonrpc_spec": "JSON-RPC methods",
+    "wsdl_file":                 "SOAP operations",
+    "corba_idl":                 "CORBA methods",
+    "jndi_config":               "JNDI bindings",
+    "pdb_file":                  "PDB symbols",
 }
 
 
@@ -90,13 +100,15 @@ def run_discovery(target: Path, description: Optional[str]) -> dict:
     """Run src/discovery/main.py on *target*, collect ALL output JSONs,
     notify the user about hybrid files, and return a single merged data dict."""
     console.print(f"\n[bold cyan]Running discovery on:[/] {target}\n")
-    cmd = [sys.executable, str(MAIN_PY), "--dll", str(target), "--out", str(ARTIFACTS_DIR)]
+    cmd = [sys.executable, str(MAIN_PY), "--target", str(target), "--out", str(ARTIFACTS_DIR)]
     result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
     if result.returncode != 0:
         console.print("[red]Discovery failed — check output above.[/]")
         sys.exit(1)
 
-    # Collect ALL *_mcp.json files written for this target stem
+    # Collect ALL *_mcp.json files written for this target stem.
+    # For a directory target the aggregate is <dir>_scan_mcp.json; for a
+    # single file it is <stem>_*_mcp.json — both are found by the glob below.
     candidates = sorted(
         ARTIFACTS_DIR.glob(f"{target.stem}*_mcp.json"),
         key=lambda p: p.stat().st_mtime,
@@ -491,8 +503,10 @@ def main():
         description="MCP Factory — Sections 2-3: specify binary and select invocables"
     )
     src = parser.add_mutually_exclusive_group(required=True)
-    src.add_argument("--target", type=Path, metavar="FILE",
-                     help="Binary to analyse (runs discovery first; .dll/.exe/.tlb)")
+    src.add_argument("--target", type=Path, metavar="FILE_OR_DIR",
+                     help="Binary / script to analyse, or an installed directory "
+                          "(e.g. C:\\\\Program Files\\\\AppD\\\\).  "
+                          "Runs discovery first; .dll/.exe/.tlb/scripts/etc. accepted.")
     src.add_argument("--input", type=Path, metavar="JSON",
                      help="Existing discovery-output JSON (skip discovery)")
     parser.add_argument("--description", "-d", type=str, default="",
@@ -505,7 +519,7 @@ def main():
 
     if args.target:
         if not args.target.exists():
-            console.print(f"[red]File not found:[/] {args.target}")
+            console.print(f"[red]Target not found:[/] {args.target}")
             sys.exit(1)
         data = run_discovery(args.target, args.description or None)
     else:
