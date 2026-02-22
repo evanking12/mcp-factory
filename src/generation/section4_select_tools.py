@@ -12,7 +12,7 @@ def load_discovery(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    for key in ["schema_version", "metadata", "invocables"]:
+    for key in ["metadata", "invocables"]:
         if key not in data:
             raise ValueError(f"Discovery JSON missing required key: {key}")
 
@@ -32,7 +32,7 @@ def print_invocables(invocables: list) -> None:
         name = inv.get("name", "unknown")
         kind = inv.get("kind", "unknown")
         conf = inv.get("confidence", "unknown")
-        summary = (inv.get("documentation") or {}).get("summary", "")
+        summary = inv.get("description", "")
         line = f"{i}. {name}  kind={kind}  confidence={conf}"
         if summary:
             line += f"  summary={summary}"
@@ -90,7 +90,6 @@ def main() -> None:
         component_name = suggested
 
     output = {
-        "schema_version": discovery["schema_version"],
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "component_name": component_name,
         "metadata": metadata,

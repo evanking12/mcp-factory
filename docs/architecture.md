@@ -9,9 +9,9 @@ Generate an MCP server/tool schema from existing binaries (DLL/EXE/CLI/repo) by 
    - Detects all capabilities: Native Exports (`.dll`), COM Server (`HKCR`), .NET Assembly (`CLR`), CLI Tool (`.exe`)
    - Supports multi-paradigm files (e.g., `shell32.dll` = COM + Native)
 3. Discover invocable surfaces (exports/help/registry/etc.)
-4. **Score confidence** in each surface (6-factor analysis)
+4. **Score confidence** in each surface (4-factor analysis; label derived after data is measured)
 5. **Strict Artifact Generation**
-   - Output normalized MCP JSON v2.0 (`*_mcp.json`)
+   - Output normalized MCP JSON (`*_mcp.json`) using flat invocable contract
    - Suppress empty/invalid outputs ("Silence is Golden")
 6. User selects subset -> `selection.json`
 7. Generate MCP tools/server + deploy verification instance

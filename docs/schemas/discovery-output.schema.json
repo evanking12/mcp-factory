@@ -1,15 +1,9 @@
-{
+﻿{
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "MCP Factory Discovery Output",
-  "version": "2.0.0",
-  "description": "Stable JSON schema for binary discovery pipeline output. Consumed by Section 4 (MCP generation) and Section 5 (verification UI). This schema is designed to be forward-compatible - new fields can be added without breaking existing consumers.",
+  "description": "Stable JSON schema for binary discovery pipeline output. Consumed by Section 4 (MCP generation) and Section 5 (verification UI).",
   "type": "object",
   "properties": {
-    "schema_version": {
-      "type": "string",
-      "description": "Schema version for compatibility tracking",
-      "const": "2.0.0"
-    },
     "metadata": {
       "type": "object",
       "description": "Information about the analyzed binary and pipeline execution",
@@ -24,12 +18,12 @@
         },
         "target_type": {
           "type": "string",
-          "enum": ["dll", "exe", "sys", "ocx", "unknown"],
+          "enum": ["dll", "exe", "sys", "ocx", "tlb", "olb", "unknown"],
           "description": "Binary type"
         },
         "architecture": {
-          "type": "string",
-          "enum": ["x86", "x64", "arm64", "unknown"],
+          "type": ["string", "null"],
+          "enum": ["x86", "x64", "arm64", "unknown", null],
           "description": "Target architecture"
         },
         "file_size_bytes": {
@@ -51,16 +45,10 @@
         },
         "pipeline_version": {
           "type": "string",
-          "description": "Discovery pipeline version (for debugging)"
-        },
-        "tier": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 5,
-          "description": "Analysis tier achieved (1=best, 5=metadata only)"
+          "description": "Discovery pipeline version"
         }
       },
-      "required": ["target_path", "target_name", "target_type", "analysis_timestamp", "schema_version", "tier"]
+      "required": ["target_path", "target_name", "analysis_timestamp"]
     },
     "invocables": {
       "type": "array",
@@ -70,204 +58,88 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "Function/command name (mangled or unmangled)"
+            "description": "Function or command name"
           },
           "kind": {
             "type": "string",
-            "enum": ["dll_export", "cli_command", "com_method", "dotnet_method", "unknown"],
+            "enum": ["export", "cli", "com", "dotnet", "rpc", "cli_command", "unknown"],
             "description": "Type of invocable"
-          },
-          "ordinal": {
-            "type": ["integer", "null"],
-            "description": "Export ordinal (DLL exports only, 1-based)"
-          },
-          "rva": {
-            "type": ["string", "null"],
-            "pattern": "^(0x[0-9a-fA-F]+)?$",
-            "description": "Relative Virtual Address (DLL exports only)"
           },
           "confidence": {
             "type": "string",
-            "enum": ["high", "medium", "low"],
-            "description": "Invokability confidence based on available metadata"
+            "enum": ["guaranteed", "high", "medium", "low"],
+            "description": "Invocability confidence. guaranteed=full header match; high=partial match; medium=name/pattern only; low=name only"
           },
-          "confidence_factors": {
-            "type": "object",
-            "description": "Breakdown of what contributed to confidence score",
-            "properties": {
-              "has_signature": {
-                "type": "boolean",
-                "description": "Function signature found in headers"
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of what this invocable does. Empty string if not available."
+          },
+          "return_type": {
+            "type": ["string", "null"],
+            "description": "Return type (e.g. 'size_t', 'HRESULT', 'string', null if unknown)"
+          },
+          "parameters": {
+            "type": "array",
+            "description": "Ordered list of parameters. Empty array if none or unknown.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "description": "Parameter name" },
+                "type": { "type": "string", "description": "JSON-compatible type: string, integer, number, boolean" },
+                "required": { "type": "boolean", "description": "Whether parameter is required" },
+                "description": { "type": "string", "description": "Original C/native type or description" }
               },
-              "has_documentation": {
-                "type": "boolean",
-                "description": "Documentation comment found"
-              },
-              "has_parameters": {
-                "type": "boolean",
-                "description": "Parameter types known"
-              },
-              "has_return_type": {
-                "type": "boolean",
-                "description": "Return type known"
-              },
-              "is_forwarded": {
-                "type": "boolean",
-                "description": "Export forwarded to another DLL"
-              },
-              "is_ordinal_only": {
-                "type": "boolean",
-                "description": "Export by ordinal with no name"
-              }
+              "required": ["name", "type"]
             }
           },
-          "signature": {
+          "execution": {
             "type": "object",
-            "description": "Function signature details (if available)",
+            "description": "How to invoke this function. Section 4 uses this to construct the actual call.",
             "properties": {
-              "return_type": {
-                "type": ["string", "null"],
-                "description": "Return type (e.g., 'int', 'HANDLE', 'void')"
-              },
-              "parameters": {
-                "type": ["string", "null"],
-                "description": "Parameter list as string (e.g., 'int x, char* str')"
-              },
-              "calling_convention": {
-                "type": ["string", "null"],
-                "description": "Calling convention (e.g., '__stdcall', '__cdecl')"
-              },
-              "full_prototype": {
-                "type": ["string", "null"],
-                "description": "Complete C/C++ prototype"
-              }
-            }
-          },
-          "documentation": {
-            "type": "object",
-            "description": "Documentation extracted from headers/help text",
-            "properties": {
-              "summary": {
-                "type": ["string", "null"],
-                "description": "Brief one-line description"
-              },
-              "description": {
-                "type": ["string", "null"],
-                "description": "Full documentation text"
-              },
-              "source_file": {
-                "type": ["string", "null"],
-                "description": "Header file where documentation was found"
-              },
-              "source_line": {
-                "type": ["integer", "null"],
-                "description": "Line number in source file"
-              }
-            }
-          },
-          "evidence": {
-            "type": "object",
-            "description": "Provenance - where each fact came from",
-            "properties": {
-              "discovered_by": {
+              "method": {
                 "type": "string",
-                "description": "Module that found this invocable (e.g., 'exports.py', 'cli_analyzer.py')"
+                "enum": ["subprocess", "dll_import", "dotnet_reflection", "com_dispatch", "rpc_call", "unknown"],
+                "description": "Invocation mechanism"
               },
-              "header_file": {
-                "type": ["string", "null"],
-                "description": "Header file containing prototype (if matched)"
-              },
-              "forwarded_to": {
-                "type": ["string", "null"],
-                "description": "Target DLL.Function if forwarded"
-              },
-              "demangled_name": {
-                "type": ["string", "null"],
-                "description": "Unmangled C++ name (if applicable)"
-              }
+              "executable_path": { "type": ["string", "null"], "description": "Path to executable (subprocess only)" },
+              "arg_style": { "type": ["string", "null"], "description": "Argument passing style: 'flag', 'positional' (subprocess only)" },
+              "dll_path": { "type": ["string", "null"], "description": "Path to DLL (dll_import only)" },
+              "function_name": { "type": ["string", "null"], "description": "Exported function name (dll_import / dotnet_reflection / com_dispatch)" },
+              "calling_convention": { "type": ["string", "null"], "description": "Calling convention; null on x64 (single ABI)" },
+              "assembly_path": { "type": ["string", "null"], "description": "Path to .NET assembly (dotnet_reflection only)" },
+              "type_name": { "type": ["string", "null"], "description": "Fully qualified .NET type name (dotnet_reflection only)" },
+              "is_static": { "type": ["boolean", "null"], "description": "Whether .NET method is static (dotnet_reflection only)" },
+              "clsid": { "type": ["string", "null"], "description": "COM class GUID (com_dispatch only)" },
+              "interface": { "type": ["string", "null"], "description": "COM interface name (com_dispatch only)" }
             },
-            "required": ["discovered_by"]
-          },
-          "metadata": {
-            "type": "object",
-            "description": "Additional metadata (extensible - add fields here without breaking schema)",
-            "additionalProperties": true
+            "required": ["method"]
           }
         },
-        "required": ["name", "kind", "confidence", "evidence"]
+        "required": ["name", "kind", "confidence", "description", "parameters", "execution"]
       }
     },
-    "pipeline_results": {
+    "summary": {
       "type": "object",
-      "description": "Details of pipeline execution (for debugging/validation)",
+      "description": "Summary counts for quick assessment",
       "properties": {
-        "modules_run": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "List of modules that executed"
+        "total_invocables": { "type": "integer" },
+        "by_confidence": {
+          "type": "object",
+          "description": "Count per confidence level",
+          "additionalProperties": { "type": "integer" }
         },
-        "modules_passed": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Modules that completed successfully"
+        "by_source_type": {
+          "type": "object",
+          "description": "Count per source type (export, com, cli, dotnet, rpc)",
+          "additionalProperties": { "type": "integer" }
         },
-        "modules_warned": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Modules with degraded functionality"
-        },
-        "modules_failed": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Modules that failed"
-        },
-        "total_duration_ms": {
-          "type": "number",
-          "description": "Total analysis time in milliseconds"
-        }
-      }
-    },
-    "statistics": {
-      "type": "object",
-      "description": "Summary statistics for quick assessment",
-      "properties": {
-        "total_invocables": {
-          "type": "integer",
-          "description": "Total number of invocables found"
-        },
-        "high_confidence_count": {
-          "type": "integer",
-          "description": "Count with high confidence"
-        },
-        "medium_confidence_count": {
-          "type": "integer",
-          "description": "Count with medium confidence"
-        },
-        "low_confidence_count": {
-          "type": "integer",
-          "description": "Count with low confidence"
-        },
-        "signature_match_rate": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Percentage of exports matched to headers (0.0 to 1.0)"
-        },
-        "documented_count": {
-          "type": "integer",
-          "description": "Count with documentation found"
+        "source_groups": {
+          "type": "object",
+          "description": "Present only in merged hybrid outputs — count per analysis pass",
+          "additionalProperties": { "type": "integer" }
         }
       }
     }
   },
-  "required": ["schema_version", "metadata", "invocables"],
-  "additionalProperties": false
+  "required": ["metadata", "invocables"]
 }

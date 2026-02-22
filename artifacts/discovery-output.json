@@ -1,5 +1,4 @@
 {
-  "schema_version": "2.0.0",
   "metadata": {
     "target_path": "C:\\Program Files\\Contoso\\contoso-support.exe",
     "target_name": "contoso-support.exe",
@@ -9,74 +8,73 @@
     "is_signed": false,
     "publisher": null,
     "analysis_timestamp": "2026-02-11T20:30:00Z",
-    "pipeline_version": "0.1.0",
-    "tier": 2
+    "pipeline_version": "0.1.0"
   },
   "invocables": [
     {
       "name": "check-order-status",
       "kind": "cli_command",
       "confidence": "high",
-      "documentation": {
-        "summary": "Retrieves the status of a customer order by order ID"
-      },
-      "evidence": {
-        "discovered_by": "cli_analyzer.py"
-      },
-      "metadata": {
-        "parameters": [
-          {
-            "name": "orderId",
-            "type": "string",
-            "required": true,
-            "description": "The ID of the order"
-          }
-        ]
+      "description": "Retrieves the status of a customer order by order ID",
+      "return_type": "string",
+      "parameters": [
+        {
+          "name": "orderId",
+          "type": "string",
+          "required": true,
+          "description": "The ID of the order"
+        }
+      ],
+      "execution": {
+        "method": "subprocess",
+        "executable_path": "C:\\Program Files\\Contoso\\contoso-support.exe",
+        "arg_style": "flag"
       }
     },
     {
       "name": "open-support-ticket",
       "kind": "cli_command",
       "confidence": "medium",
-      "documentation": {
-        "summary": "Creates a new customer support ticket"
-      },
-      "evidence": {
-        "discovered_by": "cli_analyzer.py"
-      },
-      "metadata": {
-        "parameters": [
-          {
-            "name": "customerName",
-            "type": "string",
-            "required": true
-          },
-          {
-            "name": "issueDescription",
-            "type": "string",
-            "required": true
-          }
-        ]
+      "description": "Creates a new customer support ticket",
+      "return_type": "string",
+      "parameters": [
+        {
+          "name": "customerName",
+          "type": "string",
+          "required": true,
+          "description": "Full name of the customer"
+        },
+        {
+          "name": "issueDescription",
+          "type": "string",
+          "required": true,
+          "description": "Description of the issue to report"
+        }
+      ],
+      "execution": {
+        "method": "subprocess",
+        "executable_path": "C:\\Program Files\\Contoso\\contoso-support.exe",
+        "arg_style": "flag"
       }
     },
     {
       "name": "get-account-balance",
       "kind": "cli_command",
       "confidence": "high",
-      "documentation": {
-        "summary": "Returns account balance for a customer account"
-      },
-      "evidence": {
-        "discovered_by": "cli_analyzer.py"
-      },
-      "metadata": {
-        "parameters": [
-          {
-            "name": "accountNumber",
-            "type": "string",
-            "required": true
-          }
-        ]
+      "description": "Returns account balance for a customer account",
+      "return_type": "number",
+      "parameters": [
+        {
+          "name": "accountNumber",
+          "type": "string",
+          "required": true,
+          "description": "The account number to look up"
+        }
+      ],
+      "execution": {
+        "method": "subprocess",
+        "executable_path": "C:\\Program Files\\Contoso\\contoso-support.exe",
+        "arg_style": "flag"
       }
     }
   ]
