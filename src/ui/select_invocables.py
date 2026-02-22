@@ -26,6 +26,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# ── Windows UTF-8 fix ─────────────────────────────────────────────────────────
+# Rich renders checkmarks and box-drawing characters that cp1252 can't encode.
+# Reconfigure stdout/stderr to UTF-8 before Rich is imported.
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
 from rich.console import Console
 from rich.table import Table
 from rich import box
@@ -59,7 +70,9 @@ CONF_ICON = {
 
 # ── console ───────────────────────────────────────────────────────────────────
 
-console = Console()
+# legacy_windows=False: use ANSI renderer on all Windows terminals,
+# avoiding the cp1252 encode error for Unicode box/check characters.
+console = Console(legacy_windows=False, highlight=False)
 
 
 # ── discovery helpers ─────────────────────────────────────────────────────────

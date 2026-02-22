@@ -37,13 +37,7 @@ Enterprise organizations need AI-powered customer service that can invoke existi
 
 ## Platform Requirements
 
-**⚠️ Windows Only:** This tool is designed exclusively for Windows due to dependencies on:
-- **PowerShell** (for .NET reflection and signature verification)
-- **Windows Registry** (for COM object discovery)
-- **pywin32** (pythoncom for Type Library parsing)
-- **PE/COFF** Windows executable format
-
-Mac/Linux support is not feasible without significant feature loss.
+This tool is designed around Windows. If you are on a Mac, see [docs/mac-compatibility.md](docs/mac-compatibility.md).
 
 ## Prerequisites
 
@@ -52,9 +46,8 @@ Mac/Linux support is not feasible without significant feature loss.
 - **Python** 3.8+ — Download from [python.org](https://www.python.org/downloads/)
   - Add Python to PATH during installation (checked by default)
 - **Git** — Download from [git-scm.com](https://git-scm.com)
-- **Visual Studio Build Tools 2022** — Download from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/downloads/)
-  - During installation, **select the "Desktop development with C++" workload**
-  - This installs development tools (for binary analysis)
+
+
 
 
 ## Installation
