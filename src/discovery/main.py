@@ -36,66 +36,67 @@ ANALYZER_REGISTRY = {
 
 
 def score_confidence(export: Invocable, matches: dict, is_signed: bool, forwarded_resolved: bool, is_system_dll: bool = False) -> tuple:
-    """Score confidence in export invocability with reasons (matches exports_to_invocables logic)."""
-    reasons = []
-    confidence = 'low'
-    
-    # Start with base reason
-    reasons.append('exported from DLL')
-    
-    # GUARANTEED CONFIDENCE: Header match
-    if export.name in matches:
+    """Score confidence in export invocability.
+
+    Factors are derived from actual extracted data first; the label is
+    then derived from those factors. This keeps the label honest and
+    consistent with what an LLM downstream will actually find usable.
+    """
+    reasons = ['exported from DLL']
+
+    # Step 1: measure what we actually extracted for this export
+    match = matches.get(export.name) if isinstance(matches, dict) else None
+    has_signature   = bool(match and getattr(match, 'prototype', None))
+    has_return_type = bool(match and getattr(match, 'return_type', None))
+    _params = (getattr(match, 'parameters', '') or '').strip().lower() if match else ''
+    has_parameters  = bool(_params and _params not in ('', 'void'))
+    has_doc         = bool(getattr(export, 'doc_comment', None))
+
+    # Step 2: label derived from factors (never set label before measuring data)
+    if has_signature and has_parameters and has_return_type:
         confidence = 'guaranteed'
         reasons.append('complete signature from header file')
-    elif is_system_dll:
-        # Well-known system DLLs (kernel32, user32, etc.) have high confidence
+    elif has_signature and (has_parameters or has_return_type):
         confidence = 'high'
-        reasons.append('well-known system API')
+        reasons.append('partial signature from header file')
     elif hasattr(export, 'demangled') and export.demangled:
-        # C++ exports with demangled names
         confidence = 'medium'
-        reasons.append('demangled name available')
-    
-    # MEDIUM CONFIDENCE BOOST: Digital signature
-    if is_signed:
-        if confidence == 'low':
-            confidence = 'medium'
-        reasons.append('digitally signed')
-    
-    # MEDIUM CONFIDENCE BOOST: Common API patterns
-    if confidence == 'low':
+        reasons.append('demangled C++ name available')
+    elif is_signed and is_system_dll:
+        confidence = 'medium'
+        reasons.append('well-known signed system API (no header match)')
+    elif is_signed:
+        confidence = 'medium'
+        reasons.append('digitally signed binary')
+    elif is_system_dll:
+        confidence = 'medium'
+        reasons.append('well-known system API (no header match)')
+    else:
+        # Step 3: name-pattern heuristics as last resort
+        confidence = 'low'
         name = export.name
-        
-        # Check for library prefix patterns (e.g., sqlite3_, ZSTD_, curl_, SSL_)
-        # Consistent prefixes indicate professional library design
         if '_' in name:
             prefix = name.split('_')[0]
-            # If prefix is 3+ chars and uppercase or lowercase consistent, it's likely a library prefix
             if len(prefix) >= 3 and (prefix.isupper() or prefix.islower()):
                 confidence = 'medium'
                 reasons.append(f'library prefix pattern ({prefix}_*)')
-        
-        # Check for common API patterns (Windows + cross-platform)
-        elif any(name.startswith(prefix) for prefix in [
-            # Windows patterns
+        elif any(name.startswith(p) for p in [
             'Create', 'Get', 'Set', 'Open', 'Close', 'Read', 'Write',
             'Initialize', 'Finalize', 'Register', 'Unregister',
             'Allocate', 'Free', 'Query', 'Release',
-            # Cross-platform C library patterns
             'init', 'destroy', 'alloc', 'dealloc', 'malloc', 'calloc',
             'compress', 'decompress', 'encode', 'decode', 'encrypt', 'decrypt',
             'load', 'save', 'bind', 'connect', 'send', 'recv', 'shutdown'
         ]):
             confidence = 'medium'
             reasons.append('common API pattern')
-    
-    # Additional factors
+
+    # Step 3: append any additional evidence (does not change tier)
     if forwarded_resolved:
         reasons.append('forwarded reference resolved')
-    
-    if export.doc_comment:
+    if has_doc:
         reasons.append('has documentation')
-    
+
     return confidence, reasons
 
 

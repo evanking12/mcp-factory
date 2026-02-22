@@ -381,3 +381,49 @@ python scripts/demo_capabilities.py
 - Analysis is now CPU-bound instead of I/O-bound (spawning processes)
 - pefile provides direct access to memory offsets, removing the need for text scraping dumpbin output
 - "Ordinal Only" exports and string decoding (Latin-1 vs UTF-8) are now handled explicitly in Python
+
+---
+
+## 2026-02-22 — Flat Invocable Contract + Selection UI (Sessions 1-4)
+
+**Task/Issue:** Four related issues resolved in one working session:
+1. `discovery-output.json` had too many pipeline-internal fields with no value for Section 4 or LLM invocation
+2. Confidence scoring set the label *before* measuring data — shell32 showed `confidence: "high"` with all four factors `false`
+3. No user-facing UI existed for Sections 2-3 invocable selection
+4. Hybrid binaries (e.g. shell32.dll) silently showed only one output set
+
+**Copilot Prompts Used:**
+- "Design the invocable contract fields required for an LLM to autonomously call discovered binary functions. Prioritise what Section 4 needs to construct and validate a call (name, description, parameters with types, return type, execution method/path)."
+- "Audit the current discovery-output.json schema and remove all pipeline-internal fields that have no value to Section 4 or LLM invocation. Flatten the invocable shape — no wrapper objects."
+- "Update schema.py Invocable.to_dict() and section4_select_tools.py to emit and consume the new flat contract. Document the changes in session-changes.md."
+- "Build an interactive CLI invocable selection UI (src/ui/select_invocables.py) with confidence-based defaults. Run against zstd.dll and assess whether the output is sufficient for autonomous LLM invocation."
+- "When a binary produces multiple output sets (e.g. native exports + COM interfaces), the UI should detect and merge them, notifying the user clearly rather than silently discarding one set."
+
+**Output Accepted:**
+- `src/discovery/schema.py` — `to_dict()` rewritten to flat contract; `_parse_parameters_to_list()` added; `_get_execution_metadata()` bug fixes (duplicate `method` keys on dotnet/com; cli fell through to `unknown`)
+- `src/generation/section4_select_tools.py` — removed `schema_version` validation; reads flat `description`; drops `schema_version` from output
+- `src/ui/select_invocables.py` — new interactive selection UI with rich table, confidence-based defaults, hybrid merge, `--description` hint highlighting
+- `docs/schemas/discovery-output.schema.json` — rewritten to flat schema
+- `CHANGELOG.md` — 1.1.0 entry added
+- `docs/session-changes.md` — full record of all four sessions
+
+**Manual Changes:**
+- None — all output accepted as-is after smoke testing
+
+**Result:**
+```
+python src/ui/select_invocables.py --target tests/fixtures/vcpkg_installed/x64-windows/bin/zstd.dll
+
+→ 187 invocables: 168 guaranteed (89.8%), 15 high (8.0%), 4 medium (2.1%), 0 low
+→ guaranteed+high pre-checked; medium/low off by default
+→ writes artifacts/selected-invocables.json for Section 4
+
+python -c "from select_invocables import _load_and_merge; ..."  # shell32 hybrid test
+→ Hybrid binary detected — 961 COM interfaces + 842 native exports = 1803 total
+→ _source_group stripped before output write
+```
+
+**Notes:**
+- `demo_output/` artifacts are stale (written 2026-01-27 with old schema). Delete and re-run `scripts/demo_capabilities.py` before next demo
+- `calling_convention: "stdcall"` is technically wrong on x64 (single ABI) — low priority, Section 4 ignores it
+- Section 2.b description hint highlights rows but does not yet feed back into confidence scoring — deferred post-MVP

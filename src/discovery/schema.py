@@ -53,60 +53,15 @@ class Invocable:
     clsid: Optional[str] = None
     
     def to_dict(self) -> dict:
-        """Convert Invocable to MCP-compatible JSON dict."""
-        import re
-        
-        # Generate unique tool ID
-        tool_id = self._generate_tool_id()
-        
-        # Parse parameters into JSON Schema
-        input_schema = self._parse_parameters_to_schema()
-        
-        # Get execution metadata
-        execution = self._get_execution_metadata()
-        
+        """Convert Invocable to flat MCP-compatible JSON dict."""
         return {
             "name": self.name,
-            "tool_id": tool_id,
             "kind": self.source_type,
-            "ordinal": self.ordinal,
-            "rva": self.rva,
             "confidence": self.confidence,
-            "confidence_factors": {
-                "has_signature": bool(self.signature),
-                "has_documentation": bool(self.doc_comment),
-                "has_parameters": bool(self.parameters),
-                "has_return_type": bool(self.return_type),
-                "is_forwarded": self.is_forwarded,
-                "is_ordinal_only": bool(self.ordinal and not self.name)
-            },
-            "signature": {
-                "return_type": self.return_type,
-                "parameters": self.parameters,
-                "calling_convention": None,
-                "full_prototype": self.signature or self._build_prototype()
-            },
-            "documentation": {
-                "summary": self.doc_comment,
-                "description": self.doc_comment,
-                "source_file": self.header_file,
-                "source_line": self.header_line
-            },
-            "evidence": {
-                "discovered_by": self.source_type + "_analyzer",
-                "header_file": self.header_file,
-                "forwarded_to": None,
-                "demangled_name": self.demangled
-            },
-            "mcp": {
-                "version": "1.0",
-                "input_schema": input_schema,
-                "execution": execution
-            },
-            "metadata": {
-                "is_signed": self.is_signed,
-                "publisher": self.publisher
-            }
+            "description": self.doc_comment or "",
+            "return_type": self.return_type,
+            "parameters": self._parse_parameters_to_list(),
+            "execution": self._get_execution_metadata(),
         }
     
     def _generate_tool_id(self) -> str:
@@ -174,7 +129,30 @@ class Invocable:
             "properties": properties,
             "required": required
         }
-    
+
+    def _parse_parameters_to_list(self) -> list:
+        """Convert parameter string to a flat list of parameter dicts for MCP."""
+        if not self.parameters or self.parameters.strip().lower() in ('void', ''):
+            return []
+
+        result = []
+        params = self._split_parameters(self.parameters)
+
+        for i, param in enumerate(params):
+            param = param.strip()
+            if not param:
+                continue
+            param_info = self._parse_single_parameter(param, i)
+            if param_info:
+                result.append({
+                    "name": param_info["name"],
+                    "type": param_info["json_type"],
+                    "required": True,
+                    "description": param_info["c_type"],
+                })
+
+        return result
+
     def _split_parameters(self, params: str) -> List[str]:
         """Split parameter string by commas, respecting nested types."""
         result = []
@@ -290,32 +268,38 @@ class Invocable:
             return {
                 "method": "dotnet_reflection",
                 "assembly_path": self.assembly_path,
-                "type": self.type_name,
-                "method": self.name,
-                "is_static": self.is_static or False
+                "type_name": self.type_name,
+                "function_name": self.name,
+                "is_static": self.is_static or False,
             }
-        
+
         elif self.source_type == "com":
             return {
-                "method": "com_automation",
+                "method": "com_dispatch",
                 "clsid": self.clsid,
                 "interface": "IDispatch",
-                "method": self.name
+                "function_name": self.name,
             }
-        
+
+        elif self.source_type == "cli":
+            return {
+                "method": "subprocess",
+                "executable_path": self.dll_path,  # dll_path holds exe path for CLI
+                "arg_style": "flag",
+            }
+
         elif self.source_type == "rpc":
-            # RPC endpoint invocation
             return {
                 "method": "rpc_call",
-                "endpoint": self.parameters,  # Named pipe or network endpoint
-                "interface_uuid": self.signature.split(': ')[-1] if 'UUID:' in (self.signature or '') else None,
-                "dll_path": self.dll_path
+                "endpoint": self.parameters,
+                "interface_uuid": self.signature.split(": ")[-1] if "UUID:" in (self.signature or "") else None,
+                "dll_path": self.dll_path,
             }
-        
+
         else:
             return {
                 "method": "unknown",
-                "notes": f"Execution method not defined for source_type: {self.source_type}"
+                "notes": f"Execution method not defined for source_type: {self.source_type}",
             }
 
 
@@ -371,60 +355,72 @@ def exports_to_invocables(
     
     for export in exports:
         match = matches.get(export.name)
-        
-        # IMPROVED CONFIDENCE SCORING (4-TIER SYSTEM)
-        confidence = "low"
+
+        # ----------------------------------------------------------------
+        # CONFIDENCE SCORING: compute factors from actual extracted data
+        # first, then derive the label. The label must never contradict
+        # the factors — that makes the JSON self-consistent and honest
+        # for downstream LLM consumers.
+        # ----------------------------------------------------------------
+
+        # Step 1: measure what we actually have from the match
+        has_signature   = bool(match and match.prototype)
+        has_return_type = bool(match and match.return_type)
+        _params = (match.parameters or "").strip().lower() if match else ""
+        has_parameters  = bool(match and _params and _params not in ('', 'void'))
+        has_documentation = bool(match and match.doc_comment)
+
+        # Step 2: derive confidence from factors (factors → label, not label → factors)
         confidence_reasons = ["exported from DLL"]
-        
-        # GUARANTEED: Header match with complete signature
-        if match:
+
+        if has_signature and has_parameters and has_return_type:
+            # Full header match: we know exactly how to call this
             confidence = "guaranteed"
             confidence_reasons.append("complete signature from header file")
-        elif is_system_dll:
-            # Well-known system DLLs have high confidence even without headers
+        elif has_signature and (has_parameters or has_return_type):
+            # Partial header match: structure present but incomplete
             confidence = "high"
-            confidence_reasons.append("well-known system API")
+            confidence_reasons.append("partial signature from header file")
         elif export.demangled:
-            # C++ exports with demangled names
+            # C++ mangled name decoded: we know types but not all params
             confidence = "medium"
-            confidence_reasons.append("demangled name available")
-        
-        # MEDIUM CONFIDENCE BOOST: Digital signature
-        if is_signed and publisher:
-            if confidence == "low":
-                confidence = "medium"
-            confidence_reasons.append("digitally signed")
-            if "Microsoft" in publisher:
+            confidence_reasons.append("demangled C++ name available")
+        elif is_signed and is_system_dll:
+            # Trusted source but no extracted data — medium, not high
+            confidence = "medium"
+            confidence_reasons.append("well-known signed system API (no header match)")
+            if publisher and "Microsoft" in publisher:
                 confidence_reasons.append("Microsoft signed")
-        
-        # ADDITIONAL HEURISTICS
-        # Well-formed function names (PascalCase, snake_case) suggest legitimate API
-        if confidence == "low":
+        elif is_signed:
+            confidence = "medium"
+            confidence_reasons.append("digitally signed binary")
+        elif is_system_dll:
+            # Known DLL but unsigned and no header — still only medium
+            confidence = "medium"
+            confidence_reasons.append("well-known system API (no header match)")
+        else:
+            # Step 3: name-pattern heuristics as last resort
+            confidence = "low"
             name = export.name
-            
-            # Check for library prefix patterns (e.g., sqlite3_, ZSTD_, curl_, SSL_)
-            # Consistent prefixes indicate professional library design
             if '_' in name:
                 prefix = name.split('_')[0]
-                # If prefix is 3+ chars and uppercase or lowercase consistent, it's likely a library prefix
                 if len(prefix) >= 3 and (prefix.isupper() or prefix.islower()):
                     confidence = "medium"
                     confidence_reasons.append(f"library prefix pattern ({prefix}_*)")
-            
-            # Check for common API patterns (Windows + cross-platform)
-            elif any(name.startswith(prefix) for prefix in [
-                # Windows patterns
+            elif any(name.startswith(p) for p in [
                 'Create', 'Get', 'Set', 'Open', 'Close', 'Read', 'Write',
                 'Initialize', 'Finalize', 'Register', 'Unregister',
                 'Allocate', 'Free', 'Query', 'Release',
-                # Cross-platform C library patterns
                 'init', 'destroy', 'alloc', 'dealloc', 'malloc', 'calloc',
                 'compress', 'decompress', 'encode', 'decode', 'encrypt', 'decrypt',
                 'load', 'save', 'bind', 'connect', 'send', 'recv', 'shutdown'
             ]):
                 confidence = "medium"
                 confidence_reasons.append("common API pattern")
-        
+
+        if has_documentation:
+            confidence_reasons.append("has documentation")
+
         # Create Invocable
         invocable = Invocable(
             name=export.name,

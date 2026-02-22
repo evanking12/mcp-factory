@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-22
+
+### Added
+- **Interactive invocable selection UI** — `src/ui/select_invocables.py`: rich terminal table with confidence-based defaults (`guaranteed`+`high` on, `medium`+`low` off), toggle/range/filter commands, description hint highlighting (Section 2.b), writes `selected-invocables.json` for Section 4 consumption
+- **Hybrid binary detection** — selection UI automatically detects multi-output binaries (e.g. `shell32.dll` produces both native exports and COM interfaces), merges them into one unified list with a `Source` column, announces the merge clearly
+- **`src/ui/` module** — new package for user-facing entry points
+
+### Changed
+- **Flat invocable schema** — `Invocable.to_dict()` in `schema.py` now emits the clean LLM-ready contract: `name`, `kind`, `confidence`, `description`, `return_type`, `parameters[]`, `execution`. Removed pipeline-internal wrappers: `tool_id`, `ordinal`, `rva`, `confidence_factors`, `signature{}`, `documentation{}`, `evidence{}`, `mcp{}`, `metadata{}`
+- **`parameters` promoted to flat list** — was a string inside `signature.parameters`; now a top-level list of `{name, type, required, description}` matching OpenAI/Anthropic function-calling spec
+- **`confidence` added `guaranteed` level** — four levels now: `guaranteed` > `high` > `medium` > `low`; scoring is factor-first (data measured before label set)
+- **`section4_select_tools.py`** — removed `schema_version` from required-key validation; reads flat `description` field; drops `schema_version` from output
+- **`docs/schemas/discovery-output.schema.json`** — rewritten to match flat schema; removed `schema_version`, `tier`, `evidence`, `confidence_factors`, `signature{}`, `documentation{}`; added `return_type`, flat `parameters[]`, `execution{}`, `guaranteed` confidence level
+
+### Fixed
+- `_get_execution_metadata()` in `schema.py`: `dotnet` and `com` source types had duplicate `"method"` dict keys — Python silently discarded the first, losing `"dotnet_reflection"` / `"com_automation"`. Fixed to use explicit `method`/`function_name`/`type_name` keys
+- `cli` source type fell through to `method: "unknown"` — now correctly emits `method: "subprocess"` with `executable_path` and `arg_style`
+
 ## [1.0.0] - 2026-01-20
 
 ### Added

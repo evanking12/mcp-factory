@@ -34,3 +34,6 @@ __pycache__/
 validation_output/
 
 demo_output/
+
+# Working/scratch documents not for version control
+docs/SECTIONS_2_3_GAP_ANALYSIS.md
