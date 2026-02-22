@@ -13,10 +13,31 @@ from typing import Optional, Tuple
 
 class FileType(Enum):
     """Supported file types for analysis."""
+    # Native Windows binaries
     PE_DLL = "PE_DLL"
     PE_EXE = "PE_EXE"
     DOTNET_ASSEMBLY = "DOTNET_ASSEMBLY"
     COM_OBJECT = "COM_OBJECT"
+    # JIT / scripting languages
+    PYTHON_SCRIPT = "PYTHON_SCRIPT"
+    POWERSHELL_SCRIPT = "POWERSHELL_SCRIPT"
+    BATCH_SCRIPT = "BATCH_SCRIPT"
+    VBSCRIPT = "VBSCRIPT"
+    SHELL_SCRIPT = "SHELL_SCRIPT"
+    JAVASCRIPT = "JAVASCRIPT"
+    TYPESCRIPT = "TYPESCRIPT"
+    RUBY_SCRIPT = "RUBY_SCRIPT"
+    PHP_SCRIPT = "PHP_SCRIPT"
+    # Data / query
+    SQL_FILE = "SQL_FILE"
+    # Protocol / service descriptors
+    OPENAPI_SPEC  = "OPENAPI_SPEC"   # OpenAPI 3.x / Swagger 2.x YAML or JSON
+    JSONRPC_SPEC  = "JSONRPC_SPEC"   # JSON-RPC 2.0 service descriptor JSON
+    WSDL_FILE     = "WSDL_FILE"      # SOAP/WSDL 1.1 or 2.0
+    CORBA_IDL     = "CORBA_IDL"      # CORBA Interface Definition Language
+    JNDI_CONFIG   = "JNDI_CONFIG"    # JNDI .properties / Spring XML
+    PDB_FILE      = "PDB_FILE"       # Windows Program Database (debug symbols)
+    # Generic fallback kept for backwards-compat
     SCRIPT = "SCRIPT"
     UNKNOWN = "UNKNOWN"
 
@@ -39,11 +60,78 @@ def classify_file(file_path: Path) -> FileType:
     if ext in ['.tlb', '.olb']:
         return FileType.COM_OBJECT
 
-    # Script files
-    if ext in ['.ps1', '.py', '.vbs', '.bat', '.cmd', '.sh']:
-        return FileType.SCRIPT
+    # --- JIT / scripting / query files (extension-based detection) ---
+    if ext == '.py':
+        return FileType.PYTHON_SCRIPT
+    if ext == '.ps1':
+        return FileType.POWERSHELL_SCRIPT
+    if ext in ('.bat', '.cmd'):
+        return FileType.BATCH_SCRIPT
+    if ext == '.vbs':
+        return FileType.VBSCRIPT
+    if ext in ('.sh', '.bash', '.zsh'):
+        return FileType.SHELL_SCRIPT
+    if ext in ('.js', '.mjs', '.cjs'):
+        return FileType.JAVASCRIPT
+    if ext in ('.ts', '.tsx', '.mts'):
+        return FileType.TYPESCRIPT
+    if ext == '.rb':
+        return FileType.RUBY_SCRIPT
+    if ext == '.php':
+        return FileType.PHP_SCRIPT
+    if ext == '.sql':
+        return FileType.SQL_FILE
 
-    # Check magic bytes for binary files
+    # ── Service / protocol descriptor files ─────────────────────────────────
+    if ext in ('.yaml', '.yml'):
+        # Could be a plain YAML config or an OpenAPI spec; peek inside
+        try:
+            snippet = file_path.read_text(encoding='utf-8', errors='replace')[:2000]
+            if any(k in snippet for k in ('openapi:', 'swagger:')):
+                return FileType.OPENAPI_SPEC
+        except OSError:
+            pass
+        return FileType.OPENAPI_SPEC  # treat all YAML as potential OpenAPI specs
+
+    if ext == '.wsdl':
+        return FileType.WSDL_FILE
+
+    if ext == '.idl':
+        return FileType.CORBA_IDL
+
+    if ext in ('.jndi', '.properties'):
+        return FileType.JNDI_CONFIG
+
+    if ext == '.pdb':
+        return FileType.PDB_FILE
+
+    # XML: could be Spring JNDI context
+    if ext == '.xml':
+        try:
+            snippet = file_path.read_text(encoding='utf-8', errors='replace')[:2000]
+            if any(k in snippet for k in ('jndi-lookup', 'JndiObjectFactoryBean',
+                                          'java.naming', 'jndiName')):
+                return FileType.JNDI_CONFIG
+            if '<definitions' in snippet and 'schemas.xmlsoap.org/wsdl' in snippet:
+                return FileType.WSDL_FILE
+        except OSError:
+            pass
+
+    # JSON: could be OpenAPI or JSON-RPC
+    if ext == '.json':
+        try:
+            import json as _json
+            snippet = file_path.read_text(encoding='utf-8', errors='replace')[:4000]
+            data = _json.loads(snippet + ('}' if not snippet.rstrip().endswith('}') else ''))
+        except Exception:
+            data = {}
+        if isinstance(data, dict):
+            if 'openapi' in data or 'swagger' in data:
+                return FileType.OPENAPI_SPEC
+            if 'methods' in data and 'jsonrpc' not in data:
+                return FileType.JSONRPC_SPEC
+            if 'jsonrpc' in data or 'method' in data:
+                return FileType.JSONRPC_SPEC
     try:
         with open(file_path, 'rb') as f:
             magic = f.read(4)

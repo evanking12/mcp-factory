@@ -118,7 +118,7 @@ def com_objects_to_invocables(com_objects: List[Dict], dll_path: Optional[Path] 
             source_type='com',
             signature=f"CLSID: {obj['clsid']}",
             doc_comment=obj.get('name'),
-            parameters=obj.get('server_path'),
+            parameters=None,   # Registry entries have no enumerable parameter list
             dll_path=str(dll_path) if dll_path else obj.get('server_path'),
             clsid=obj['clsid'],
             confidence='high', # Registry exists, but methods unknown
