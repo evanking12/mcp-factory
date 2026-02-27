@@ -8,6 +8,9 @@ import subprocess
 from pathlib import Path
 from typing import List
 
+# Suppress GUI windows when calling undname or other tools (Windows only).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 from schema import ExportedFunc
 
 
@@ -36,7 +39,8 @@ def demangle_with_undname(
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
-                timeout=5
+                timeout=5,
+                creationflags=_NO_WINDOW,
             )
 
             if result.returncode == 0:

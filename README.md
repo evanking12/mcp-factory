@@ -48,8 +48,6 @@ This tool is designed around Windows. If you are on a Mac, see [docs/mac-compati
 - **Git** — Download from [git-scm.com](https://git-scm.com)
 
 
-
-
 ## Installation
 
 **Prerequisites:** Git, Python 3.8+, and Visual Studio Build Tools (for `dumpbin.exe`).

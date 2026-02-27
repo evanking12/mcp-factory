@@ -13,6 +13,9 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+# Suppress any GUI window when launching EXEs for --help scraping (Windows only).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 from schema import Invocable
 
 logger = logging.getLogger(__name__)
@@ -80,7 +83,8 @@ def _get_help_output(exe_path: Path, timeout: int) -> Optional[str]:
                 [str(exe_path), flag],
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                creationflags=_NO_WINDOW,
             )
             
             output = result.stdout + "\n" + result.stderr

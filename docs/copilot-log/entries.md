@@ -1,35 +1,3 @@
-# Copilot Log Entries
-
-## 2026-02-22 — §2.a Directory Walk — Installed-Instance Target
-
-**Task/Issue:** §2.a required "an installed instance" as a valid input (e.g. `c:\Program Files\AppD\`). `main.py` only accepted a single file. This was the only remaining §2-3 compliance gap.
-
-**Copilot Prompts Used:**
-- "Implement directory scanning in main.py. When --target is a directory, rglob for all files with recognized extensions, classify each, run discovery on each, and aggregate results. Surface it in select_invocables.py. Add a demo target to demo_all_capabilities.py pointing at a directory. Update sections-2-3.md and entries.md, and create ADR-0007."
-
-**Output Accepted:**
-- `RECOGNIZED_EXTENSIONS` frozenset — canonical list of extensions that `classify_file()` handles; used as fast pre-screen before the authoritative content-sniff classification.
-- `analyze_directory(dir_path, out_dir, args)` in `main.py` — rglobs tree, classifies files, calls `main()` recursively (with `sys.argv` swap + `finally` restore) for each file, harvests individual `*_mcp.json` artifacts, writes aggregate `<dir>_scan_mcp.json`.
-- Six-line directory check in `main()` — added immediately after base-name resolution so the existing single-file path is untouched.
-- `select_invocables.py` — changed `--dll` to `--target` in subprocess command; updated `--target` help text to include "or installed directory (e.g. C:\Program Files\AppD\)"; softened "File not found" to "Target not found".
-- `demo_all_capabilities.py` — Section 10 "Directory Scan (§2.a)" passes `tests/fixtures/scripts/` (13 files) as target; aggregate invocable count proves the walk works end-to-end.
-- `docs/sections-2-3.md` — §2.a status updated to ✅, target count 28→29, demo and test-results rows updated.
-- `docs/adr/0007-directory-scan-installed-instance-target.md` — ADR documenting design choices (rglob + RECOGNIZED_EXTENSIONS + classify_file arbitration + recursive main() pattern + per-file sub-dirs + aggregate JSON).
-
-**Manual Changes:**
-- None required — all changes applied cleanly.
-
-**Result:**
-```powershell
-python scripts/demo_all_capabilities.py
-```
-Section 10 "Directory Scan" now appears in the output table.  Aggregate `scripts_scan_mcp.json` is written to `demo_output/unified/scripts/`.
-
-**References:**
-- ADR-0007: `docs/adr/0007-directory-scan-installed-instance-target.md`
-- §2.a spec: "Users must be able to provide the system a copy of the target file or an installed instance."
-
----
 
 ## 2026-01-19 — Fixture Harness + Robust Parser
 
@@ -570,3 +538,98 @@ python scripts/demo_all_capabilities.py
 **References:**
 - ADR-0006: `docs/adr/0006-spec-gap-closure-legacy-protocol-analyzers.md`
 - dbghelp SymEnumSymbols: https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symenumsymbols
+# Copilot Log Entries
+
+
+
+## 2026-02-22 — §2.a Directory Walk — Installed-Instance Target
+
+**Task/Issue:** §2.a required "an installed instance" as a valid input (e.g. `c:\Program Files\AppD\`). `main.py` only accepted a single file. This was the only remaining §2-3 compliance gap.
+
+**Copilot Prompts Used:**
+- "Implement directory scanning in main.py. When --target is a directory, rglob for all files with recognized extensions, classify each, run discovery on each, and aggregate results. Surface it in select_invocables.py. Add a demo target to demo_all_capabilities.py pointing at a directory. Update sections-2-3.md and entries.md, and create ADR-0007."
+
+**Output Accepted:**
+- `RECOGNIZED_EXTENSIONS` frozenset — canonical list of extensions that `classify_file()` handles; used as fast pre-screen before the authoritative content-sniff classification.
+- `analyze_directory(dir_path, out_dir, args)` in `main.py` — rglobs tree, classifies files, calls `main()` recursively (with `sys.argv` swap + `finally` restore) for each file, harvests individual `*_mcp.json` artifacts, writes aggregate `<dir>_scan_mcp.json`.
+- Six-line directory check in `main()` — added immediately after base-name resolution so the existing single-file path is untouched.
+- `select_invocables.py` — changed `--dll` to `--target` in subprocess command; updated `--target` help text to include "or installed directory (e.g. C:\Program Files\AppD\)"; softened "File not found" to "Target not found".
+- `demo_all_capabilities.py` — Section 10 "Directory Scan (§2.a)" passes `tests/fixtures/scripts/` (13 files) as target; aggregate invocable count proves the walk works end-to-end.
+- `docs/sections-2-3.md` — §2.a status updated to ✅, target count 28→29, demo and test-results rows updated.
+- `docs/adr/0007-directory-scan-installed-instance-target.md` — ADR documenting design choices (rglob + RECOGNIZED_EXTENSIONS + classify_file arbitration + recursive main() pattern + per-file sub-dirs + aggregate JSON).
+
+**Manual Changes:**
+- None required — all changes applied cleanly.
+
+**Result:**
+```powershell
+python scripts/demo_all_capabilities.py
+```
+Section 10 "Directory Scan" now appears in the output table.  Aggregate `scripts_scan_mcp.json` is written to `demo_output/unified/scripts/`.
+
+**References:**
+- ADR-0007: `docs/adr/0007-directory-scan-installed-instance-target.md`
+- §2.a spec: "Users must be able to provide the system a copy of the target file or an installed instance."
+
+---
+
+## 2026-02-27 — §4 /chat Endpoint + §5 Chat UI + CREATE_NO_WINDOW Suppression
+
+**Task/Issue:** Three separate gaps addressed in one session: (1) §4's generated Flask server had no LLM connection — it could list and invoke tools but had no natural-language interface. (2) §5 had no UI at all. (3) Discovery and invocation subprocesses were spawning visible desktop windows when running EXEs like `notepad.exe` or `cmd.exe`.
+
+**Copilot Prompts Used:**
+- "Add a `/chat` endpoint to `section4_generate_server.py` using Azure OpenAI function calling. Read credentials from `.env` via `python-dotenv`. Convert `selected-invocables.json` tools into OpenAI function definitions. Route user messages to the correct tool, execute the binary, and return a natural-language summary of the result. Support conversation history so multi-turn context is maintained."
+- "Build a single-page HTML chat UI served from the Flask `/` route. Dark theme, bubble layout, tool output blocks showing function name / args / result, typing indicator, download button for `selected-invocables.json`. No build step — plain HTML/JS."
+- "Add `CREATE_NO_WINDOW` subprocess flag to `cli_analyzer.py`, `exports.py`, `classify.py`, and the generated `server.py` to suppress desktop windows when invoking binaries on Windows. Use `getattr(subprocess, 'CREATE_NO_WINDOW', 0)` for cross-platform safety."
+
+**Output Accepted:**
+- `/chat` route in `SERVER_TEMPLATE` — accepts `{ message, history }`, builds OpenAI function-calling payload from `INVOCABLES`, executes matched tool via `_execute_tool()`, feeds tool result back for a natural-language follow-up, returns `{ reply, tool_outputs, updated_history }`.
+- `_build_openai_functions()` — converts each invocable's `parameters` list into an OpenAI function schema object; gracefully handles invocables with no parameters.
+- `_execute_dll()` — `ctypes.CDLL` path for `dll_import` execution method; passes string args as `c_char_p`.
+- `_execute_cli()` — `subprocess.run` path for all other methods; uses `CREATE_NO_WINDOW`.
+- `/download/invocables` route — serves `selected-invocables.json` as a file download attachment.
+- `HTML_TEMPLATE` — full single-page chat UI injected into `static/index.html` at generation time; component name substituted via `__COMPONENT_NAME__` token.
+- `.env.example` (root) and per-generated-server `.env.example` — documents both `api.openai.com` (Option A) and Azure OpenAI (Option B) credential formats.
+- `requirements.txt` template updated to `flask>=3.0`, `openai>=1.0`, `python-dotenv>=1.0`.
+- `_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)` added to `cli_analyzer.py`, `exports.py`, `classify.py`; `creationflags=_NO_WINDOW` passed to every `subprocess.run` call in those modules.
+
+**Manual Changes:**
+- None required — all changes applied cleanly and `demo_all_capabilities.py` passed 29/29 after edits.
+
+**Result:**
+```powershell
+# Regenerate server from existing selected-invocables.json
+python src/generation/section4_generate_server.py
+
+# Start the generated server (requires .env with OPENAI_API_KEY)
+cd generated\test-component
+pip install -r requirements.txt
+cp .env.example .env   # fill in API key
+python server.py
+
+# Verify
+curl http://localhost:5000/tools
+# Open http://localhost:5000 in browser for chat UI
+```
+
+Generated artifacts:
+- `generated/test-component/server.py` — Flask server with `/tools`, `/invoke`, `/chat`, `/download/invocables`
+- `generated/test-component/static/index.html` — chat UI
+- `generated/test-component/requirements.txt`
+- `generated/test-component/.env.example`
+
+Demo suite: `29 succeeded  0 skipped` (unchanged, confirmed post-edit).
+
+**Notes:**
+- `OPENAI_BASE_URL` left blank defaults to `api.openai.com`; set to Azure endpoint when subscription is provisioned.
+- `gpt-4o-mini` is the default deployment — ~20× cheaper than `gpt-4o` at negligible quality cost for function-calling use.
+- `zstd.dll` invocables have empty `description` and `parameters: []` (expected for a raw C DLL). OpenAI routes by function name only; self-descriptive names like `ZSTD_compress` / `ZSTD_decompress` are sufficient for demo.
+- `CREATE_NO_WINDOW` uses `getattr(..., 0)` so no platform-specific imports are needed; safe on Mac/Linux.
+- Azure sponsored subscription not yet provisioned — email sent to sponsors 2026-02-27. Weekend testing will use personal `api.openai.com` credits (~$5, `gpt-4o-mini`).
+
+**References:**
+- OpenAI function calling: https://platform.openai.com/docs/guides/function-calling
+- Azure OpenAI compatibility: https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/function-calling
+- `CREATE_NO_WINDOW`: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+
+---

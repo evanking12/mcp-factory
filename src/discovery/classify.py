@@ -10,6 +10,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Tuple
 
+# Suppress GUI windows when calling wmic or other tools (Windows only).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 class FileType(Enum):
     """Supported file types for analysis."""
@@ -340,7 +343,8 @@ def extract_signature(pe_path: Path) -> Tuple[bool, Optional[str]]:
                  'get', 'Description,Version', '/format:list'],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                creationflags=_NO_WINDOW,
             )
             
             if result.returncode == 0:
