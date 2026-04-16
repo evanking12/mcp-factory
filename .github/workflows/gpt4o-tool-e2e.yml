@@ -82,14 +82,57 @@ jobs:
       - name: Run cloud GPT tool E2E
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path ci_artifacts | Out-Null
+          $artifactDir = "ci_artifacts/gpt4o-tool-e2e"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
           python scripts/ci_verify.py cloud-gpt-e2e `
             --base-url "$env:PIPELINE_URL" `
             --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" `
             --target "${{ steps.target.outputs.target }}" `
             --tool-name EchoSentinel `
             --sentinel "${{ steps.target.outputs.sentinel }}" `
-            --transcript "ci_artifacts/gpt4o-tool-e2e-transcript.json"
+            --artifact-dir "$artifactDir" `
+            --transcript "$artifactDir/transcript.json"
+
+      - name: Print GPT E2E artifact summary
+        if: always()
+        shell: pwsh
+        run: |
+          $artifactDir = "ci_artifacts/gpt4o-tool-e2e"
+          if (-not (Test-Path $artifactDir)) {
+            Write-Host "No GPT E2E artifact directory exists."
+            exit 0
+          }
+          $paths = @(
+            "transcript.json",
+            "selected-invocable.json",
+            "generated-mcp-schema.json",
+            "job-status-history.json",
+            "downloaded-mcp-schema.json"
+          )
+          foreach ($name in $paths) {
+            $path = Join-Path $artifactDir $name
+            Write-Host "$name exists=$(Test-Path $path)"
+          }
+          $transcriptPath = Join-Path $artifactDir "transcript.json"
+          if (Test-Path $transcriptPath) {
+            $transcript = Get-Content $transcriptPath -Raw | ConvertFrom-Json
+            $toolCallCount = @($transcript.events | Where-Object { $_.type -eq "tool_call" }).Count
+            $toolResultCount = @($transcript.events | Where-Object { $_.type -eq "tool_result" }).Count
+            Write-Host "job_id=$($transcript.job_id)"
+            Write-Host "sentinel=$($transcript.sentinel)"
+            Write-Host "tool_call_events=$toolCallCount"
+            Write-Host "tool_result_events=$toolResultCount"
+          }
+          $selectedPath = Join-Path $artifactDir "selected-invocable.json"
+          if (Test-Path $selectedPath) {
+            $selected = Get-Content $selectedPath -Raw | ConvertFrom-Json
+            Write-Host "selected_tool=$($selected.name)"
+          }
+          $schemaPath = Join-Path $artifactDir "generated-mcp-schema.json"
+          if (Test-Path $schemaPath) {
+            $schema = Get-Content $schemaPath -Raw | ConvertFrom-Json
+            Write-Host "schema_tool_count=$(@($schema.tools).Count)"
+          }
 
       - name: Upload GPT E2E transcript
         if: always()

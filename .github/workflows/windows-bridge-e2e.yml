@@ -12,6 +12,7 @@ env:
   VM_NAME: mcpfactory-runner-vm
   KEY_VAULT: mcp-factory-kv
   BRIDGE_URL: http://20.124.33.45:8090
+  PIPELINE_APP: mcp-factory-pipeline
 
 jobs:
   bridge-e2e:
@@ -54,17 +55,73 @@ jobs:
           echo "Bridge did not become healthy in time" >&2
           exit 1
 
+      - name: Capture preflight diagnostics
+        if: always()
+        run: |
+          mkdir -p ci_artifacts/windows-bridge-e2e/preflight
+          az vm get-instance-view \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            -o json > ci_artifacts/windows-bridge-e2e/preflight/vm-instance-view.json || true
+          az containerapp revision list \
+            -g "$RESOURCE_GROUP" \
+            -n "$PIPELINE_APP" \
+            -o json > ci_artifacts/windows-bridge-e2e/preflight/pipeline-revisions.json || true
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" \
+            "$BRIDGE_URL/health" > ci_artifacts/windows-bridge-e2e/preflight/bridge-health.txt || true
+          az vm run-command invoke \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            --command-id RunPowerShellScript \
+            --scripts '$ErrorActionPreference = "Continue"
+          Write-Output "repo_commit:"
+          if (Test-Path "C:\mcp-factory\.git") { git -C "C:\mcp-factory" rev-parse HEAD }
+          Write-Output "bridge_tasks:"
+          Get-ScheduledTask | Where-Object { $_.TaskName -like "*Bridge*" -or $_.TaskName -like "*MCP*" } | Select-Object TaskName,TaskPath,State | ConvertTo-Json -Compress
+          Write-Output "python_processes:"
+          Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path,StartTime | ConvertTo-Json -Compress' \
+            --query "value[0].message" \
+            -o tsv > ci_artifacts/windows-bridge-e2e/preflight/vm-bridge-task.txt || true
+
       - name: Run direct bridge E2E
         run: |
           python scripts/ci_verify.py direct-bridge-e2e \
             --bridge-url "$BRIDGE_URL" \
             --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" \
-            --out ci_artifacts/bridge-e2e-summary.json \
+            --out-dir ci_artifacts/windows-bridge-e2e \
             --targets \
               'C:\Windows\System32\kernel32.dll' \
               'C:\Windows\System32\cmd.exe' \
               'C:\Windows\System32\notepad.exe' \
-              'C:\Windows\System32\shell32.dll'
+              'C:\Windows\System32\shell32.dll' \
+            --optional-targets \
+              'C:\Windows\System32\stdole2.tlb'
+
+      - name: Capture failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p ci_artifacts/windows-bridge-e2e/failure
+          az vm get-instance-view \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            -o json > ci_artifacts/windows-bridge-e2e/failure/vm-instance-view.json || true
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" \
+            "$BRIDGE_URL/health" > ci_artifacts/windows-bridge-e2e/failure/bridge-health.txt || true
+          az vm run-command invoke \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            --command-id RunPowerShellScript \
+            --scripts '$ErrorActionPreference = "Continue"
+          Write-Output "bridge_tasks:"
+          Get-ScheduledTask | Where-Object { $_.TaskName -like "*Bridge*" -or $_.TaskName -like "*MCP*" } | Select-Object TaskName,TaskPath,State | ConvertTo-Json -Compress
+          Write-Output "python_processes:"
+          Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path,StartTime | ConvertTo-Json -Compress
+          Write-Output "recent_bridge_logs:"
+          Get-ChildItem -Path "C:\mcp-factory" -Filter "*bridge*.log" -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { Write-Output "LOG:$($_.FullName)"; Get-Content $_.FullName -Tail 80 -ErrorAction SilentlyContinue }' \
+            --query "value[0].message" \
+            -o tsv > ci_artifacts/windows-bridge-e2e/failure/vm-bridge-task.txt || true
 
       - name: Upload bridge E2E artifacts
         if: always()
@@ -77,4 +134,3 @@ jobs:
       - name: Deallocate bridge VM
         if: always()
         run: az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"
-

@@ -1,84 +1,17 @@
-# MCP Factory — CI / CD
-#
-# Trigger: every push to main (tests + deploy) and every PR to main (tests only).
-#
-# Prerequisites — add these as GitHub Actions secrets in the repo settings:
-#   AZURE_CLIENT_ID       f70e3ce7-3790-49de-95b0-2de22fc0adbe
-#   AZURE_TENANT_ID       bfddc1f5-1e88-471c-9b5e-44611ddd3c22
-#   AZURE_SUBSCRIPTION_ID abb10328-e7f1-4d4a-9067-c1967fd70429
-#
-# Azure one-time setup (run once, then commit this file):
-#   # Add federated credential to the Managed Identity for GitHub OIDC
-#   az identity federated-credential create \
-#     --identity-name mcp-factory-identity \
-#     --resource-group mcp-factory-rg \
-#     --name github-actions \
-#     --issuer https://token.actions.githubusercontent.com \
-#     --subject repo:evanking12/mcp-factory:ref:refs/heads/main \
-#     --audiences api://AzureADTokenExchange
-#
-#   # Grant Contributor on each ACA app (needed for az containerapp update)
-#   # Note: "Azure ContainerApps Contributor" is not a real built-in role — use "Contributor" scoped per-app.
-#   az role assignment create \
-#     --assignee ef864658-442a-4dc1-b8d9-37f01f79fe8d \
-#     --role "Contributor" \
-#     --scope /subscriptions/abb10328-e7f1-4d4a-9067-c1967fd70429/resourceGroups/mcp-factory-rg/providers/Microsoft.App/containerApps/mcp-factory-pipeline
-#   az role assignment create \
-#     --assignee ef864658-442a-4dc1-b8d9-37f01f79fe8d \
-#     --role "Contributor" \
-#     --scope /subscriptions/abb10328-e7f1-4d4a-9067-c1967fd70429/resourceGroups/mcp-factory-rg/providers/Microsoft.App/containerApps/mcp-factory-ui
-#   # DONE — both assignments created 2026-03-07
-#
-# All other roles (AcrPush, Storage, OpenAI, Key Vault) are already assigned.
-
-name: CI / CD
+name: Legacy CI Smoke (Manual)
 
 on:
-  push:
-    branches: [main]
-    # Only run the full CI/CD pipeline for changes that don't already have a
-    # dedicated deploy workflow (deploy-pipeline.yml, deploy-ui.yml).
-    # api/**, src/**, Dockerfile, and ui/** are handled by those workflows,
-    # avoiding a double-deploy race where two jobs update the same Container App
-    # simultaneously.  ci-cd.yml now owns tests + build only; deploy-pipeline.yml
-    # and deploy-ui.yml own their respective deploys.
-    paths-ignore:
-      - 'api/**'
-      - 'src/**'
-      - 'Dockerfile'
-      - 'requirements.txt'
-      - 'ui/**'
-      - 'Dockerfile.ui'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: 'Skip tests and deploy immediately (hotfix mode)'
-        required: false
-        default: 'false'
-        type: choice
-        options: ['false', 'true']
 
 permissions:
-  id-token: write   # required for Azure OIDC login
   contents: read
 
-env:
-  RESOURCE_GROUP:  mcp-factory-rg
-  ACR_NAME:        mcpfactoryacr
-  PIPELINE_IMAGE:  mcpfactoryacr.azurecr.io/mcp-factory-pipeline
-  UI_IMAGE:        mcpfactoryacr.azurecr.io/mcp-factory-ui
-  PIPELINE_APP:    mcp-factory-pipeline
-  UI_APP:          mcp-factory-ui
-  HEALTH_URL:      https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io/health
-
 jobs:
-  # ── 1. Tests ────────────────────────────────────────────────────────────────
-  test:
-    name: Python tests
+  linux-smoke:
+    name: Manual Linux smoke
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    timeout-minutes: 15
+
     steps:
       - uses: actions/checkout@v4
 
@@ -90,190 +23,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r api/requirements.txt
 
-      - name: Run pytest
-        # Skip mcp_stdio tests on Linux — they require a live Windows session
-        # (pywinauto, Notepad on the desktop). Those run in the gui-tests job below.
-        run: pytest tests/ -v --tb=short --ignore=tests/test_mcp_stdio.py
+      - name: Run Python smoke tests
+        run: python -m pytest tests -q --ignore=tests/test_mcp_stdio.py
 
-  # ── 2. GUI automation tests (self-hosted Windows runner) ───────────────────
-  gui-tests:
-    name: GUI automation tests (Windows)
-    runs-on: [self-hosted, windows, x64]
-    timeout-minutes: 15
-    # Run in parallel with the Linux test job — no dependency between them.
-    # Only runs on push to main so we don't spin up Notepad on every PR.
-    if: github.ref == 'refs/heads/main'
+      - name: Run sponsor fixture contract
+        run: python scripts/ci_verify.py run-fixture-contract --out ci_artifacts/legacy-smoke-contract
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Sync bridge files from checkout
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path C:\mcp-bridge | Out-Null
-          $bridgeSrc = "$env:GITHUB_WORKSPACE\scripts\gui_bridge.py"
-          $bridgeDst = "C:\mcp-bridge\gui_bridge.py"
-          # Only restart the bridge if the script itself changed — avoids
-          # clearing the analysis cache and triggering GUI cold-start on
-          # every push to main that happens to touch any file.
-          $needsRestart = $false
-          if (-not (Test-Path $bridgeDst)) {
-            $needsRestart = $true
-          } elseif ((Get-FileHash $bridgeSrc).Hash -ne (Get-FileHash $bridgeDst).Hash) {
-            $needsRestart = $true
-          }
-          Copy-Item $bridgeSrc -Destination $bridgeDst -Force
-          if (Test-Path "$env:GITHUB_WORKSPACE\src\discovery") {
-            Copy-Item "$env:GITHUB_WORKSPACE\src\discovery" -Destination C:\mcp-bridge\discovery -Recurse -Force
-          }
-          if ($needsRestart) {
-            Write-Host "gui_bridge.py changed — restarting bridge service"
-            Stop-ScheduledTask -TaskName MCPFactoryGUIBridge -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 1
-            Start-ScheduledTask -TaskName MCPFactoryGUIBridge -ErrorAction SilentlyContinue
-          } else {
-            Write-Host "gui_bridge.py unchanged — bridge left running (cache preserved)"
-          }
-
-      - uses: actions/setup-python@v5
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          python-version: "3.10"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt -r api/requirements.txt `
-            flask>=3.0 pywinauto comtypes pywin32
-        shell: pwsh
-
-      # ── pywinauto GUI tests ─────────────────────────────────────────────
-      - name: Run pywinauto UI tests
-        run: pytest test_notepad_uia.py -v --tb=short
-        shell: pwsh
-
-      # ── MCP stdio protocol tests (includes Windows GUI tool call) ───────
-      - name: Run MCP stdio protocol tests
-        run: pytest tests/test_mcp_stdio.py -v --tb=short
-        shell: pwsh
-
-      # ── End-to-end: launch MCP server, send initialize + tools/list ────
-      - name: MCP end-to-end tool call smoke test
-        run: python scripts/mcp_smoke_test.py
-        shell: pwsh
-
-  # ── 3. Build & push Docker images ───────────────────────────────────────────
-  build:
-    name: Build & push Docker images
-    needs: [test]
-    if: |
-      always() &&
-      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
-      (needs.test.result == 'success' || needs.test.result == 'skipped')
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    outputs:
-      image-tag: ${{ github.sha }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Upgrade Azure CLI
-        run: az upgrade --yes --all 2>/dev/null || pip install --upgrade azure-cli
-
-      - name: Azure login (OIDC — no stored secrets)
-        uses: azure/login@v2
-        with:
-          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Build & push pipeline image
-        run: |
-          docker build \
-            -t ${{ env.PIPELINE_IMAGE }}:${{ github.sha }} \
-            -t ${{ env.PIPELINE_IMAGE }}:latest \
-            .
-          docker push ${{ env.PIPELINE_IMAGE }}:${{ github.sha }}
-          docker push ${{ env.PIPELINE_IMAGE }}:latest
-
-      - name: Build & push UI image
-        run: |
-          docker build \
-            -t ${{ env.UI_IMAGE }}:${{ github.sha }} \
-            -t ${{ env.UI_IMAGE }}:latest \
-            -f Dockerfile.ui \
-            .
-          docker push ${{ env.UI_IMAGE }}:${{ github.sha }}
-          docker push ${{ env.UI_IMAGE }}:latest
-
-  # ── 4. Deploy to Azure Container Apps ───────────────────────────────────────
-  deploy:
-    name: Deploy to ACA
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Upgrade Azure CLI
-        run: az upgrade --yes --all 2>/dev/null || pip install --upgrade azure-cli
-
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy pipeline container
-        run: |
-          az containerapp update \
-            --name ${{ env.PIPELINE_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
-            --image ${{ env.PIPELINE_IMAGE }}:${{ needs.build.outputs.image-tag }} \
-            --min-replicas 1
-          az containerapp ingress update \
-            --name ${{ env.PIPELINE_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
-            --target-port 8000
-
-      - name: Deploy UI container
-        run: |
-          az containerapp update \
-            --name ${{ env.UI_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
-            --min-replicas 1 \
-            --image ${{ env.UI_IMAGE }}:${{ needs.build.outputs.image-tag }}
-          az containerapp ingress update \
-            --name ${{ env.UI_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
-            --target-port 8080
-
-      - name: Wait for revision to stabilise
-        run: sleep 30
-
-      - name: Smoke-test pipeline health
-        run: |
-          curl -sf ${{ env.HEALTH_URL }} | grep -q '"status":"ok"'
-          echo "Pipeline health check passed"
-
-      - name: Smoke-test UI health
-        run: |
-          UI_URL="https://$(az containerapp show \
-            --name ${{ env.UI_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
-            --query properties.configuration.ingress.fqdn -o tsv)"
-          curl -sf "$UI_URL/health" | grep -q '"status":"ok"'
-          echo "UI health check passed"
+          name: legacy-ci-smoke
+          path: ci_artifacts
+          if-no-files-found: ignore
