@@ -67,6 +67,8 @@ logger = logging.getLogger("gui_bridge")
 # which matters most for UWP stubs that require a full cold-start window wait.
 _ANALYSIS_CACHE: dict[str, tuple[float, dict]] = {}
 _ANALYSIS_CACHE_TTL = 3600  # seconds — 1 hour
+_BRIDGE_PROCESS_ID = os.getpid()
+_BRIDGE_CREATION_DATE = f"{time.time():.6f}"
 
 # ── Active analysis cancellation ─────────────────────────────────────────────
 # Only one analysis runs at a time.  When a new /analyze request arrives,
@@ -1703,9 +1705,28 @@ async def execute(
     return JSONResponse({"result": result})
 
 
+def _current_process_session_id() -> int | None:
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        sid = ctypes.c_ulong(0)
+        ok = ctypes.windll.kernel32.ProcessIdToSessionId(_BRIDGE_PROCESS_ID, ctypes.byref(sid))
+        return int(sid.value) if ok else None
+    except Exception:
+        return None
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "platform": "windows"}
+    return {
+        "status": "ok",
+        "platform": "windows",
+        "process_id": _BRIDGE_PROCESS_ID,
+        "creation_date": _BRIDGE_CREATION_DATE,
+        "session_id": _current_process_session_id(),
+    }
 
 
 @app.get("/debug_session")

@@ -318,10 +318,15 @@ def _bridge_health(bridge_url: str, bridge_secret: str, *, timeout: int = 10) ->
     try:
         with request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw) if raw else None
+            except json.JSONDecodeError:
+                payload = None
             return {
                 "ok": 200 <= resp.status < 300,
                 "status": resp.status,
                 "body": raw,
+                "json": payload,
                 "elapsed_seconds": round(time.perf_counter() - started, 3),
             }
     except Exception as exc:
@@ -357,6 +362,136 @@ def _wait_bridge_health(
             last["wait_timeout_seconds"] = timeout
             return last
         time.sleep(interval)
+
+
+def _bridge_cache_key(bridge_url: str) -> str:
+    return bridge_url.rstrip("/")
+
+
+def _int_or_none(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bridge_health_payload(health: dict) -> dict:
+    payload = health.get("json")
+    if isinstance(payload, dict):
+        return payload
+    body = health.get("body")
+    if isinstance(body, str) and body.strip():
+        try:
+            parsed = json.loads(body)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _bridge_health_identity(health: dict) -> dict | None:
+    payload = _bridge_health_payload(health)
+    process_id = _int_or_none(payload.get("process_id"))
+    creation_date = payload.get("creation_date")
+    if process_id is None or creation_date in (None, ""):
+        return None
+    return {
+        "process_id": process_id,
+        "creation_date": str(creation_date),
+        "session_id": _int_or_none(payload.get("session_id")),
+    }
+
+
+def _load_bridge_session_cache(cache_path: Path | None) -> dict:
+    if not cache_path or not cache_path.exists():
+        return {}
+    try:
+        data = _load_json(cache_path)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _cached_bridge_session_proof(
+    *,
+    cache_path: Path | None,
+    bridge_url: str,
+    health: dict,
+    resource_group: str,
+    vm_name: str,
+    required_session_id: int | None,
+) -> dict | None:
+    if not health.get("ok"):
+        return None
+    identity = _bridge_health_identity(health)
+    if not identity:
+        return None
+    cache = _load_bridge_session_cache(cache_path)
+    entry = cache.get(_bridge_cache_key(bridge_url))
+    if not isinstance(entry, dict):
+        return None
+    if str(entry.get("vm_name") or "") != str(vm_name or ""):
+        return None
+    if str(entry.get("resource_group") or "") != str(resource_group or ""):
+        return None
+    if _int_or_none(entry.get("process_id")) != identity["process_id"]:
+        return None
+    if str(entry.get("creation_date") or "") != identity["creation_date"]:
+        return None
+    cached_session_id = _int_or_none(entry.get("session_id"))
+    health_session_id = identity.get("session_id")
+    if health_session_id is not None and cached_session_id != health_session_id:
+        return None
+    if required_session_id is not None and cached_session_id != required_session_id:
+        return None
+    proof = {
+        "attempted": False,
+        "ok": True,
+        "cached": True,
+        "source": "bridge_session_cache",
+        "process_id": identity["process_id"],
+        "creation_date": identity["creation_date"],
+        "session_id": cached_session_id,
+        "checked_at": entry.get("checked_at"),
+        "vm_name": entry.get("vm_name"),
+        "resource_group": entry.get("resource_group"),
+    }
+    return proof
+
+
+def _write_bridge_session_cache(
+    *,
+    cache_path: Path | None,
+    bridge_url: str,
+    health: dict,
+    process_info: dict,
+    resource_group: str,
+    vm_name: str,
+) -> None:
+    if not cache_path or not process_info.get("ok"):
+        return
+    process_id = _int_or_none(process_info.get("process_id"))
+    session_id = _int_or_none(process_info.get("session_id"))
+    creation_date = process_info.get("creation_date")
+    identity = _bridge_health_identity(health)
+    if identity and identity.get("process_id") == process_id:
+        creation_date = identity.get("creation_date")
+        if identity.get("session_id") is not None:
+            session_id = identity.get("session_id")
+    if process_id is None or creation_date in (None, ""):
+        return
+    cache = _load_bridge_session_cache(cache_path)
+    cache[_bridge_cache_key(bridge_url)] = {
+        "process_id": process_id,
+        "creation_date": str(creation_date),
+        "session_id": session_id,
+        "checked_at": time.time(),
+        "vm_name": vm_name,
+        "resource_group": resource_group,
+    }
+    _write_json(cache_path, cache)
 
 
 def _ps_quote(value: str) -> str:
@@ -593,10 +728,23 @@ def _ensure_bridge_health(
     restart_task_name: str = "MCP-Factory-Bridge-Interactive",
     restart_timeout: int = 90,
     required_session_id: int | None = 1,
+    session_cache_path: Path | None = None,
 ) -> dict:
     health = _wait_bridge_health(bridge_url, bridge_secret, timeout=timeout)
     process_info = None
     if health.get("ok") and required_session_id is not None and restart_resource_group and restart_vm_name:
+        cached_proof = _cached_bridge_session_proof(
+            cache_path=session_cache_path,
+            bridge_url=bridge_url,
+            health=health,
+            resource_group=restart_resource_group,
+            vm_name=restart_vm_name,
+            required_session_id=required_session_id,
+        )
+        if cached_proof:
+            health["bridge_process"] = cached_proof
+            health["restart_attempted"] = False
+            return health
         process_info = _bridge_process_info(
             resource_group=restart_resource_group,
             vm_name=restart_vm_name,
@@ -604,6 +752,14 @@ def _ensure_bridge_health(
         )
         health["bridge_process"] = process_info
         if process_info.get("ok") and process_info.get("session_id") == required_session_id:
+            _write_bridge_session_cache(
+                cache_path=session_cache_path,
+                bridge_url=bridge_url,
+                health=health,
+                process_info=process_info,
+                resource_group=restart_resource_group,
+                vm_name=restart_vm_name,
+            )
             health["restart_attempted"] = False
             return health
         health["ok"] = False
@@ -679,6 +835,14 @@ def _ensure_bridge_health(
                 )
                 after_vm_restart["bridge_process"] = process_info
                 if process_info.get("ok") and process_info.get("session_id") == required_session_id:
+                    _write_bridge_session_cache(
+                        cache_path=session_cache_path,
+                        bridge_url=bridge_url,
+                        health=after_vm_restart,
+                        process_info=process_info,
+                        resource_group=restart_resource_group,
+                        vm_name=restart_vm_name,
+                    )
                     return after_vm_restart
                 after_vm_restart["ok"] = False
                 after_vm_restart["error"] = (
@@ -686,6 +850,15 @@ def _ensure_bridge_health(
                     f"found {process_info.get('session_id')} after VM restart"
                 )
                 return after_vm_restart
+        else:
+            _write_bridge_session_cache(
+                cache_path=session_cache_path,
+                bridge_url=bridge_url,
+                health=recovered,
+                process_info=process_info,
+                resource_group=restart_resource_group,
+                vm_name=restart_vm_name,
+            )
     return recovered
 
 
@@ -1170,6 +1343,7 @@ def _run_bridge_case(
     bridge_task_name: str = "MCP-Factory-Bridge-Interactive",
     bridge_restart_timeout: int = 90,
     bridge_required_session_id: int | None = 1,
+    bridge_session_cache: Path | None = None,
     expect_source_type: str = "",
     expect_name_contains: str = "",
 ) -> dict:
@@ -1180,6 +1354,7 @@ def _run_bridge_case(
     summary_path = target_dir / f"{safe_name}.summary.json"
     error_path = target_dir / f"{safe_name}.error.txt"
     requested_types = types or ["gui", "com", "cli", "registry", "dotnet", "rpc", "directory", "ghidra"]
+    bridge_session_cache = bridge_session_cache or (out_dir / ".bridge-session-cache.json")
 
     print(f"START bridge target label={safe_name} kind={kind} target={target}")
     health_before = _ensure_bridge_health(
@@ -1191,6 +1366,7 @@ def _run_bridge_case(
         restart_task_name=bridge_task_name,
         restart_timeout=bridge_restart_timeout,
         required_session_id=bridge_required_session_id,
+        session_cache_path=bridge_session_cache,
     )
     attempts = []
     started = time.perf_counter()
@@ -1236,6 +1412,7 @@ def _run_bridge_case(
             restart_task_name=bridge_task_name,
             restart_timeout=bridge_restart_timeout,
             required_session_id=bridge_required_session_id,
+            session_cache_path=bridge_session_cache,
         )
         retry_raw_path = target_dir / f"{safe_name}.retry.raw.jsonl"
         if retry_health.get("ok"):
@@ -1290,6 +1467,7 @@ def _run_bridge_case(
             restart_task_name=bridge_task_name,
             restart_timeout=bridge_restart_timeout,
             required_session_id=bridge_required_session_id,
+            session_cache_path=bridge_session_cache,
         )
         if not post_grace_health.get("ok"):
             passed = False
@@ -1332,6 +1510,7 @@ def _run_bridge_case(
         "bridge_restart_vm_name": bridge_vm_name,
         "bridge_restart_task_name": bridge_task_name,
         "bridge_required_session_id": bridge_required_session_id,
+        "bridge_session_cache_path": str(bridge_session_cache),
         "raw_response_path": result.get("raw_response_path") or str(raw_path),
         "summary_path": str(summary_path),
         "bridge_errors": bridge_errors,
@@ -1361,11 +1540,12 @@ def _run_bridge_case(
 
 
 def cmd_bridge_target_e2e(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out_dir)
     item = _run_bridge_case(
         bridge_url=args.bridge_url.rstrip("/"),
         bridge_secret=args.bridge_secret,
         target=args.target,
-        out_dir=Path(args.out_dir),
+        out_dir=out_dir,
         label=args.label,
         kind=args.kind,
         hints=args.hints,
@@ -1380,6 +1560,7 @@ def cmd_bridge_target_e2e(args: argparse.Namespace) -> int:
         bridge_task_name=args.bridge_task_name,
         bridge_restart_timeout=args.bridge_restart_timeout,
         bridge_required_session_id=args.bridge_required_session_id if args.bridge_required_session_id >= 0 else None,
+        bridge_session_cache=Path(args.bridge_session_cache) if args.bridge_session_cache else out_dir / ".bridge-session-cache.json",
         expect_source_type=args.expect_source_type,
         expect_name_contains=args.expect_name_contains,
     )
@@ -1399,6 +1580,7 @@ def cmd_direct_bridge_e2e(args: argparse.Namespace) -> int:
     optional_targets = args.optional_targets or []
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    bridge_session_cache = Path(args.bridge_session_cache) if args.bridge_session_cache else out_dir / ".bridge-session-cache.json"
 
     summary = [
         _run_bridge_case(
@@ -1415,6 +1597,7 @@ def cmd_direct_bridge_e2e(args: argparse.Namespace) -> int:
             bridge_task_name=args.bridge_task_name,
             bridge_restart_timeout=args.bridge_restart_timeout,
             bridge_required_session_id=args.bridge_required_session_id if args.bridge_required_session_id >= 0 else None,
+            bridge_session_cache=bridge_session_cache,
         )
         for target, required in [(t, True) for t in required_targets] + [(t, False) for t in optional_targets]
     ]
@@ -1749,6 +1932,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bridge-task-name", default=os.getenv("BRIDGE_TASK_NAME", "MCP-Factory-Bridge-Interactive"))
     p.add_argument("--bridge-restart-timeout", type=int, default=90)
     p.add_argument("--bridge-required-session-id", type=int, default=1)
+    p.add_argument("--bridge-session-cache", default="")
     p.add_argument("--out", default="")
     p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
     p.set_defaults(func=cmd_direct_bridge_e2e)
@@ -1769,6 +1953,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bridge-task-name", default=os.getenv("BRIDGE_TASK_NAME", "MCP-Factory-Bridge-Interactive"))
     p.add_argument("--bridge-restart-timeout", type=int, default=90)
     p.add_argument("--bridge-required-session-id", type=int, default=1)
+    p.add_argument("--bridge-session-cache", default="")
     p.add_argument("--min-invocables", type=int, default=1)
     p.add_argument("--required", default="true")
     p.add_argument("--expect-source-type", default="")

@@ -131,6 +131,20 @@ az containerapp update --name mcp-factory-ui --resource-group mcp-factory-rg --i
   - ✅ Budget alert script — `scripts/setup_budget_alert.ps1` ($150/month cap)
   - ✅ FERPA compliance statement — below
 
+### Sponsor Demo E2E
+
+The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml). The workflow uploads a GitHub Actions artifact named `sponsor-demo-e2e`.
+
+Key artifact paths:
+
+- `ci_artifacts/demo/final-summary.md`
+- `ci_artifacts/demo/final-summary.json`
+- `ci_artifacts/demo/windows/summary.json`
+- `ci_artifacts/demo/windows/cmd_exe/cmd_exe.summary.json`
+- `ci_artifacts/demo/windows/notepad_exe/notepad_exe.summary.json`
+
+These are CI proof artifacts from GitHub Actions. They are separate from the app UI blob downloads served by `/api/download/{job_id}/{filename}`.
+
 ### Known Gaps
 
 | Gap | Status |
