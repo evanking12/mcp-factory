@@ -428,6 +428,161 @@ Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue
         }
 
 
+def _restart_bridge_vm(*, resource_group: str, vm_name: str, timeout: int = 420) -> dict:
+    if not resource_group or not vm_name:
+        return {
+            "attempted": False,
+            "ok": False,
+            "error": "VM restart skipped: resource group or VM name missing",
+        }
+    cmd = ["az", "vm", "restart", "-g", resource_group, "-n", vm_name]
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        return {
+            "attempted": True,
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+
+
+def _ensure_bridge_vm_running(*, resource_group: str, vm_name: str, timeout: int = 360) -> dict:
+    if not resource_group or not vm_name:
+        return {
+            "attempted": False,
+            "ok": False,
+            "error": "VM start skipped: resource group or VM name missing",
+        }
+
+    view_cmd = [
+        "az", "vm", "get-instance-view",
+        "-g", resource_group,
+        "-n", vm_name,
+        "--query", "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus|[0]",
+        "-o", "tsv",
+    ]
+    started = time.perf_counter()
+    try:
+        view = subprocess.run(view_cmd, check=False, capture_output=True, text=True, timeout=60)
+        power = view.stdout.strip()
+        if view.returncode == 0 and power == "VM running":
+            return {
+                "attempted": True,
+                "ok": True,
+                "already_running": True,
+                "power": power,
+                "elapsed_seconds": round(time.perf_counter() - started, 3),
+            }
+    except Exception:
+        power = ""
+
+    cmd = ["az", "vm", "start", "-g", resource_group, "-n", vm_name]
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        return {
+            "attempted": True,
+            "ok": proc.returncode == 0,
+            "already_running": False,
+            "power": power,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "already_running": False,
+            "power": power,
+            "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+
+
+def _bridge_process_info(
+    *,
+    resource_group: str,
+    vm_name: str,
+    timeout: int = 90,
+) -> dict:
+    if not resource_group or not vm_name:
+        return {
+            "attempted": False,
+            "ok": False,
+            "error": "bridge process check skipped: resource group or VM name missing",
+        }
+
+    script = """
+$ErrorActionPreference = "Continue"
+$conn = Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if (-not $conn) {
+    @{ ok = $false; error = "port 8090 is not listening" } | ConvertTo-Json -Compress
+    exit 0
+}
+$proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)"
+if (-not $proc) {
+    @{ ok = $false; error = "listener process not found"; process_id = $conn.OwningProcess } |
+        ConvertTo-Json -Compress
+    exit 0
+}
+@{
+    ok = $true
+    process_id = $proc.ProcessId
+    parent_process_id = $proc.ParentProcessId
+    name = $proc.Name
+    command_line = $proc.CommandLine
+    creation_date = $proc.CreationDate
+    session_id = $proc.SessionId
+} | ConvertTo-Json -Compress
+"""
+    cmd = [
+        "az", "vm", "run-command", "invoke",
+        "-g", resource_group,
+        "-n", vm_name,
+        "--command-id", "RunPowerShellScript",
+        "--scripts", script,
+        "--query", "value[0].message",
+        "-o", "tsv",
+    ]
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        result = {
+            "attempted": True,
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+        if proc.returncode == 0 and proc.stdout.strip():
+            try:
+                payload = json.loads(proc.stdout.strip().splitlines()[-1])
+                result.update(payload if isinstance(payload, dict) else {"raw_payload": payload})
+            except json.JSONDecodeError:
+                result["parse_error"] = "failed to parse bridge process JSON"
+        return result
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+
+
 def _ensure_bridge_health(
     bridge_url: str,
     bridge_secret: str,
@@ -437,9 +592,26 @@ def _ensure_bridge_health(
     restart_vm_name: str = "",
     restart_task_name: str = "MCP-Factory-Bridge-Interactive",
     restart_timeout: int = 90,
+    required_session_id: int | None = 1,
 ) -> dict:
     health = _wait_bridge_health(bridge_url, bridge_secret, timeout=timeout)
-    if health.get("ok"):
+    process_info = None
+    if health.get("ok") and required_session_id is not None and restart_resource_group and restart_vm_name:
+        process_info = _bridge_process_info(
+            resource_group=restart_resource_group,
+            vm_name=restart_vm_name,
+            timeout=restart_timeout,
+        )
+        health["bridge_process"] = process_info
+        if process_info.get("ok") and process_info.get("session_id") == required_session_id:
+            health["restart_attempted"] = False
+            return health
+        health["ok"] = False
+        health["error"] = (
+            f"bridge process SessionId must be {required_session_id}; "
+            f"found {process_info.get('session_id')}"
+        )
+    elif health.get("ok"):
         health["restart_attempted"] = False
         return health
 
@@ -452,6 +624,11 @@ def _ensure_bridge_health(
         "RESTART bridge: health check failed; "
         f"starting scheduled task {restart_task_name} on {restart_vm_name}"
     )
+    vm_start = _ensure_bridge_vm_running(
+        resource_group=restart_resource_group,
+        vm_name=restart_vm_name,
+        timeout=max(360, restart_timeout),
+    )
     restart = _restart_bridge_task(
         resource_group=restart_resource_group,
         vm_name=restart_vm_name,
@@ -460,7 +637,55 @@ def _ensure_bridge_health(
     )
     recovered = _wait_bridge_health(bridge_url, bridge_secret, timeout=timeout)
     recovered["restart_attempted"] = True
+    recovered["vm_start_result"] = vm_start
     recovered["restart_result"] = restart
+    if recovered.get("ok") and required_session_id is not None and restart_resource_group and restart_vm_name:
+        process_info = _bridge_process_info(
+            resource_group=restart_resource_group,
+            vm_name=restart_vm_name,
+            timeout=restart_timeout,
+        )
+        recovered["bridge_process"] = process_info
+        if not process_info.get("ok") or process_info.get("session_id") != required_session_id:
+            recovered["ok"] = False
+            recovered["error"] = (
+                f"bridge process SessionId must be {required_session_id}; "
+                f"found {process_info.get('session_id')}"
+            )
+            print(
+                "RESTART bridge VM: bridge listener is not in the required "
+                f"SessionId={required_session_id}; rebooting {restart_vm_name} for AutoLogon"
+            )
+            vm_restart = _restart_bridge_vm(
+                resource_group=restart_resource_group,
+                vm_name=restart_vm_name,
+                timeout=max(420, restart_timeout),
+            )
+            recovered["vm_restart_result"] = vm_restart
+            if vm_restart.get("ok"):
+                after_vm_restart = _wait_bridge_health(
+                    bridge_url,
+                    bridge_secret,
+                    timeout=max(timeout, 90),
+                )
+                after_vm_restart["restart_attempted"] = True
+                after_vm_restart["vm_start_result"] = vm_start
+                after_vm_restart["restart_result"] = restart
+                after_vm_restart["vm_restart_result"] = vm_restart
+                process_info = _bridge_process_info(
+                    resource_group=restart_resource_group,
+                    vm_name=restart_vm_name,
+                    timeout=restart_timeout,
+                )
+                after_vm_restart["bridge_process"] = process_info
+                if process_info.get("ok") and process_info.get("session_id") == required_session_id:
+                    return after_vm_restart
+                after_vm_restart["ok"] = False
+                after_vm_restart["error"] = (
+                    f"bridge process SessionId must be {required_session_id}; "
+                    f"found {process_info.get('session_id')} after VM restart"
+                )
+                return after_vm_restart
     return recovered
 
 
@@ -944,6 +1169,7 @@ def _run_bridge_case(
     bridge_vm_name: str = "",
     bridge_task_name: str = "MCP-Factory-Bridge-Interactive",
     bridge_restart_timeout: int = 90,
+    bridge_required_session_id: int | None = 1,
     expect_source_type: str = "",
     expect_name_contains: str = "",
 ) -> dict:
@@ -964,6 +1190,7 @@ def _run_bridge_case(
         restart_vm_name=bridge_vm_name,
         restart_task_name=bridge_task_name,
         restart_timeout=bridge_restart_timeout,
+        required_session_id=bridge_required_session_id,
     )
     attempts = []
     started = time.perf_counter()
@@ -1008,6 +1235,7 @@ def _run_bridge_case(
             restart_vm_name=bridge_vm_name,
             restart_task_name=bridge_task_name,
             restart_timeout=bridge_restart_timeout,
+            required_session_id=bridge_required_session_id,
         )
         retry_raw_path = target_dir / f"{safe_name}.retry.raw.jsonl"
         if retry_health.get("ok"):
@@ -1049,11 +1277,33 @@ def _run_bridge_case(
     passed = bool(result.get("ok") and len(matched_invocables) >= min_invocables)
     health_after = _bridge_health(bridge_url, bridge_secret)
     first_names = [str(inv.get("name", "")) for inv in matched_invocables[:20]]
+    post_grace_health = None
+    if post_grace > 0:
+        print(f"GRACE bridge target {safe_name}: sleeping {post_grace:g}s before health verification")
+        time.sleep(post_grace)
+        post_grace_health = _ensure_bridge_health(
+            bridge_url,
+            bridge_secret,
+            timeout=health_timeout,
+            restart_resource_group=bridge_resource_group,
+            restart_vm_name=bridge_vm_name,
+            restart_task_name=bridge_task_name,
+            restart_timeout=bridge_restart_timeout,
+            required_session_id=bridge_required_session_id,
+        )
+        if not post_grace_health.get("ok"):
+            passed = False
     error_text = ""
     if not passed:
         error_text = str(
             result.get("error")
             or bridge_errors
+            or (
+                "bridge not healthy after post-grace: "
+                f"{post_grace_health.get('error') or post_grace_health}"
+                if post_grace_health and not post_grace_health.get("ok")
+                else ""
+            )
             or f"matched_invocables={len(matched_invocables)} min_invocables={min_invocables}"
         )
         error_path.write_text(error_text, encoding="utf-8")
@@ -1081,11 +1331,13 @@ def _run_bridge_case(
         "bridge_restart_resource_group": bridge_resource_group,
         "bridge_restart_vm_name": bridge_vm_name,
         "bridge_restart_task_name": bridge_task_name,
+        "bridge_required_session_id": bridge_required_session_id,
         "raw_response_path": result.get("raw_response_path") or str(raw_path),
         "summary_path": str(summary_path),
         "bridge_errors": bridge_errors,
         "health_before": health_before,
         "health_after": health_after,
+        "post_grace_health": post_grace_health,
         "attempts": [
             {
                 "ok": attempt.get("ok"),
@@ -1105,9 +1357,6 @@ def _run_bridge_case(
         f"matched={len(matched_invocables)} total={len(all_invocables)} "
         f"retry_count={item['retry_count']} elapsed={item['elapsed_seconds']}s"
     )
-    if post_grace > 0:
-        print(f"GRACE bridge target {safe_name}: sleeping {post_grace:g}s before next bridge activity")
-        time.sleep(post_grace)
     return item
 
 
@@ -1130,6 +1379,7 @@ def cmd_bridge_target_e2e(args: argparse.Namespace) -> int:
         bridge_vm_name=args.bridge_vm_name,
         bridge_task_name=args.bridge_task_name,
         bridge_restart_timeout=args.bridge_restart_timeout,
+        bridge_required_session_id=args.bridge_required_session_id if args.bridge_required_session_id >= 0 else None,
         expect_source_type=args.expect_source_type,
         expect_name_contains=args.expect_name_contains,
     )
@@ -1164,6 +1414,7 @@ def cmd_direct_bridge_e2e(args: argparse.Namespace) -> int:
             bridge_vm_name=args.bridge_vm_name,
             bridge_task_name=args.bridge_task_name,
             bridge_restart_timeout=args.bridge_restart_timeout,
+            bridge_required_session_id=args.bridge_required_session_id if args.bridge_required_session_id >= 0 else None,
         )
         for target, required in [(t, True) for t in required_targets] + [(t, False) for t in optional_targets]
     ]
@@ -1497,6 +1748,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bridge-vm-name", default=os.getenv("VM_NAME", ""))
     p.add_argument("--bridge-task-name", default=os.getenv("BRIDGE_TASK_NAME", "MCP-Factory-Bridge-Interactive"))
     p.add_argument("--bridge-restart-timeout", type=int, default=90)
+    p.add_argument("--bridge-required-session-id", type=int, default=1)
     p.add_argument("--out", default="")
     p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
     p.set_defaults(func=cmd_direct_bridge_e2e)
@@ -1516,6 +1768,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bridge-vm-name", default=os.getenv("VM_NAME", ""))
     p.add_argument("--bridge-task-name", default=os.getenv("BRIDGE_TASK_NAME", "MCP-Factory-Bridge-Interactive"))
     p.add_argument("--bridge-restart-timeout", type=int, default=90)
+    p.add_argument("--bridge-required-session-id", type=int, default=1)
     p.add_argument("--min-invocables", type=int, default=1)
     p.add_argument("--required", default="true")
     p.add_argument("--expect-source-type", default="")
