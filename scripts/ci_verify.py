@@ -821,6 +821,124 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
     return 0
 
 
+def _count_pass_fail(items: list[dict]) -> dict:
+    failures = [item for item in items if not item.get("passed")]
+    return {
+        "total": len(items),
+        "passed": len(items) - len(failures),
+        "failed": len(failures),
+        "failed_ids": [str(item.get("id") or item.get("label") or item.get("target") or "-") for item in failures],
+    }
+
+
+def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
+    non_vm_path = Path(args.non_vm_summary)
+    windows_path = Path(args.windows_summary)
+    gpt_dir = Path(args.gpt_artifact_dir)
+    deallocation_path = Path(args.vm_deallocation)
+    out_path = Path(args.out)
+
+    non_vm = _load_json(non_vm_path) if non_vm_path.exists() else {"cases": [], "failures": 1, "missing": str(non_vm_path)}
+    windows = _load_json(windows_path) if windows_path.exists() else {"targets": [], "failures": 1, "missing": str(windows_path)}
+    transcript_path = gpt_dir / "transcript.json"
+    selected_path = gpt_dir / "selected-invocable.json"
+    generated_schema_path = gpt_dir / "generated-mcp-schema.json"
+    downloaded_schema_path = gpt_dir / "downloaded-mcp-schema.json"
+    job_history_path = gpt_dir / "job-status-history.json"
+
+    events = []
+    sentinel = ""
+    job_id = ""
+    if transcript_path.exists():
+        transcript = _load_json(transcript_path)
+        events = transcript.get("events") or []
+        sentinel = str(transcript.get("sentinel") or "")
+        job_id = str(transcript.get("job_id") or "")
+
+    schema_tool_count = 0
+    if generated_schema_path.exists():
+        schema = _load_json(generated_schema_path)
+        schema_tool_count = len(schema.get("tools") or [])
+
+    tool_call_seen = any(evt.get("type") == "tool_call" for evt in events if isinstance(evt, dict))
+    tool_results = [evt for evt in events if isinstance(evt, dict) and evt.get("type") == "tool_result"]
+    sentinel_seen = bool(sentinel and any(sentinel in str(evt.get("result", "")) for evt in tool_results))
+    selected_tool = ""
+    if selected_path.exists():
+        selected_tool = str(_load_json(selected_path).get("name") or "")
+
+    deallocation = _load_json(deallocation_path) if deallocation_path.exists() else {"attempted": False}
+    non_vm_counts = _count_pass_fail(non_vm.get("cases") or [])
+    windows_counts = _count_pass_fail(windows.get("targets") or [])
+    checks = {
+        "non_vm_formats_passed": non_vm_counts["failed"] == 0 and non_vm_counts["total"] > 0 and int(non_vm.get("failures", 0)) == 0,
+        "windows_targets_passed": windows_counts["failed"] == 0 and windows_counts["total"] > 0 and int(windows.get("failures", 0)) == 0,
+        "gpt_tool_call_seen": tool_call_seen,
+        "gpt_sentinel_seen": sentinel_seen,
+        "generated_schema_exists": generated_schema_path.exists() and schema_tool_count > 0,
+        "downloaded_schema_exists": downloaded_schema_path.exists(),
+        "job_history_exists": job_history_path.exists(),
+        "vm_deallocation_attempted": bool(deallocation.get("attempted")),
+        "vm_deallocation_completed": bool(deallocation.get("completed")),
+    }
+    passed = all(checks.values())
+    summary = {
+        "passed": passed,
+        "checks": checks,
+        "non_vm": non_vm_counts,
+        "windows": windows_counts,
+        "gpt": {
+            "job_id": job_id,
+            "selected_tool": selected_tool,
+            "sentinel": sentinel,
+            "tool_call_events": sum(1 for evt in events if isinstance(evt, dict) and evt.get("type") == "tool_call"),
+            "tool_result_events": len(tool_results),
+            "schema_tool_count": schema_tool_count,
+        },
+        "artifacts": {
+            "non_vm_summary": str(non_vm_path),
+            "windows_summary": str(windows_path),
+            "transcript": str(transcript_path),
+            "selected_invocable": str(selected_path),
+            "generated_schema": str(generated_schema_path),
+            "downloaded_schema": str(downloaded_schema_path),
+            "job_status_history": str(job_history_path),
+            "vm_deallocation": str(deallocation_path),
+        },
+    }
+    _write_json(out_path, summary)
+
+    markdown = Path(args.markdown) if args.markdown else None
+    if markdown:
+        lines = [
+            "# Sponsor Demo E2E Summary",
+            "",
+            f"Overall: {'PASS' if passed else 'FAIL'}",
+            "",
+            f"- Sponsor non-VM formats: {non_vm_counts['passed']}/{non_vm_counts['total']} passed",
+            f"- Windows VM targets: {windows_counts['passed']}/{windows_counts['total']} passed",
+            f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
+            f"- Sentinel seen in tool result: {checks['gpt_sentinel_seen']}",
+            f"- Generated schema tools: {schema_tool_count}",
+            f"- Downloaded schema artifact exists: {checks['downloaded_schema_exists']}",
+            f"- VM deallocation attempted: {checks['vm_deallocation_attempted']}",
+            f"- VM deallocation completed: {checks['vm_deallocation_completed']}",
+            "",
+            f"Final summary artifact: `{out_path}`",
+        ]
+        if non_vm_counts["failed_ids"]:
+            lines.append(f"- Failed sponsor formats: {', '.join(non_vm_counts['failed_ids'])}")
+        if windows_counts["failed_ids"]:
+            lines.append(f"- Failed Windows targets: {', '.join(windows_counts['failed_ids'])}")
+        markdown.parent.mkdir(parents=True, exist_ok=True)
+        markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    print(f"Sponsor Demo E2E {'PASS' if passed else 'FAIL'}: summary={out_path}")
+    if not passed:
+        raise AssertionError(f"Sponsor Demo E2E failed; see {out_path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -904,6 +1022,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("summarize-bridge-e2e")
     p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
     p.set_defaults(func=cmd_summarize_bridge_e2e)
+
+    p = sub.add_parser("summarize-sponsor-demo")
+    p.add_argument("--non-vm-summary", default="ci_artifacts/demo/non-vm/summary.json")
+    p.add_argument("--windows-summary", default="ci_artifacts/demo/windows/summary.json")
+    p.add_argument("--gpt-artifact-dir", default="ci_artifacts/demo/gpt4o")
+    p.add_argument("--vm-deallocation", default="ci_artifacts/demo/vm-deallocation.json")
+    p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
+    p.add_argument("--markdown", default="")
+    p.set_defaults(func=cmd_summarize_sponsor_demo)
 
     return parser
 
