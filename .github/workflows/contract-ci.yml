@@ -32,10 +32,12 @@ jobs:
       - name: Run sponsor-scope discovery fixtures
         run: python scripts/ci_verify.py run-fixture-contract --out ci_artifacts/contract
 
+      - name: Run sponsor binary manifest fixtures
+        run: python scripts/ci_verify.py run-sponsor-contract --out ci_artifacts/sponsor-contract
+
       - name: Upload contract artifacts
         uses: actions/upload-artifact@v4
         with:
           name: contract-ci-artifacts
-          path: ci_artifacts/contract
+          path: ci_artifacts
           if-no-files-found: error
-

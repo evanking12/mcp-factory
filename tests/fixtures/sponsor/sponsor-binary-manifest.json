@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "Sponsor-facing coverage manifest for MCP Factory project requirement categories.",
+  "non_vm_cases": [
+    { "id": "openapi", "kind": "file", "category": "OpenAPI/REST", "path": "tests/fixtures/sponsor/contoso_api.yaml", "min_invocables": 1 },
+    { "id": "jsonrpc", "kind": "file", "category": "JSON/JSON-RPC", "path": "tests/fixtures/sponsor/contoso_jsonrpc.json", "min_invocables": 1, "expect_source_type": "jsonrpc_method" },
+    { "id": "soap_wsdl", "kind": "file", "category": "SOAP/WSDL", "path": "tests/fixtures/sponsor/contoso_service.wsdl", "min_invocables": 1 },
+    { "id": "corba_idl", "kind": "file", "category": "CORBA/IDL", "path": "tests/fixtures/sponsor/contoso_service.idl", "min_invocables": 1 },
+    { "id": "rpc_idl_contract", "kind": "file", "category": "RPC IDL contract", "path": "tests/fixtures/sponsor/contoso_rpc.idl", "min_invocables": 1, "expect_source_type": "rpc" },
+    { "id": "jndi", "kind": "file", "category": "JNDI", "path": "tests/fixtures/sponsor/contoso_jndi.properties", "min_invocables": 1 },
+    { "id": "sql", "kind": "file", "category": "SQL source executable", "path": "tests/fixtures/sponsor/contoso_db.sql", "min_invocables": 1 },
+    { "id": "python", "kind": "file", "category": "Python JIT executable", "path": "tests/fixtures/sponsor/contoso_service.py", "min_invocables": 1 },
+    { "id": "javascript", "kind": "file", "category": "JavaScript JIT executable", "path": "tests/fixtures/sponsor/contoso_service.js", "min_invocables": 1 },
+    { "id": "ruby", "kind": "file", "category": "Ruby JIT executable", "path": "tests/fixtures/sponsor/contoso_service.rb", "min_invocables": 1 },
+    { "id": "php", "kind": "file", "category": "PHP JIT executable", "path": "tests/fixtures/sponsor/contoso_service.php", "min_invocables": 1 },
+    { "id": "powershell", "kind": "file", "category": "PowerShell executable script", "path": "tests/fixtures/sponsor/contoso_service.ps1", "min_invocables": 1 },
+    { "id": "cmd", "kind": "file", "category": "CMD/BAT executable script", "path": "tests/fixtures/sponsor/contoso_service.cmd", "min_invocables": 1 }
+  ],
+  "vm_cases": [
+    { "id": "kernel32_dll", "kind": "system_path", "category": "Windows DLL", "target": "C:\\Windows\\System32\\kernel32.dll", "min_invocables": 1 },
+    { "id": "cmd_exe", "kind": "system_path", "category": "Windows EXE/CLI", "target": "C:\\Windows\\System32\\cmd.exe", "min_invocables": 1 },
+    { "id": "notepad_exe", "kind": "system_path", "category": "Windows GUI EXE", "target": "C:\\Windows\\System32\\notepad.exe", "min_invocables": 1 },
+    { "id": "shell32_dll", "kind": "system_path", "category": "Windows shell DLL", "target": "C:\\Windows\\System32\\shell32.dll", "min_invocables": 1 },
+    { "id": "stdole2_tlb", "kind": "system_path", "category": "COM/DCOM Type Library", "target": "C:\\Windows\\System32\\stdole2.tlb", "min_invocables": 1, "expect_source_type": "com" },
+    { "id": "registry_contoso", "kind": "registry", "category": "Windows Registry inventory", "target": "C:\\Windows\\System32\\notepad.exe", "hints": "contoso_mcp_factory_e2e", "min_invocables": 1, "expect_source_type": "registry", "expect_name_contains": "contoso" },
+    { "id": "system32_directory", "kind": "directory", "category": "Installed directory inventory", "target": "C:\\Windows\\System32", "hints": "installed directory", "min_invocables": 1, "expect_source_type": "directory" }
+  ]
+}

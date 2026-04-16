@@ -1,0 +1,14 @@
+[
+  uuid(3f2504e0-4f89-41d3-9a0c-0305e82c3301),
+  version(1.0)
+]
+interface ContosoRpcSupport {
+  // Create a support ticket through a legacy RPC contract.
+  long RpcCreateTicket(in string customerId, in string issueCode);
+
+  // Retrieve ticket status through a legacy RPC contract.
+  long RpcGetTicketStatus(in long ticketId);
+
+  // Close a support ticket through a legacy RPC contract.
+  void RpcCloseTicket(in long ticketId, in string resolutionCode);
+};

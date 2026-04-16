@@ -314,6 +314,7 @@ def _make_invocable(
 ) -> dict[str, Any]:
     return {
         "name":        name,
+        "source_type": "registry",
         "kind":        kind,
         "confidence":  confidence,
         "tier":        2 if confidence == "medium" else 3,

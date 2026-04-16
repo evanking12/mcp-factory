@@ -1,0 +1,129 @@
+// =============================================================
+// Contoso Customer Service — CORBA IDL
+// Covers §1.b CORBA/IDL requirement.
+// =============================================================
+
+module Contoso {
+
+  // Shared data types
+  typedef string CustomerId;
+  typedef string OrderId;
+  typedef long   TicketId;
+
+  struct CustomerInfo {
+    CustomerId id;
+    string     name;
+    string     email;
+    string     phone;
+    string     tier;
+    long       loyalty_points;
+  };
+
+  struct OrderItem {
+    string sku;
+    long   quantity;
+    double unit_price;
+  };
+
+  typedef sequence<OrderItem> OrderItemList;
+
+  struct OrderSummary {
+    OrderId       id;
+    string        status;
+    double        total;
+    string        shipping_address;
+  };
+
+  exception CustomerNotFound { string reason; };
+  exception OrderNotFound    { string reason; };
+  exception InvalidPriority  { string reason; };
+
+  // ── Customer management interface ──────────────────────────
+  interface ICustomerService {
+
+    // Retrieve customer information by ID.
+    CustomerInfo getCustomer(in CustomerId customer_id)
+      raises (CustomerNotFound);
+
+    // Register a new customer account.
+    // Returns the new customer ID.
+    CustomerId registerCustomer(
+      in string name,
+      in string email,
+      in string phone);
+
+    // Update the customer's email address.
+    boolean updateEmail(
+      in CustomerId customer_id,
+      in string     new_email)
+      raises (CustomerNotFound);
+
+    // Get the loyalty point balance.
+    long getLoyaltyBalance(in CustomerId customer_id)
+      raises (CustomerNotFound);
+
+    // Redeem loyalty points for a reward.
+    boolean redeemPoints(
+      in CustomerId customer_id,
+      in long       points,
+      in string     reward_id)
+      raises (CustomerNotFound);
+
+  };
+
+  // ── Order management interface ─────────────────────────────
+  interface IOrderService {
+
+    // Place a new order. Returns the new order ID.
+    OrderId createOrder(
+      in CustomerId   customer_id,
+      in OrderItemList items,
+      in string       shipping_address,
+      in string       coupon_code)
+      raises (CustomerNotFound);
+
+    // Retrieve order summary.
+    OrderSummary getOrder(in OrderId order_id)
+      raises (OrderNotFound);
+
+    // Cancel an unshipped order.
+    boolean cancelOrder(
+      in OrderId order_id,
+      in string  reason)
+      raises (OrderNotFound);
+
+    // Process a refund. amount=0 means full refund.
+    boolean processRefund(
+      in OrderId order_id,
+      in string  reason,
+      in double  amount)
+      raises (OrderNotFound);
+
+  };
+
+  // ── Support ticket interface ───────────────────────────────
+  interface ISupportService {
+
+    // Open a new support ticket.
+    TicketId submitTicket(
+      in CustomerId customer_id,
+      in string     subject,
+      in string     description,
+      in string     priority)
+      raises (CustomerNotFound, InvalidPriority);
+
+    // Escalate a ticket to a higher priority.
+    void escalateTicket(
+      in TicketId ticket_id,
+      in string   new_priority,
+      in string   agent_id)
+      raises (InvalidPriority);
+
+    // Close a resolved ticket.
+    void closeTicket(
+      in TicketId ticket_id,
+      in string   resolution_notes);
+
+  };
+
+};

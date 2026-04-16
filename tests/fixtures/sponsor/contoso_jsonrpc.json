@@ -1,0 +1,34 @@
+{
+  "jsonrpc": "2.0",
+  "service": "ContosoCustomerService",
+  "description": "JSON-RPC facade for Contoso automated customer service.",
+  "methods": [
+    {
+      "name": "getCustomerProfile",
+      "description": "Fetch a customer profile by customer ID.",
+      "params": {
+        "customerId": "string"
+      },
+      "returns": "object"
+    },
+    {
+      "name": "createSupportTicket",
+      "description": "Create a support ticket for a customer issue.",
+      "params": {
+        "customerId": "string",
+        "category": "string",
+        "description": "string",
+        "priority": "string"
+      },
+      "returns": "object"
+    },
+    {
+      "name": "lookupOrderStatus",
+      "description": "Look up the status of a customer order.",
+      "params": {
+        "orderId": "string"
+      },
+      "returns": "object"
+    }
+  ]
+}

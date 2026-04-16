@@ -118,7 +118,7 @@ class AnalyzeRequest(BaseModel):
     hints: str = ""
     types: list[str] = [
         "gui", "com", "cli", "registry",
-        "dotnet", "rpc",
+        "dotnet", "rpc", "directory",
         "sql", "wsdl", "idl", "js", "script", "openapi", "jndi",
         "ghidra",
     ]  # base64-encoded binary content (optional): lets the bridge analyze an
@@ -230,6 +230,40 @@ def _make_serializable(obj: Any) -> Any:
 # Raised to 60 s to give Win11 UWP apps enough time to expose their UIA tree.
 GUI_ANALYZE_TIMEOUT = 60
 
+_DIRECTORY_INVENTORY_EXTS = {
+    ".exe", ".com", ".cmd", ".bat", ".dll", ".tlb", ".olb",
+    ".ps1", ".vbs", ".js", ".py", ".rb", ".php", ".sql",
+}
+_DIRECTORY_INVENTORY_LIMIT = 200
+
+
+def _directory_inventory_invocables(target: Path) -> list[dict]:
+    """Return lightweight invocables for an installed application directory."""
+    if not target.is_dir():
+        return []
+
+    invocables: list[dict] = []
+    for child in sorted(target.iterdir()):
+        if len(invocables) >= _DIRECTORY_INVENTORY_LIMIT:
+            break
+        if not child.is_file() or child.suffix.lower() not in _DIRECTORY_INVENTORY_EXTS:
+            continue
+        name = f"{target.name}_{child.stem}".lower().replace(" ", "_").replace("-", "_")
+        invocables.append({
+            "name": name,
+            "source_type": "directory",
+            "confidence": "medium",
+            "description": f"Installed directory candidate: {child.name}",
+            "parameters": [],
+            "execution": {
+                "method": "inspect_file",
+                "target_path": str(child),
+                "directory_path": str(target),
+                "file_extension": child.suffix.lower(),
+            },
+        })
+    return invocables
+
 
 def _run_analysis_sync(target: Path, requested: set, hints: str,
                        kill_event: threading.Event) -> dict:
@@ -252,6 +286,16 @@ def _run_analysis_sync(target: Path, requested: set, hints: str,
             errors["aborted"] = "superseded by newer upload"
             return True
         return False
+
+    # Installed directory inventory (§2.a installed instance)
+    if not _aborted() and "directory" in requested and target.is_dir():
+        try:
+            results = _directory_inventory_invocables(target)
+            invocables.extend(results)
+            logger.info("Directory inventory: %d candidates from %s", len(results), target)
+        except Exception as exc:
+            logger.warning("Directory inventory failed: %s", exc)
+            errors["directory"] = str(exc)
 
     # ── GUI ──────────────────────────────────────────────────────────────────
     if not _aborted() and "gui" in requested and target.suffix.lower() == ".exe":

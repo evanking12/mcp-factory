@@ -51,6 +51,8 @@ _METHOD_RE = re.compile(
     re.MULTILINE,
 )
 
+_RPC_UUID_RE = re.compile(r'\[\s*uuid\s*\(\s*([0-9a-fA-F-]{36})\s*\)', re.IGNORECASE)
+
 # Parameter: [direction] type name
 _PARAM_RE = re.compile(
     r'(?:(?P<dir>in|out|inout)\s+)?'
@@ -188,6 +190,9 @@ def analyze_idl(path: Path) -> List[Invocable]:
 
     clean = _strip_comments(source)
     invocables: List[Invocable] = []
+    rpc_uuid_match = _RPC_UUID_RE.search(source)
+    rpc_uuid = rpc_uuid_match.group(1) if rpc_uuid_match else ""
+    is_rpc_idl = bool(rpc_uuid)
 
     # Scan for interface blocks
     for iface_m in _INTERFACE_RE.finditer(clean):
@@ -229,6 +234,8 @@ def analyze_idl(path: Path) -> List[Invocable]:
             sig = f"{name}({params_str}): {ret_type}"
             if is_oneway:
                 sig = f"[oneway] {sig}"
+            if is_rpc_idl:
+                sig = f"UUID: {rpc_uuid}; {sig}"
 
             has_doc = bool(doc)
             has_params = bool(params_str)
@@ -244,7 +251,7 @@ def analyze_idl(path: Path) -> List[Invocable]:
 
             invocables.append(Invocable(
                 name=name,
-                source_type="corba_method",
+                source_type="rpc" if is_rpc_idl else "corba_method",
                 signature=sig,
                 parameters=params_str or None,
                 return_type=ret_type,

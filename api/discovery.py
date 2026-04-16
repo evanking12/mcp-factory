@@ -203,7 +203,7 @@ def _call_gui_bridge(binary_path: Path, job_id: str, hints: str = "") -> list[di
         "hints":   hints,
         "types":   [
             "gui", "com", "cli", "registry", "dotnet", "rpc", "script",
-            "sql", "wsdl", "idl", "js", "openapi", "jndi", "ghidra",
+            "sql", "wsdl", "idl", "js", "openapi", "jndi", "directory", "ghidra",
         ],
         "content": content_b64,   # None → bridge falls back to system-path lookup
     }

@@ -1,0 +1,176 @@
+openapi: "3.0.3"
+info:
+  title: Contoso Customer Service API
+  version: "1.0.0"
+  description: REST API for Contoso customer service operations.
+
+paths:
+  /customers/{customerId}:
+    get:
+      operationId: getCustomer
+      summary: Retrieve a customer record
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Customer record
+
+  /customers:
+    post:
+      operationId: createCustomer
+      summary: Register a new customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+              required: [name, email]
+      responses:
+        "201":
+          description: Created customer
+
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Place a new order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customerId:
+                  type: string
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      sku:
+                        type: string
+                      quantity:
+                        type: integer
+                shippingAddress:
+                  type: string
+                couponCode:
+                  type: string
+              required: [customerId, items, shippingAddress]
+      responses:
+        "201":
+          description: Order created
+
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Get order details and status
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order details
+
+  /orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      summary: Cancel an unshipped order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+              required: [reason]
+      responses:
+        "200":
+          description: Cancelled
+
+  /orders/{orderId}/refund:
+    post:
+      operationId: refundOrder
+      summary: Issue a full or partial refund
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                amount:
+                  type: number
+              required: [reason]
+      responses:
+        "200":
+          description: Refund accepted
+
+  /tickets:
+    post:
+      operationId: createTicket
+      summary: Open a new support ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customerId:
+                  type: string
+                subject:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                  enum: [low, normal, high, urgent]
+              required: [customerId, subject, description]
+      responses:
+        "201":
+          description: Ticket created
+
+  /customers/{customerId}/loyalty:
+    get:
+      operationId: getLoyaltyBalance
+      summary: Get loyalty point balance
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Loyalty balance

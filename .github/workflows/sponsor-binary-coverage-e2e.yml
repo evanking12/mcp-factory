@@ -1,0 +1,168 @@
+name: Sponsor Binary Coverage E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: mcp-factory-rg
+  VM_NAME: mcpfactory-runner-vm
+  KEY_VAULT: mcp-factory-kv
+  BRIDGE_URL: http://20.124.33.45:8090
+  STORAGE_ACCOUNT: mcpfactorystore
+  ARTIFACT_CONTAINER: artifacts
+
+jobs:
+  non-vm-coverage:
+    name: Non-VM sponsor formats
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r api/requirements.txt
+
+      - name: Run manifest fixture coverage
+        run: python scripts/ci_verify.py run-sponsor-contract --out ci_artifacts/sponsor/non-vm
+
+      - name: Upload non-VM sponsor artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponsor-binary-coverage-non-vm
+          path: ci_artifacts/sponsor/non-vm
+          if-no-files-found: ignore
+
+  vm-coverage:
+    name: VM sponsor target kinds
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start bridge VM
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-before-vm-start" --job-id "${{ github.run_id }}"
+          az vm start -g "$RESOURCE_GROUP" -n "$VM_NAME"
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-vm-started" --job-id "${{ github.run_id }}"
+
+      - name: Fetch bridge secret
+        id: bridge-secret
+        run: |
+          secret="$(az keyvault secret show --vault-name "$KEY_VAULT" --name gui-bridge-secret --query value -o tsv)"
+          echo "::add-mask::$secret"
+          echo "secret=$secret" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for bridge health
+        run: |
+          for i in {1..84}; do
+            python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-health-wait-$i" --job-id "${{ github.run_id }}"
+            if curl -fsS -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" "$BRIDGE_URL/health"; then
+              echo "Bridge health OK after attempt $i"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Bridge did not become healthy in time" >&2
+          exit 1
+
+      - name: Seed registry fixture
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-seed-registry" --job-id "${{ github.run_id }}"
+          az vm run-command invoke \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            --command-id RunPowerShellScript \
+            --scripts '$ErrorActionPreference = "Stop"
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\contoso_mcp_factory_e2e.exe"
+          New-Item -Path $key -Force -Value "C:\Windows\System32\notepad.exe" | Out-Null
+          Set-Item -Path $key -Value "C:\Windows\System32\notepad.exe"
+          Write-Output "Seeded $key"' \
+            --query "value[0].message" \
+            -o tsv
+
+      - name: Cover Windows DLL
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-kernel32" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label kernel32_dll --kind system_path --target 'C:\Windows\System32\kernel32.dll' --timeout 150 --out-dir ci_artifacts/sponsor/vm
+
+      - name: Cover Windows EXE/CLI
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-cmd" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label cmd_exe --kind system_path --target 'C:\Windows\System32\cmd.exe' --timeout 120 --out-dir ci_artifacts/sponsor/vm
+
+      - name: Cover Windows GUI EXE
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-notepad" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label notepad_exe --kind system_path --target 'C:\Windows\System32\notepad.exe' --timeout 150 --out-dir ci_artifacts/sponsor/vm
+
+      - name: Cover COM/DCOM Type Library
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-stdole2" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label stdole2_tlb --kind system_path --target 'C:\Windows\System32\stdole2.tlb' --types com --expect-source-type com --timeout 120 --out-dir ci_artifacts/sponsor/vm
+
+      - name: Cover registry target kind
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-registry" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label registry_contoso --kind registry --target 'C:\Windows\System32\notepad.exe' --hints contoso_mcp_factory_e2e --types registry --expect-source-type registry --expect-name-contains contoso --timeout 90 --out-dir ci_artifacts/sponsor/vm
+
+      - name: Cover installed directory target kind
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-directory" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label system32_directory --kind directory --target 'C:\Windows\System32' --hints "installed directory" --types directory --expect-source-type directory --timeout 90 --out-dir ci_artifacts/sponsor/vm
+
+      - name: Summarize VM coverage
+        run: python scripts/ci_verify.py summarize-bridge-e2e --out-dir ci_artifacts/sponsor/vm
+
+      - name: Clean registry fixture
+        if: always()
+        run: |
+          az vm run-command invoke \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            --command-id RunPowerShellScript \
+            --scripts 'Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\contoso_mcp_factory_e2e.exe" -Recurse -Force -ErrorAction SilentlyContinue' \
+            --query "value[0].message" \
+            -o tsv || true
+
+      - name: Upload VM sponsor artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponsor-binary-coverage-vm
+          path: ci_artifacts/sponsor/vm
+          if-no-files-found: ignore
+
+      - name: Deallocate bridge VM
+        if: always()
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-coverage-before-deallocate" --job-id "${{ github.run_id }}" || true
+          az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"

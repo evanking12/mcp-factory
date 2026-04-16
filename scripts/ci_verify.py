@@ -23,6 +23,8 @@ from urllib import error, request
 ROOT = Path(__file__).resolve().parents[1]
 DISCOVERY_MAIN = ROOT / "src" / "discovery" / "main.py"
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "scripts"
+SPONSOR_MANIFEST = ROOT / "tests" / "fixtures" / "sponsor" / "sponsor-binary-manifest.json"
+BRIDGE_ACTIVITY_BLOB = "_vm/last_bridge_activity.json"
 
 DEFAULT_FIXTURES = [
     "sample_openapi.yaml",
@@ -305,18 +307,78 @@ def _write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def _touch_bridge_lease(*, storage_account: str, container: str, reason: str, job_id: str = "") -> None:
+    payload = {
+        "updated_at": time.time(),
+        "reason": reason,
+        "job_id": job_id,
+        "source": "github-actions",
+    }
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".json") as fh:
+        json.dump(payload, fh)
+        temp_path = fh.name
+    try:
+        cmd = [
+            "az", "storage", "blob", "upload",
+            "--auth-mode", "login",
+            "--account-name", storage_account,
+            "--container-name", container,
+            "--name", BRIDGE_ACTIVITY_BLOB,
+            "--file", temp_path,
+            "--overwrite", "true",
+            "--only-show-errors",
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
+        print(f"LEASE bridge activity touched: reason={reason} job_id={job_id or '-'}")
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+def _case_bool(value: object, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() not in {"0", "false", "no", "off"}
+
+
+def _filter_invocables(
+    invocables: list[dict],
+    *,
+    expect_source_type: str = "",
+    expect_name_contains: str = "",
+) -> list[dict]:
+    filtered = invocables
+    if expect_source_type:
+        expected = expect_source_type.lower()
+        filtered = [
+            inv for inv in filtered
+            if str(inv.get("source_type") or inv.get("kind") or "").lower() == expected
+        ]
+    if expect_name_contains:
+        needle = expect_name_contains.lower()
+        filtered = [
+            inv for inv in filtered
+            if needle in str(inv.get("name", "")).lower()
+            or needle in str(inv.get("description", "")).lower()
+        ]
+    return filtered
+
+
 def _bridge_analyze_once(
     bridge_url: str,
     bridge_secret: str,
     target: str,
     *,
+    hints: str,
+    types: list[str],
     timeout: int,
     raw_path: Path,
 ) -> dict:
     body = {
         "path": target,
-        "hints": "github actions bridge e2e",
-        "types": ["gui", "com", "cli", "registry", "dotnet", "rpc", "ghidra"],
+        "hints": hints,
+        "types": types,
     }
     if Path(target).exists():
         import base64
@@ -382,10 +444,22 @@ def cmd_cloud_gpt_e2e(args: argparse.Namespace) -> int:
     target = Path(args.target)
     sentinel = args.sentinel or f"MCP_FACTORY_E2E_{uuid.uuid4().hex[:10]}"
 
+    def touch(reason: str) -> None:
+        if args.lease_storage_account and args.lease_container:
+            _touch_bridge_lease(
+                storage_account=args.lease_storage_account,
+                container=args.lease_container,
+                reason=f"gpt4o-e2e-{reason}",
+                job_id=args.lease_job_id,
+            )
+
+    touch("upload-start")
     job_id = _upload_file(base_url, target, key=args.pipeline_key or "", hints=f"e2e sentinel {sentinel}")
+    touch(f"uploaded-{job_id}")
     status_history: list[dict] = []
     deadline = time.monotonic() + args.timeout
     while True:
+        touch(f"poll-{job_id}")
         job = _http_json("GET", f"{base_url}/api/jobs/{job_id}", key=args.pipeline_key or "", timeout=30)
         status_history.append(job)
         status = job.get("status")
@@ -413,6 +487,7 @@ def cmd_cloud_gpt_e2e(args: argparse.Namespace) -> int:
     _write_json(selected_path, selected[0])
     _write_json(status_history_path, status_history)
 
+    touch(f"generate-{job_id}")
     gen = _http_json(
         "POST",
         f"{base_url}/api/generate",
@@ -425,6 +500,7 @@ def cmd_cloud_gpt_e2e(args: argparse.Namespace) -> int:
     generated_schema_path = artifact_dir / "generated-mcp-schema.json"
     _write_json(generated_schema_path, schema)
 
+    touch(f"chat-{job_id}")
     prompt = (
         f"Call the tool named {selected[0]['name']} now. "
         f"The successful tool output must contain this sentinel: {sentinel}. "
@@ -453,6 +529,7 @@ def cmd_cloud_gpt_e2e(args: argparse.Namespace) -> int:
 
     downloaded_schema_ok = False
     downloaded_schema_path = artifact_dir / "downloaded-mcp-schema.json"
+    touch(f"download-schema-{job_id}")
     try:
         downloaded_schema_path.write_bytes(
             _http_bytes("GET", f"{base_url}/api/download/{job_id}/mcp_schema.json", key=args.pipeline_key or "", timeout=60)
@@ -464,12 +541,160 @@ def cmd_cloud_gpt_e2e(args: argparse.Namespace) -> int:
     transcript_path = Path(args.transcript or f"gpt4o-e2e-{job_id}.json")
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(json.dumps({"job_id": job_id, "sentinel": sentinel, "events": events}, indent=2), encoding="utf-8")
+    touch(f"complete-{job_id}")
     print(
         "OK cloud GPT E2E: "
         f"job={job_id} tool={selected[0]['name']} sentinel={sentinel} "
         f"invocables={len(invocables)} schema_tools={len(tools)} "
         f"downloaded_schema={downloaded_schema_ok} transcript={transcript_path}"
     )
+    return 0
+
+
+def _run_bridge_case(
+    *,
+    bridge_url: str,
+    bridge_secret: str,
+    target: str,
+    out_dir: Path,
+    label: str = "",
+    kind: str = "system_path",
+    hints: str = "github actions bridge e2e",
+    types: list[str] | None = None,
+    min_invocables: int = 1,
+    required: bool = True,
+    timeout: int = 180,
+    expect_source_type: str = "",
+    expect_name_contains: str = "",
+) -> dict:
+    safe_name = _safe_target_name(label or target)
+    target_dir = out_dir / safe_name
+    target_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = target_dir / f"{safe_name}.raw.jsonl"
+    summary_path = target_dir / f"{safe_name}.summary.json"
+    error_path = target_dir / f"{safe_name}.error.txt"
+    requested_types = types or ["gui", "com", "cli", "registry", "dotnet", "rpc", "directory", "ghidra"]
+
+    print(f"START bridge target label={safe_name} kind={kind} target={target}")
+    health_before = _bridge_health(bridge_url, bridge_secret)
+    attempts = []
+    started = time.perf_counter()
+    result = _bridge_analyze_once(
+        bridge_url,
+        bridge_secret,
+        target,
+        hints=hints,
+        types=requested_types,
+        timeout=timeout,
+        raw_path=raw_path,
+    )
+    attempts.append(result)
+
+    initial_payload = result.get("payload") or {}
+    initial_invocables = _filter_invocables(
+        _extract_invocables(initial_payload),
+        expect_source_type=expect_source_type,
+        expect_name_contains=expect_name_contains,
+    )
+    if not result["ok"] or len(initial_invocables) < min_invocables:
+        retry_health = _bridge_health(bridge_url, bridge_secret)
+        retry_raw_path = target_dir / f"{safe_name}.retry.raw.jsonl"
+        retry_result = _bridge_analyze_once(
+            bridge_url,
+            bridge_secret,
+            target,
+            hints=hints,
+            types=requested_types,
+            timeout=timeout,
+            raw_path=retry_raw_path,
+        )
+        retry_result["health_before_retry"] = retry_health
+        attempts.append(retry_result)
+        result = retry_result
+
+    payload = result.get("payload") or {}
+    all_invocables = _extract_invocables(payload)
+    matched_invocables = _filter_invocables(
+        all_invocables,
+        expect_source_type=expect_source_type,
+        expect_name_contains=expect_name_contains,
+    )
+    bridge_errors = payload.get("errors") if isinstance(payload, dict) else None
+    passed = bool(result.get("ok") and len(matched_invocables) >= min_invocables)
+    health_after = _bridge_health(bridge_url, bridge_secret)
+    first_names = [str(inv.get("name", "")) for inv in matched_invocables[:20]]
+    error_text = ""
+    if not passed:
+        error_text = str(
+            result.get("error")
+            or bridge_errors
+            or f"matched_invocables={len(matched_invocables)} min_invocables={min_invocables}"
+        )
+        error_path.write_text(error_text, encoding="utf-8")
+
+    item = {
+        "label": safe_name,
+        "target": target,
+        "kind": kind,
+        "category": _target_category(target),
+        "required": required,
+        "passed": passed,
+        "invocable_count": len(all_invocables),
+        "matched_invocable_count": len(matched_invocables),
+        "min_invocables": min_invocables,
+        "expect_source_type": expect_source_type,
+        "expect_name_contains": expect_name_contains,
+        "first_20_invocable_names": first_names,
+        "bridge_http_status": result.get("http_status"),
+        "exception": error_text,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "bridge_elapsed_seconds": result.get("elapsed_seconds"),
+        "retry_count": max(0, len(attempts) - 1),
+        "raw_response_path": result.get("raw_response_path") or str(raw_path),
+        "summary_path": str(summary_path),
+        "bridge_errors": bridge_errors,
+        "health_before": health_before,
+        "health_after": health_after,
+        "attempts": [
+            {
+                "ok": attempt.get("ok"),
+                "http_status": attempt.get("http_status"),
+                "elapsed_seconds": attempt.get("elapsed_seconds"),
+                "error": attempt.get("error", ""),
+                "raw_response_path": attempt.get("raw_response_path"),
+                "health_before_retry": attempt.get("health_before_retry"),
+            }
+            for attempt in attempts
+        ],
+    }
+    _write_json(summary_path, item)
+    status = "OK" if passed else ("OPTIONAL-FAIL" if not required else "FAIL")
+    print(
+        f"{status} bridge target {safe_name}: "
+        f"matched={len(matched_invocables)} total={len(all_invocables)} "
+        f"retry_count={item['retry_count']} elapsed={item['elapsed_seconds']}s"
+    )
+    return item
+
+
+def cmd_bridge_target_e2e(args: argparse.Namespace) -> int:
+    item = _run_bridge_case(
+        bridge_url=args.bridge_url.rstrip("/"),
+        bridge_secret=args.bridge_secret,
+        target=args.target,
+        out_dir=Path(args.out_dir),
+        label=args.label,
+        kind=args.kind,
+        hints=args.hints,
+        types=args.types,
+        min_invocables=args.min_invocables,
+        required=_case_bool(args.required),
+        timeout=args.timeout,
+        expect_source_type=args.expect_source_type,
+        expect_name_contains=args.expect_name_contains,
+    )
+    if item["required"] and not item["passed"]:
+        raise AssertionError(f"required bridge target failed: {item['label']}; see {item['summary_path']}")
     return 0
 
 
@@ -485,89 +710,18 @@ def cmd_direct_bridge_e2e(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    summary = []
-    failures = 0
-
-    for target, required in [(t, True) for t in required_targets] + [(t, False) for t in optional_targets]:
-        safe_name = _safe_target_name(target)
-        target_dir = out_dir / safe_name
-        target_dir.mkdir(parents=True, exist_ok=True)
-        raw_path = target_dir / f"{safe_name}.raw.jsonl"
-        summary_path = target_dir / f"{safe_name}.summary.json"
-        error_path = target_dir / f"{safe_name}.error.txt"
-
-        health_before = _bridge_health(bridge_url, args.bridge_secret)
-        attempts = []
-        result = _bridge_analyze_once(
-            bridge_url,
-            args.bridge_secret,
-            target,
+    summary = [
+        _run_bridge_case(
+            bridge_url=bridge_url,
+            bridge_secret=args.bridge_secret,
+            target=target,
+            out_dir=out_dir,
+            required=required,
             timeout=args.timeout,
-            raw_path=raw_path,
         )
-        attempts.append(result)
-
-        initial_payload = result.get("payload") or {}
-        if not result["ok"] or not _extract_invocables(initial_payload):
-            retry_health = _bridge_health(bridge_url, args.bridge_secret)
-            retry_raw_path = target_dir / f"{safe_name}.retry.raw.jsonl"
-            retry_result = _bridge_analyze_once(
-                bridge_url,
-                args.bridge_secret,
-                target,
-                timeout=args.timeout,
-                raw_path=retry_raw_path,
-            )
-            retry_result["health_before_retry"] = retry_health
-            attempts.append(retry_result)
-            result = retry_result
-
-        payload = result.get("payload") or {}
-        invocables = _extract_invocables(payload)
-        bridge_errors = payload.get("errors") if isinstance(payload, dict) else None
-        passed = bool(result.get("ok") and len(invocables) > 0)
-        health_after = _bridge_health(bridge_url, args.bridge_secret)
-        first_names = [str(inv.get("name", "")) for inv in invocables[:20]]
-        error_text = ""
-        if not passed:
-            error_text = str(result.get("error") or bridge_errors or f"invocables={len(invocables)}")
-            error_path.write_text(error_text, encoding="utf-8")
-            if required:
-                failures += 1
-
-        item = {
-            "target": target,
-            "category": _target_category(target),
-            "required": required,
-            "passed": passed,
-            "invocable_count": len(invocables),
-            "first_20_invocable_names": first_names,
-            "bridge_http_status": result.get("http_status"),
-            "exception": error_text,
-            "elapsed_seconds": result.get("elapsed_seconds"),
-            "retry_count": max(0, len(attempts) - 1),
-            "raw_response_path": result.get("raw_response_path") or str(raw_path),
-            "summary_path": str(summary_path),
-            "bridge_errors": bridge_errors,
-            "health_before": health_before,
-            "health_after": health_after,
-            "attempts": [
-                {
-                    "ok": attempt.get("ok"),
-                    "http_status": attempt.get("http_status"),
-                    "elapsed_seconds": attempt.get("elapsed_seconds"),
-                    "error": attempt.get("error", ""),
-                    "raw_response_path": attempt.get("raw_response_path"),
-                    "health_before_retry": attempt.get("health_before_retry"),
-                }
-                for attempt in attempts
-            ],
-        }
-        _write_json(summary_path, item)
-        summary.append(item)
-        status = "OK" if passed else ("OPTIONAL-FAIL" if not required else "FAIL")
-        print(f"{status} bridge target {target}: invocables={len(invocables)} retry_count={item['retry_count']}")
-
+        for target, required in [(t, True) for t in required_targets] + [(t, False) for t in optional_targets]
+    ]
+    failures = sum(1 for item in summary if item.get("required") and not item.get("passed"))
     summary_file = out_dir / "summary.json"
     _write_json(summary_file, {"targets": summary, "failures": failures})
     legacy_out = Path(args.out) if args.out else None
@@ -576,6 +730,94 @@ def cmd_direct_bridge_e2e(args: argparse.Namespace) -> int:
     if failures:
         raise AssertionError(f"{failures} required bridge target(s) failed; see {summary_file}")
     print(f"OK direct bridge E2E: {len(summary)} target(s), artifacts={out_dir}")
+    return 0
+
+
+def cmd_summarize_bridge_e2e(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out_dir)
+    summaries = []
+    for path in sorted(out_dir.glob("*/*.summary.json")):
+        summaries.append(_load_json(path))
+    if not summaries:
+        raise AssertionError(f"no bridge target summaries found under {out_dir}")
+    failures = [item for item in summaries if item.get("required", True) and not item.get("passed")]
+    aggregate = {
+        "targets": summaries,
+        "total": len(summaries),
+        "failures": len(failures),
+        "failed_labels": [item.get("label") for item in failures],
+    }
+    _write_json(out_dir / "summary.json", aggregate)
+    for item in summaries:
+        status = "OK" if item.get("passed") else ("OPTIONAL-FAIL" if not item.get("required", True) else "FAIL")
+        print(
+            f"{status} {item.get('label')}: "
+            f"matched={item.get('matched_invocable_count')} total={item.get('invocable_count')} "
+            f"elapsed={item.get('elapsed_seconds')}s"
+        )
+    if failures:
+        raise AssertionError(f"{len(failures)} required bridge target(s) failed: {aggregate['failed_labels']}")
+    print(f"OK bridge summary: {len(summaries)} target(s)")
+    return 0
+
+
+def cmd_touch_bridge_lease(args: argparse.Namespace) -> int:
+    _touch_bridge_lease(
+        storage_account=args.storage_account,
+        container=args.container,
+        reason=args.reason,
+        job_id=args.job_id,
+    )
+    return 0
+
+
+def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest)
+    manifest = _load_json(manifest_path)
+    out_root = Path(args.out)
+    out_root.mkdir(parents=True, exist_ok=True)
+    summary = []
+    failures = 0
+    for case in manifest.get("non_vm_cases", []):
+        case_id = case["id"]
+        target = ROOT / case["path"]
+        case_out = out_root / case_id
+        if case_out.exists():
+            shutil.rmtree(case_out)
+        case_out.mkdir(parents=True, exist_ok=True)
+        try:
+            artifact, invocables = _run_discovery_fixture(target, case_out)
+            matched = _filter_invocables(
+                invocables,
+                expect_source_type=case.get("expect_source_type", ""),
+                expect_name_contains=case.get("expect_name_contains", ""),
+            )
+            min_invocables = int(case.get("min_invocables", 1))
+            passed = len(matched) >= min_invocables
+            error_text = "" if passed else f"matched_invocables={len(matched)} min_invocables={min_invocables}"
+            item = {
+                **case,
+                "artifact": str(artifact),
+                "passed": passed,
+                "invocable_count": len(invocables),
+                "matched_invocable_count": len(matched),
+                "first_20_invocable_names": [str(inv.get("name", "")) for inv in matched[:20]],
+                "error": error_text,
+            }
+        except Exception as exc:
+            passed = False
+            item = {**case, "passed": False, "error": str(exc)}
+        summary.append(item)
+        if not passed:
+            failures += 1
+        print(
+            f"{'OK' if passed else 'FAIL'} sponsor fixture {case_id}: "
+            f"matched={item.get('matched_invocable_count', 0)} total={item.get('invocable_count', 0)}"
+        )
+    _write_json(out_root / "summary.json", {"cases": summary, "failures": failures})
+    if failures:
+        raise AssertionError(f"{failures} sponsor fixture case(s) failed; see {out_root / 'summary.json'}")
+    print(f"OK sponsor fixture contract: {len(summary)} case(s)")
     return 0
 
 
@@ -598,6 +840,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fixtures", nargs="*")
     p.set_defaults(func=cmd_run_fixture_contract)
 
+    p = sub.add_parser("run-sponsor-contract")
+    p.add_argument("--manifest", default=str(SPONSOR_MANIFEST))
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_run_sponsor_contract)
+
+    p = sub.add_parser("touch-bridge-lease")
+    p.add_argument("--storage-account", required=True)
+    p.add_argument("--container", required=True)
+    p.add_argument("--reason", required=True)
+    p.add_argument("--job-id", default="")
+    p.set_defaults(func=cmd_touch_bridge_lease)
+
     p = sub.add_parser("poll-job")
     p.add_argument("--base-url", required=True)
     p.add_argument("--job-id", required=True)
@@ -616,6 +870,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chat-timeout", type=int, default=240)
     p.add_argument("--transcript", default="")
     p.add_argument("--artifact-dir", default="ci_artifacts/gpt4o-tool-e2e")
+    p.add_argument("--lease-storage-account", default="")
+    p.add_argument("--lease-container", default="")
+    p.add_argument("--lease-job-id", default="")
     p.set_defaults(func=cmd_cloud_gpt_e2e)
 
     p = sub.add_parser("direct-bridge-e2e")
@@ -627,6 +884,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="")
     p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
     p.set_defaults(func=cmd_direct_bridge_e2e)
+
+    p = sub.add_parser("bridge-target-e2e")
+    p.add_argument("--bridge-url", required=True)
+    p.add_argument("--bridge-secret", required=True)
+    p.add_argument("--target", required=True)
+    p.add_argument("--label", default="")
+    p.add_argument("--kind", default="system_path")
+    p.add_argument("--hints", default="github actions bridge e2e")
+    p.add_argument("--types", nargs="*")
+    p.add_argument("--timeout", type=int, default=180)
+    p.add_argument("--min-invocables", type=int, default=1)
+    p.add_argument("--required", default="true")
+    p.add_argument("--expect-source-type", default="")
+    p.add_argument("--expect-name-contains", default="")
+    p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
+    p.set_defaults(func=cmd_bridge_target_e2e)
+
+    p = sub.add_parser("summarize-bridge-e2e")
+    p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
+    p.set_defaults(func=cmd_summarize_bridge_e2e)
 
     return parser
 

@@ -13,12 +13,14 @@ env:
   KEY_VAULT: mcp-factory-kv
   BRIDGE_URL: http://20.124.33.45:8090
   PIPELINE_APP: mcp-factory-pipeline
+  STORAGE_ACCOUNT: mcpfactorystore
+  ARTIFACT_CONTAINER: artifacts
 
 jobs:
   bridge-e2e:
     name: Manual bridge scan verification
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +36,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Lease before VM start
+        run: python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-before-vm-start" --job-id "${{ github.run_id }}"
+
       - name: Start bridge VM
-        run: az vm start -g "$RESOURCE_GROUP" -n "$VM_NAME"
+        run: |
+          echo "Starting VM $VM_NAME"
+          az vm start -g "$RESOURCE_GROUP" -n "$VM_NAME"
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-vm-started" --job-id "${{ github.run_id }}"
 
       - name: Fetch bridge secret
         id: bridge-secret
@@ -47,7 +55,9 @@ jobs:
       - name: Wait for bridge health
         run: |
           for i in {1..84}; do
+            python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-health-wait-$i" --job-id "${{ github.run_id }}"
             if curl -fsS -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" "$BRIDGE_URL/health"; then
+              echo "Bridge health OK after attempt $i"
               exit 0
             fi
             sleep 5
@@ -59,17 +69,10 @@ jobs:
         if: always()
         run: |
           mkdir -p ci_artifacts/windows-bridge-e2e/preflight
-          az vm get-instance-view \
-            -g "$RESOURCE_GROUP" \
-            -n "$VM_NAME" \
-            -o json > ci_artifacts/windows-bridge-e2e/preflight/vm-instance-view.json || true
-          az containerapp revision list \
-            -g "$RESOURCE_GROUP" \
-            -n "$PIPELINE_APP" \
-            -o json > ci_artifacts/windows-bridge-e2e/preflight/pipeline-revisions.json || true
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
-            -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" \
-            "$BRIDGE_URL/health" > ci_artifacts/windows-bridge-e2e/preflight/bridge-health.txt || true
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-preflight" --job-id "${{ github.run_id }}" || true
+          az vm get-instance-view -g "$RESOURCE_GROUP" -n "$VM_NAME" -o json > ci_artifacts/windows-bridge-e2e/preflight/vm-instance-view.json || true
+          az containerapp revision list -g "$RESOURCE_GROUP" -n "$PIPELINE_APP" -o json > ci_artifacts/windows-bridge-e2e/preflight/pipeline-revisions.json || true
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" "$BRIDGE_URL/health" > ci_artifacts/windows-bridge-e2e/preflight/bridge-health.txt || true
           az vm run-command invoke \
             -g "$RESOURCE_GROUP" \
             -n "$VM_NAME" \
@@ -84,31 +87,82 @@ jobs:
             --query "value[0].message" \
             -o tsv > ci_artifacts/windows-bridge-e2e/preflight/vm-bridge-task.txt || true
 
-      - name: Run direct bridge E2E
+      - name: Seed registry fixture
         run: |
-          python scripts/ci_verify.py direct-bridge-e2e \
-            --bridge-url "$BRIDGE_URL" \
-            --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" \
-            --out-dir ci_artifacts/windows-bridge-e2e \
-            --targets \
-              'C:\Windows\System32\kernel32.dll' \
-              'C:\Windows\System32\cmd.exe' \
-              'C:\Windows\System32\notepad.exe' \
-              'C:\Windows\System32\shell32.dll' \
-            --optional-targets \
-              'C:\Windows\System32\stdole2.tlb'
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-seed-registry" --job-id "${{ github.run_id }}"
+          az vm run-command invoke \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            --command-id RunPowerShellScript \
+          --scripts '$ErrorActionPreference = "Stop"
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\contoso_mcp_factory_e2e.exe"
+          New-Item -Path $key -Force -Value "C:\Windows\System32\notepad.exe" | Out-Null
+          Set-Item -Path $key -Value "C:\Windows\System32\notepad.exe"
+          Write-Output "Seeded $key"' \
+            --query "value[0].message" \
+            -o tsv
+
+      - name: Scan kernel32.dll
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-kernel32-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label kernel32_dll --kind system_path --target 'C:\Windows\System32\kernel32.dll' --timeout 150 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-kernel32-end" --job-id "${{ github.run_id }}"
+
+      - name: Scan cmd.exe
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-cmd-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label cmd_exe --kind system_path --target 'C:\Windows\System32\cmd.exe' --timeout 120 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-cmd-end" --job-id "${{ github.run_id }}"
+
+      - name: Scan notepad.exe
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-notepad-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label notepad_exe --kind system_path --target 'C:\Windows\System32\notepad.exe' --timeout 150 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-notepad-end" --job-id "${{ github.run_id }}"
+
+      - name: Scan shell32.dll
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-shell32-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label shell32_dll --kind system_path --target 'C:\Windows\System32\shell32.dll' --timeout 150 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-shell32-end" --job-id "${{ github.run_id }}"
+
+      - name: Scan stdole2.tlb
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-stdole2-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label stdole2_tlb --kind system_path --target 'C:\Windows\System32\stdole2.tlb' --types com --expect-source-type com --timeout 120 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-stdole2-end" --job-id "${{ github.run_id }}"
+
+      - name: Scan registry fixture
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-registry-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label registry_contoso --kind registry --target 'C:\Windows\System32\notepad.exe' --hints contoso_mcp_factory_e2e --types registry --expect-source-type registry --expect-name-contains contoso --timeout 90 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-registry-end" --job-id "${{ github.run_id }}"
+
+      - name: Scan installed directory
+        continue-on-error: true
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-directory-start" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" --label system32_directory --kind directory --target 'C:\Windows\System32' --hints "installed directory" --types directory --expect-source-type directory --timeout 90 --out-dir ci_artifacts/windows-bridge-e2e
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-directory-end" --job-id "${{ github.run_id }}"
+
+      - name: Summarize bridge target results
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-summary" --job-id "${{ github.run_id }}"
+          python scripts/ci_verify.py summarize-bridge-e2e --out-dir ci_artifacts/windows-bridge-e2e
 
       - name: Capture failure diagnostics
         if: failure()
         run: |
           mkdir -p ci_artifacts/windows-bridge-e2e/failure
-          az vm get-instance-view \
-            -g "$RESOURCE_GROUP" \
-            -n "$VM_NAME" \
-            -o json > ci_artifacts/windows-bridge-e2e/failure/vm-instance-view.json || true
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
-            -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" \
-            "$BRIDGE_URL/health" > ci_artifacts/windows-bridge-e2e/failure/bridge-health.txt || true
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-failure-diagnostics" --job-id "${{ github.run_id }}" || true
+          az vm get-instance-view -g "$RESOURCE_GROUP" -n "$VM_NAME" -o json > ci_artifacts/windows-bridge-e2e/failure/vm-instance-view.json || true
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" "$BRIDGE_URL/health" > ci_artifacts/windows-bridge-e2e/failure/bridge-health.txt || true
           az vm run-command invoke \
             -g "$RESOURCE_GROUP" \
             -n "$VM_NAME" \
@@ -123,6 +177,17 @@ jobs:
             --query "value[0].message" \
             -o tsv > ci_artifacts/windows-bridge-e2e/failure/vm-bridge-task.txt || true
 
+      - name: Clean registry fixture
+        if: always()
+        run: |
+          az vm run-command invoke \
+            -g "$RESOURCE_GROUP" \
+            -n "$VM_NAME" \
+            --command-id RunPowerShellScript \
+            --scripts 'Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\contoso_mcp_factory_e2e.exe" -Recurse -Force -ErrorAction SilentlyContinue' \
+            --query "value[0].message" \
+            -o tsv || true
+
       - name: Upload bridge E2E artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -133,4 +198,6 @@ jobs:
 
       - name: Deallocate bridge VM
         if: always()
-        run: az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "windows-e2e-before-deallocate" --job-id "${{ github.run_id }}" || true
+          az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"

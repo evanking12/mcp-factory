@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Contoso Customer Service — SOAP/WSDL 1.1 Service Description
+  Covers §1.b SOAP protocol requirement.
+-->
+<definitions
+    name="ContosoCustomerService"
+    targetNamespace="http://contoso.com/CustomerService"
+    xmlns="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:tns="http://contoso.com/CustomerService"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+  <!-- ── Types ── -->
+  <types>
+    <xsd:schema targetNamespace="http://contoso.com/CustomerService">
+
+      <xsd:element name="GetCustomerRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="customerId" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="GetCustomerResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="id"    type="xsd:string"/>
+            <xsd:element name="name"  type="xsd:string"/>
+            <xsd:element name="email" type="xsd:string"/>
+            <xsd:element name="tier"  type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="CreateOrderRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="customerId"      type="xsd:string"/>
+            <xsd:element name="shippingAddress" type="xsd:string"/>
+            <xsd:element name="couponCode"      type="xsd:string" minOccurs="0"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="CreateOrderResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="orderId" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="SubmitTicketRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="customerId"  type="xsd:string"/>
+            <xsd:element name="subject"     type="xsd:string"/>
+            <xsd:element name="description" type="xsd:string"/>
+            <xsd:element name="priority"    type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="SubmitTicketResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="ticketId" type="xsd:int"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="GetOrderStatusRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="orderId" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="GetOrderStatusResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="status" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="ProcessRefundRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="orderId" type="xsd:string"/>
+            <xsd:element name="reason"  type="xsd:string"/>
+            <xsd:element name="amount"  type="xsd:decimal" minOccurs="0"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="ProcessRefundResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="success" type="xsd:boolean"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+    </xsd:schema>
+  </types>
+
+  <!-- ── Messages ── -->
+  <message name="GetCustomerIn">
+    <part name="parameters" element="tns:GetCustomerRequest"/>
+  </message>
+  <message name="GetCustomerOut">
+    <part name="parameters" element="tns:GetCustomerResponse"/>
+  </message>
+
+  <message name="CreateOrderIn">
+    <part name="parameters" element="tns:CreateOrderRequest"/>
+  </message>
+  <message name="CreateOrderOut">
+    <part name="parameters" element="tns:CreateOrderResponse"/>
+  </message>
+
+  <message name="SubmitTicketIn">
+    <part name="parameters" element="tns:SubmitTicketRequest"/>
+  </message>
+  <message name="SubmitTicketOut">
+    <part name="parameters" element="tns:SubmitTicketResponse"/>
+  </message>
+
+  <message name="GetOrderStatusIn">
+    <part name="parameters" element="tns:GetOrderStatusRequest"/>
+  </message>
+  <message name="GetOrderStatusOut">
+    <part name="parameters" element="tns:GetOrderStatusResponse"/>
+  </message>
+
+  <message name="ProcessRefundIn">
+    <part name="parameters" element="tns:ProcessRefundRequest"/>
+  </message>
+  <message name="ProcessRefundOut">
+    <part name="parameters" element="tns:ProcessRefundResponse"/>
+  </message>
+
+  <!-- ── Port Type ── -->
+  <portType name="CustomerServicePortType">
+    <operation name="GetCustomer">
+      <input  message="tns:GetCustomerIn"/>
+      <output message="tns:GetCustomerOut"/>
+    </operation>
+    <operation name="CreateOrder">
+      <input  message="tns:CreateOrderIn"/>
+      <output message="tns:CreateOrderOut"/>
+    </operation>
+    <operation name="SubmitSupportTicket">
+      <input  message="tns:SubmitTicketIn"/>
+      <output message="tns:SubmitTicketOut"/>
+    </operation>
+    <operation name="GetOrderStatus">
+      <input  message="tns:GetOrderStatusIn"/>
+      <output message="tns:GetOrderStatusOut"/>
+    </operation>
+    <operation name="ProcessRefund">
+      <input  message="tns:ProcessRefundIn"/>
+      <output message="tns:ProcessRefundOut"/>
+    </operation>
+  </portType>
+
+  <!-- ── Binding ── -->
+  <binding name="CustomerServiceBinding" type="tns:CustomerServicePortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="GetCustomer">
+      <soap:operation soapAction="http://contoso.com/CustomerService/GetCustomer"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="CreateOrder">
+      <soap:operation soapAction="http://contoso.com/CustomerService/CreateOrder"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="SubmitSupportTicket">
+      <soap:operation soapAction="http://contoso.com/CustomerService/SubmitSupportTicket"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="GetOrderStatus">
+      <soap:operation soapAction="http://contoso.com/CustomerService/GetOrderStatus"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+    <operation name="ProcessRefund">
+      <soap:operation soapAction="http://contoso.com/CustomerService/ProcessRefund"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+  </binding>
+
+  <!-- ── Service ── -->
+  <service name="ContosoCustomerService">
+    <port name="CustomerServicePort" binding="tns:CustomerServiceBinding">
+      <soap:address location="https://api.contoso.com/CustomerService"/>
+    </port>
+  </service>
+
+</definitions>

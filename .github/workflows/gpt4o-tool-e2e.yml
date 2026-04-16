@@ -13,6 +13,8 @@ env:
   KEY_VAULT: mcp-factory-kv
   BRIDGE_URL: http://20.124.33.45:8090
   PIPELINE_URL: https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
+  STORAGE_ACCOUNT: mcpfactorystore
+  ARTIFACT_CONTAINER: artifacts
 
 jobs:
   gpt-tool-e2e:
@@ -36,7 +38,10 @@ jobs:
 
       - name: Start bridge VM
         shell: pwsh
-        run: az vm start -g "$env:RESOURCE_GROUP" -n "$env:VM_NAME"
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$env:STORAGE_ACCOUNT" --container "$env:ARTIFACT_CONTAINER" --reason "gpt4o-e2e-before-vm-start" --job-id "${{ github.run_id }}"
+          az vm start -g "$env:RESOURCE_GROUP" -n "$env:VM_NAME"
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$env:STORAGE_ACCOUNT" --container "$env:ARTIFACT_CONTAINER" --reason "gpt4o-e2e-vm-started" --job-id "${{ github.run_id }}"
 
       - name: Fetch runtime secrets
         id: runtime-secrets
@@ -53,6 +58,7 @@ jobs:
         shell: pwsh
         run: |
           for ($i = 0; $i -lt 84; $i++) {
+            python scripts/ci_verify.py touch-bridge-lease --storage-account "$env:STORAGE_ACCOUNT" --container "$env:ARTIFACT_CONTAINER" --reason "gpt4o-e2e-health-wait-$i" --job-id "${{ github.run_id }}"
             try {
               Invoke-RestMethod -Uri "$env:BRIDGE_URL/health" -Headers @{ "X-Bridge-Key" = "${{ steps.runtime-secrets.outputs.bridge_secret }}" } -TimeoutSec 5 | Out-Host
               exit 0
@@ -91,7 +97,10 @@ jobs:
             --tool-name EchoSentinel `
             --sentinel "${{ steps.target.outputs.sentinel }}" `
             --artifact-dir "$artifactDir" `
-            --transcript "$artifactDir/transcript.json"
+            --transcript "$artifactDir/transcript.json" `
+            --lease-storage-account "$env:STORAGE_ACCOUNT" `
+            --lease-container "$env:ARTIFACT_CONTAINER" `
+            --lease-job-id "${{ github.run_id }}"
 
       - name: Print GPT E2E artifact summary
         if: always()
@@ -145,4 +154,7 @@ jobs:
       - name: Deallocate bridge VM
         if: always()
         shell: pwsh
-        run: az vm deallocate -g "$env:RESOURCE_GROUP" -n "$env:VM_NAME"
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$env:STORAGE_ACCOUNT" --container "$env:ARTIFACT_CONTAINER" --reason "gpt4o-e2e-before-deallocate" --job-id "${{ github.run_id }}"
+          if ($LASTEXITCODE -ne 0) { Write-Host "lease touch failed before deallocate" }
+          az vm deallocate -g "$env:RESOURCE_GROUP" -n "$env:VM_NAME"
