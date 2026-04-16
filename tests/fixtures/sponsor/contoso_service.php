@@ -4,6 +4,10 @@
  * Provides functions for customer, order, and support operations.
  */
 
+function echo_sentinel(string $sentinel): string {
+    return $sentinel;
+}
+
 /**
  * Look up a customer account by ID.
  *

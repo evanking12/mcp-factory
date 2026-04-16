@@ -282,6 +282,14 @@ class Invocable:
     
     def _get_execution_metadata(self) -> dict:
         """Generate execution metadata for MCP server."""
+        def _script_content() -> Optional[str]:
+            if self.dll_path:
+                try:
+                    return Path(self.dll_path).read_text(encoding='utf-8', errors='replace')
+                except OSError:
+                    return None
+            return None
+
         if self.source_type == "export":
             return {
                 "method": "dll_import",
@@ -328,6 +336,7 @@ class Invocable:
                 "method": "python_subprocess",
                 "module_path": self.dll_path,
                 "function_name": self.name,
+                "script_content": _script_content(),
                 "example": (
                     f"python -c \""
                     f"import importlib.util; spec=importlib.util.spec_from_file_location('m',r'{self.dll_path}'); "
@@ -337,32 +346,20 @@ class Invocable:
             }
 
         elif self.source_type == "powershell_function":
-            _script_content: Optional[str] = None
-            if self.dll_path:
-                try:
-                    _script_content = Path(self.dll_path).read_text(encoding='utf-8', errors='replace')
-                except OSError:
-                    pass
             return {
                 "method": "powershell",
                 "script_path": self.dll_path,
                 "function_name": self.name,
-                "script_content": _script_content,
+                "script_content": _script_content(),
                 "example": f"powershell -NoProfile -File \"{self.dll_path}\" # then call {self.name}",
             }
 
         elif self.source_type == "batch_label":
-            _script_content: Optional[str] = None
-            if self.dll_path:
-                try:
-                    _script_content = Path(self.dll_path).read_text(encoding='utf-8', errors='replace')
-                except OSError:
-                    pass
             return {
                 "method": "cmd_call",
                 "script_path": self.dll_path,
                 "label": self.name,
-                "script_content": _script_content,
+                "script_content": _script_content(),
                 "example": f"cmd /c call \"{self.dll_path}\" :{self.name}",
             }
 
@@ -379,6 +376,7 @@ class Invocable:
                 "method": "ruby",
                 "script_path": self.dll_path,
                 "method_name": self.name,
+                "script_content": _script_content(),
                 "example": f"ruby -r '{self.dll_path}' -e 'puts {self.name}(...)'",
             }
 
@@ -387,6 +385,7 @@ class Invocable:
                 "method": "php",
                 "script_path": self.dll_path,
                 "function_name": self.name,
+                "script_content": _script_content(),
                 "example": f"php -r \"require '{self.dll_path}'; echo {self.name}(...);\"",
             }
 
@@ -395,6 +394,7 @@ class Invocable:
                 "method": "node",
                 "script_path": self.dll_path,
                 "function_name": self.name,
+                "script_content": _script_content(),
                 "example": f"node -e \"const m=require('{self.dll_path}'); console.log(m.{self.name}(...))\"",
             }
 
@@ -402,6 +402,7 @@ class Invocable:
             return {
                 "method": "node",
                 "script_path": self.dll_path,
+                "script_content": _script_content(),
                 "example": f"node \"{self.dll_path}\" --help",
             }
 
@@ -410,6 +411,7 @@ class Invocable:
                 "method": "ts-node",
                 "script_path": self.dll_path,
                 "function_name": self.name,
+                "script_content": _script_content(),
                 "example": f"ts-node -e \"const m=require('{self.dll_path}'); console.log(m.{self.name}(...))\"",
             }
 
@@ -429,16 +431,10 @@ class Invocable:
             }
 
         elif self.source_type == "batch_script":
-            _script_content: Optional[str] = None
-            if self.dll_path:
-                try:
-                    _script_content = Path(self.dll_path).read_text(encoding='utf-8', errors='replace')
-                except OSError:
-                    pass
             return {
                 "method": "cmd",
                 "script_path": self.dll_path,
-                "script_content": _script_content,
+                "script_content": _script_content(),
                 "example": f"cmd /c \"{self.dll_path}\"",
             }
 

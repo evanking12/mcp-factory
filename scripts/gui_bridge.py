@@ -1286,8 +1286,13 @@ def _execute_script_bridge(execution: dict, name: str, args: dict) -> str:
         elif method in ("node", "ts-node"):
             interp = "ts-node" if method == "ts-node" else "node"
             if func_name:
-                arg_repr = ", ".join(repr(v) for v in arg_values)
-                code = f"const m=require('{script_path}'); console.log(m.{func_name}({arg_repr}))"
+                arg_repr = ", ".join(json.dumps(v) for v in arg_values)
+                code = (
+                    f"const m=require({json.dumps(script_path)}); "
+                    f"Promise.resolve(m[{json.dumps(func_name)}]({arg_repr}))"
+                    ".then(v => { if (v !== undefined) console.log(v); })"
+                    ".catch(e => { console.error(e && e.stack || e); process.exit(1); });"
+                )
                 cmd = [interp, "-e", code]
             else:
                 cmd = [interp, script_path]
@@ -1419,8 +1424,8 @@ def _execute_dotnet_bridge(execution: dict, name: str, args: dict) -> str:
 def _execute_http_bridge(execution: dict, name: str, args: dict) -> str:
     """Dispatch HTTP-based invocables: OpenAPI, JSON-RPC, SOAP.
 
-    Requires a 'base_url' key in the execution dict (populated at chat time
-    from the user-provided server URL), or falls back to a localhost default.
+    Requires a 'base_url' key in the execution dict.  Without one, return an
+    explicit provider-required result instead of a random connection error.
     """
     import json as _json
     method = execution.get("method", "")
@@ -1430,7 +1435,17 @@ def _execute_http_bridge(execution: dict, name: str, args: dict) -> str:
     except ImportError:
         return "HTTP error: httpx not installed on the bridge VM"
 
-    base_url = execution.get("base_url", "http://localhost")
+    base_url = execution.get("base_url")
+    if not base_url:
+        labels = {
+            "http_request": "OpenAPI/REST endpoint",
+            "jsonrpc": "JSON-RPC endpoint",
+            "soap": "SOAP endpoint",
+        }
+        return (
+            f"Provider required: {labels.get(method, 'HTTP endpoint')} tool '{name}' was discovered "
+            "and exposed as an MCP tool, but live execution requires a configured backing provider/endpoint/service."
+        )
 
     try:
         if method == "http_request":
@@ -1508,13 +1523,10 @@ def _execute_sql_bridge(execution: dict, name: str, args: dict) -> str:
         except Exception as exc:
             return f"SQL error: {exc}"
 
-    # Non-SQLite: return the parameterized statement for the user to execute
-    param_hints = "; ".join(f"{k}={v}" for k, v in args.items())
-    note = f"  -- params: {param_hints}" if param_hints else ""
     return (
-        f"-- {obj_type.upper()} '{name}' discovered in {Path(source_file).name if source_file else 'unknown'}\n"
-        f"-- Execute against your target database:\n"
-        f"{statement}{note}"
+        f"Provider required: SQL database tool '{name}' was discovered and exposed as an MCP tool, "
+        "but live execution requires a configured backing provider/endpoint/service. "
+        f"Discovered {obj_type or 'object'} statement: {statement}"
     )
 
 

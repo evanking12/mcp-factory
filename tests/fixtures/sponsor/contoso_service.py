@@ -6,6 +6,11 @@ Handles customer lookups, order management, and support ticket operations.
 from typing import Optional
 
 
+def echo_sentinel(sentinel: str) -> str:
+    """Echo a deterministic sentinel for MCP E2E validation."""
+    return sentinel
+
+
 def get_customer(customer_id: str) -> dict:
     """Retrieve a customer record by their unique identifier.
 

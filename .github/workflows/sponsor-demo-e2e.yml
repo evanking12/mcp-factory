@@ -77,7 +77,7 @@ jobs:
     name: VM bridge, MCP generation, and GPT tool proof
     needs: non-vm-sponsor-coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -260,6 +260,47 @@ jobs:
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-windows-summary-end" --job-id "${{ github.run_id }}" || true
           exit $status
 
+      - name: Run GPT per-format proof matrix
+        continue-on-error: true
+        timeout-minutes: 40
+        run: |
+          artifact_dir="ci_artifacts/demo/gpt-format-matrix"
+          mkdir -p "$artifact_dir"
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-gpt-format-matrix-start" --job-id "${{ github.run_id }}"
+          set +e
+          python scripts/ci_verify.py cloud-gpt-format-matrix \
+            --base-url "$PIPELINE_URL" \
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
+            --artifact-dir "$artifact_dir" \
+            --sentinel-prefix "MCP_FACTORY_FORMAT_${{ github.run_id }}" \
+            --lease-storage-account "$STORAGE_ACCOUNT" \
+            --lease-container "$ARTIFACT_CONTAINER" \
+            --lease-job-id "${{ github.run_id }}"
+          status=$?
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-gpt-format-matrix-end" --job-id "${{ github.run_id }}" || true
+          exit $status
+
+      - name: Print GPT per-format proof summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("ci_artifacts/demo/gpt-format-matrix/summary.json")
+          print("## GPT Per-Format Proof Matrix")
+          if not path.exists():
+              print("No GPT format matrix summary exists.")
+              raise SystemExit(0)
+          data = json.loads(path.read_text(encoding="utf-8"))
+          print(f"total={data.get('total')} failures={data.get('failures')}")
+          print(f"real_execution={data.get('real_execution_passed')}/{data.get('real_execution_total')}")
+          print(f"provider_required={data.get('provider_required_tool_call_passed')}/{data.get('provider_required_total')}")
+          for item in data.get("cases", []):
+              status = "PASS" if item.get("passed") else "FAIL"
+              print(f"{status} {item.get('id')}: proof={item.get('proof_level')} tool_call={item.get('tool_call_seen')} sentinel={item.get('sentinel_seen')} provider_required={item.get('provider_required_seen')}")
+          PY
+
       - name: Create deterministic CMD target
         id: target
         run: |
@@ -388,6 +429,7 @@ jobs:
             --non-vm-summary ci_artifacts/demo/non-vm/summary.json \
             --windows-summary ci_artifacts/demo/windows/summary.json \
             --gpt-artifact-dir ci_artifacts/demo/gpt4o \
+            --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md

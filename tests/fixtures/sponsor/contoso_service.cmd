@@ -12,5 +12,5 @@ echo   echo-sentinel VALUE    Echo a deterministic value for MCP E2E validation.
 exit /b 0
 
 :echo_sentinel
-echo %~2
+if "%~2"=="" (echo %~1) else echo %~2
 exit /b 0

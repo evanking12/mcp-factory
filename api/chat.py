@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -128,7 +129,13 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
         yield _sse({"type": "error", "message": "Azure OpenAI endpoint not configured"})
         return
 
-    inv_map: dict[str, dict] = {inv["name"]: inv for inv in invocables}
+    inv_map: dict[str, dict] = {}
+    for inv in invocables:
+        raw_name = inv.get("name", "")
+        if not raw_name:
+            continue
+        inv_map[raw_name] = inv
+        inv_map[re.sub(r"[^a-zA-Z0-9_.\-]", "_", raw_name)[:64]] = inv
 
     MAX_TOOL_ROUNDS = 10
     _last_call_signature = ""

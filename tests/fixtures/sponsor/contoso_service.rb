@@ -1,6 +1,10 @@
 # Contoso Customer Service — Ruby Module
 # Wraps the Contoso CRM API for customer and order operations.
 
+def echo_sentinel(sentinel)
+  sentinel
+end
+
 module Contoso
   module CustomerService
 

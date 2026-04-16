@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -254,6 +255,37 @@ def _parse_sse(raw: str) -> list[dict]:
     return events
 
 
+def _safe_tool_name(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.\-]", "_", name)[:64]
+
+
+def _select_invocable_for_case(case: dict, invocables: list[dict]) -> dict:
+    preferred = str(case.get("preferred_tool_name") or "").lower()
+    if preferred:
+        for inv in invocables:
+            if str(inv.get("name", "")).lower() == preferred:
+                return inv
+    expected = str(case.get("expect_source_type") or "").lower()
+    if expected:
+        for inv in invocables:
+            source_type = str(inv.get("source_type") or inv.get("kind") or "").lower()
+            if source_type == expected:
+                return inv
+    if invocables:
+        return invocables[0]
+    raise AssertionError(f"{case.get('id', '<unknown>')}: no invocable available for GPT proof")
+
+
+def _provider_required_seen(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "provider required" in lowered
+        or "live execution requires" in lowered
+        or "requires a configured backing" in lowered
+        or "requires a live" in lowered
+    )
+
+
 def _safe_target_name(target: str) -> str:
     leaf = target.replace("\\", "/").rstrip("/").split("/")[-1]
     safe = "".join(ch.lower() if ch.isalnum() else "_" for ch in leaf)
@@ -300,6 +332,136 @@ def _bridge_health(bridge_url: str, bridge_secret: str, *, timeout: int = 10) ->
             "error": str(exc),
             "elapsed_seconds": round(time.perf_counter() - started, 3),
         }
+
+
+def _wait_bridge_health(
+    bridge_url: str,
+    bridge_secret: str,
+    *,
+    timeout: int = 45,
+    interval: float = 3.0,
+) -> dict:
+    deadline = time.monotonic() + max(0, timeout)
+    attempts = 0
+    last: dict = {"ok": False, "error": "bridge health was not checked"}
+    while True:
+        attempts += 1
+        remaining = max(1, int(deadline - time.monotonic())) if timeout else 1
+        last = _bridge_health(bridge_url, bridge_secret, timeout=min(10, remaining))
+        if last.get("ok"):
+            last["attempts"] = attempts
+            last["waited_seconds"] = max(0, round(timeout - max(0, deadline - time.monotonic()), 3))
+            return last
+        if time.monotonic() >= deadline:
+            last["attempts"] = attempts
+            last["wait_timeout_seconds"] = timeout
+            return last
+        time.sleep(interval)
+
+
+def _ps_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _restart_bridge_task(
+    *,
+    resource_group: str,
+    vm_name: str,
+    task_name: str,
+    timeout: int = 90,
+) -> dict:
+    if not resource_group or not vm_name:
+        return {
+            "attempted": False,
+            "ok": False,
+            "error": "bridge restart skipped: resource group or VM name missing",
+        }
+
+    script = f"""
+$ErrorActionPreference = "Continue"
+$taskName = {_ps_quote(task_name)}
+Write-Output "restart_task=$taskName"
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if (-not $task) {{
+    Write-Output "task_missing=$taskName"
+    exit 2
+}}
+Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-ScheduledTask -TaskName $taskName
+Start-Sleep -Seconds 3
+Write-Output "task_info:"
+Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue |
+    Select-Object TaskName,LastRunTime,LastTaskResult |
+    ConvertTo-Json -Compress
+Write-Output "port_8090:"
+Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object LocalAddress,LocalPort,OwningProcess,State |
+    ConvertTo-Json -Compress
+"""
+    cmd = [
+        "az", "vm", "run-command", "invoke",
+        "-g", resource_group,
+        "-n", vm_name,
+        "--command-id", "RunPowerShellScript",
+        "--scripts", script,
+        "--query", "value[0].message",
+        "-o", "tsv",
+    ]
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        return {
+            "attempted": True,
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+
+
+def _ensure_bridge_health(
+    bridge_url: str,
+    bridge_secret: str,
+    *,
+    timeout: int,
+    restart_resource_group: str = "",
+    restart_vm_name: str = "",
+    restart_task_name: str = "MCP-Factory-Bridge-Interactive",
+    restart_timeout: int = 90,
+) -> dict:
+    health = _wait_bridge_health(bridge_url, bridge_secret, timeout=timeout)
+    if health.get("ok"):
+        health["restart_attempted"] = False
+        return health
+
+    if not restart_resource_group or not restart_vm_name:
+        health["restart_attempted"] = False
+        health["restart_skipped"] = "restart_resource_group or restart_vm_name missing"
+        return health
+
+    print(
+        "RESTART bridge: health check failed; "
+        f"starting scheduled task {restart_task_name} on {restart_vm_name}"
+    )
+    restart = _restart_bridge_task(
+        resource_group=restart_resource_group,
+        vm_name=restart_vm_name,
+        task_name=restart_task_name,
+        timeout=restart_timeout,
+    )
+    recovered = _wait_bridge_health(bridge_url, bridge_secret, timeout=timeout)
+    recovered["restart_attempted"] = True
+    recovered["restart_result"] = restart
+    return recovered
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -551,6 +713,218 @@ def cmd_cloud_gpt_e2e(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
+    base_url = args.base_url.rstrip("/")
+    manifest = _load_json(Path(args.manifest))
+    out_root = Path(args.artifact_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+    sentinel_prefix = args.sentinel_prefix or f"MCP_FACTORY_FORMAT_{uuid.uuid4().hex[:8]}"
+
+    def touch(reason: str) -> None:
+        if args.lease_storage_account and args.lease_container:
+            _touch_bridge_lease(
+                storage_account=args.lease_storage_account,
+                container=args.lease_container,
+                reason=f"gpt-format-matrix-{reason}",
+                job_id=args.lease_job_id,
+            )
+
+    summaries: list[dict] = []
+    for case in manifest.get("non_vm_cases", []):
+        case_id = case["id"]
+        case_dir = out_root / case_id
+        case_dir.mkdir(parents=True, exist_ok=True)
+        sentinel = f"{sentinel_prefix}_{case_id}"
+        proof_level = case.get("proof_level", "provider_required")
+        started = time.perf_counter()
+        item = {
+            "id": case_id,
+            "category": case.get("category", case_id),
+            "proof_level": proof_level,
+            "expected_result": case.get("expected_result", ""),
+            "passed": False,
+            "tool_call_seen": False,
+            "tool_result_seen": False,
+            "sentinel_seen": False,
+            "provider_required_seen": False,
+            "job_id": "",
+            "selected_tool": "",
+            "schema_tool_count": 0,
+            "error": "",
+            "elapsed_seconds": 0.0,
+        }
+        print(f"START GPT format case {case_id}: category={item['category']} proof_level={proof_level}")
+        try:
+            touch(f"{case_id}-upload-start")
+            target = ROOT / case["path"]
+            job_id = _upload_file(
+                base_url,
+                target,
+                key=args.pipeline_key or "",
+                hints=f"sponsor format matrix {case_id} {proof_level} sentinel {sentinel}",
+            )
+            item["job_id"] = job_id
+
+            status_history: list[dict] = []
+            deadline = time.monotonic() + args.timeout
+            while True:
+                touch(f"{case_id}-poll-{job_id}")
+                job = _http_json("GET", f"{base_url}/api/jobs/{job_id}", key=args.pipeline_key or "", timeout=30)
+                status_history.append(job)
+                status = job.get("status")
+                print(f"GPT {case_id}: job={job_id} status={status} progress={job.get('progress')} message={job.get('message', '')}")
+                if status == "done":
+                    break
+                if status == "error":
+                    raise AssertionError(f"job {job_id} failed: {job.get('error') or job.get('message')}")
+                if time.monotonic() >= deadline:
+                    raise AssertionError(f"job {job_id} timed out after {args.timeout}s; last={job}")
+                time.sleep(5)
+
+            _write_json(case_dir / "job-status-history.json", status_history)
+            result = job.get("result") or {}
+            invocables = _validate_invocables(
+                result,
+                min_invocables=int(case.get("min_invocables", 1)),
+                label=f"{case_id} discovery",
+            )
+            matched = _filter_invocables(
+                invocables,
+                expect_source_type=case.get("expect_source_type", ""),
+                expect_name_contains=case.get("expect_name_contains", ""),
+            )
+            selected = _select_invocable_for_case(case, matched or invocables)
+            if proof_level == "real_execution" and not selected.get("parameters"):
+                selected = {
+                    **selected,
+                    "parameters": [{"name": "sentinel", "type": "string", "description": "Deterministic E2E sentinel"}],
+                }
+            selected_name = selected.get("name", "")
+            tool_name = _safe_tool_name(selected_name)
+            item["selected_tool"] = selected_name
+            _write_json(case_dir / "selected-invocable.json", selected)
+
+            touch(f"{case_id}-generate-{job_id}")
+            gen = _http_json(
+                "POST",
+                f"{base_url}/api/generate",
+                key=args.pipeline_key or "",
+                body={"job_id": job_id, "component_name": f"format-{case_id}-{job_id}", "selected": [selected]},
+                timeout=120,
+            )
+            schema = gen.get("mcp_schema") or {}
+            tools = _validate_mcp_schema(schema, min_tools=1, label=f"{case_id} generated schema")
+            item["schema_tool_count"] = len(tools)
+            _write_json(case_dir / "generated-mcp-schema.json", schema)
+
+            downloaded_schema_ok = False
+            try:
+                touch(f"{case_id}-download-schema-{job_id}")
+                (case_dir / "downloaded-mcp-schema.json").write_bytes(
+                    _http_bytes("GET", f"{base_url}/api/download/{job_id}/mcp_schema.json", key=args.pipeline_key or "", timeout=60)
+                )
+                downloaded_schema_ok = True
+            except Exception as exc:
+                (case_dir / "downloaded-mcp-schema.error.txt").write_text(str(exc), encoding="utf-8")
+
+            if proof_level == "real_execution":
+                prompt = (
+                    f"Call the tool named {tool_name} now. "
+                    f"Use this exact sentinel string as the value for every required string argument: {sentinel}. "
+                    f"The successful tool output must contain this sentinel: {sentinel}. "
+                    "Do not just say done."
+                )
+            else:
+                prompt = (
+                    f"Call the tool named {tool_name} now. "
+                    "This is a contract proof and no live backing provider is configured. "
+                    "The expected tool result must state that a live provider, endpoint, or service is required. "
+                    "Do not just say done."
+                )
+
+            touch(f"{case_id}-chat-{job_id}")
+            raw_chat = _http_bytes(
+                "POST",
+                f"{base_url}/api/chat",
+                key=args.pipeline_key or "",
+                body=json.dumps({
+                    "job_id": job_id,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "tools": tools,
+                    "invocables": [selected],
+                }).encode("utf-8"),
+                content_type="application/json",
+                timeout=args.chat_timeout,
+            ).decode("utf-8", errors="replace")
+            events = _parse_sse(raw_chat)
+            tool_results = [evt for evt in events if evt.get("type") == "tool_result"]
+            result_text = "\n".join(str(evt.get("result", "")) for evt in tool_results)
+            item["tool_call_seen"] = any(evt.get("type") == "tool_call" for evt in events)
+            item["tool_result_seen"] = bool(tool_results)
+            item["sentinel_seen"] = bool(sentinel in result_text)
+            item["provider_required_seen"] = _provider_required_seen(result_text)
+            item["downloaded_schema_exists"] = downloaded_schema_ok
+            transcript = {
+                "case_id": case_id,
+                "job_id": job_id,
+                "sentinel": sentinel,
+                "proof_level": proof_level,
+                "selected_tool": selected_name,
+                "events": events,
+            }
+            _write_json(case_dir / "transcript.json", transcript)
+
+            if not item["tool_call_seen"]:
+                raise AssertionError("GPT did not emit a tool_call")
+            if not item["tool_result_seen"]:
+                raise AssertionError("tool_result event missing")
+            if proof_level == "real_execution" and not item["sentinel_seen"]:
+                raise AssertionError("sentinel not found in real execution tool_result")
+            if proof_level == "provider_required" and not item["provider_required_seen"]:
+                raise AssertionError("provider-required result was not observed")
+            if not downloaded_schema_ok:
+                raise AssertionError("downloaded MCP schema artifact missing")
+            item["passed"] = True
+            touch(f"{case_id}-complete-{job_id}")
+        except Exception as exc:
+            item["error"] = str(exc)
+            (case_dir / "error.txt").write_text(str(exc), encoding="utf-8")
+        finally:
+            item["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+            _write_json(case_dir / "summary.json", item)
+            summaries.append(item)
+            status = "OK" if item["passed"] else "FAIL"
+            print(
+                f"{status} GPT format {case_id}: "
+                f"tool_call={item['tool_call_seen']} tool_result={item['tool_result_seen']} "
+                f"sentinel={item['sentinel_seen']} provider_required={item['provider_required_seen']} "
+                f"elapsed={item['elapsed_seconds']}s"
+            )
+
+    failures = [item for item in summaries if not item.get("passed")]
+    real_cases = [item for item in summaries if item.get("proof_level") == "real_execution"]
+    provider_cases = [item for item in summaries if item.get("proof_level") == "provider_required"]
+    aggregate = {
+        "cases": summaries,
+        "total": len(summaries),
+        "failures": len(failures),
+        "failed_ids": [item["id"] for item in failures],
+        "real_execution_total": len(real_cases),
+        "real_execution_passed": sum(1 for item in real_cases if item.get("passed") and item.get("sentinel_seen")),
+        "provider_required_total": len(provider_cases),
+        "provider_required_tool_call_passed": sum(
+            1 for item in provider_cases
+            if item.get("passed") and item.get("tool_call_seen") and item.get("provider_required_seen")
+        ),
+        "not_live_executed_because_provider_required": [item["id"] for item in provider_cases],
+    }
+    _write_json(out_root / "summary.json", aggregate)
+    if failures:
+        raise AssertionError(f"{len(failures)} GPT format matrix case(s) failed: {aggregate['failed_ids']}")
+    print(f"OK GPT format matrix: {len(summaries)} case(s), artifacts={out_root}")
+    return 0
+
+
 def _run_bridge_case(
     *,
     bridge_url: str,
@@ -564,6 +938,12 @@ def _run_bridge_case(
     min_invocables: int = 1,
     required: bool = True,
     timeout: int = 180,
+    health_timeout: int = 45,
+    post_grace: float = 3.0,
+    bridge_resource_group: str = "",
+    bridge_vm_name: str = "",
+    bridge_task_name: str = "MCP-Factory-Bridge-Interactive",
+    bridge_restart_timeout: int = 90,
     expect_source_type: str = "",
     expect_name_contains: str = "",
 ) -> dict:
@@ -576,18 +956,41 @@ def _run_bridge_case(
     requested_types = types or ["gui", "com", "cli", "registry", "dotnet", "rpc", "directory", "ghidra"]
 
     print(f"START bridge target label={safe_name} kind={kind} target={target}")
-    health_before = _bridge_health(bridge_url, bridge_secret)
-    attempts = []
-    started = time.perf_counter()
-    result = _bridge_analyze_once(
+    health_before = _ensure_bridge_health(
         bridge_url,
         bridge_secret,
-        target,
-        hints=hints,
-        types=requested_types,
-        timeout=timeout,
-        raw_path=raw_path,
+        timeout=health_timeout,
+        restart_resource_group=bridge_resource_group,
+        restart_vm_name=bridge_vm_name,
+        restart_task_name=bridge_task_name,
+        restart_timeout=bridge_restart_timeout,
     )
+    attempts = []
+    started = time.perf_counter()
+    if health_before.get("ok"):
+        result = _bridge_analyze_once(
+            bridge_url,
+            bridge_secret,
+            target,
+            hints=hints,
+            types=requested_types,
+            timeout=timeout,
+            raw_path=raw_path,
+        )
+    else:
+        error_text = (
+            f"bridge health not ready after {health_timeout}s: "
+            f"{health_before.get('error') or health_before.get('body') or health_before}"
+        )
+        raw_path.write_text(error_text, encoding="utf-8")
+        result = {
+            "ok": False,
+            "http_status": None,
+            "payload": {},
+            "error": error_text,
+            "elapsed_seconds": 0,
+            "raw_response_path": str(raw_path),
+        }
     attempts.append(result)
 
     initial_payload = result.get("payload") or {}
@@ -597,17 +1000,40 @@ def _run_bridge_case(
         expect_name_contains=expect_name_contains,
     )
     if not result["ok"] or len(initial_invocables) < min_invocables:
-        retry_health = _bridge_health(bridge_url, bridge_secret)
-        retry_raw_path = target_dir / f"{safe_name}.retry.raw.jsonl"
-        retry_result = _bridge_analyze_once(
+        retry_health = _ensure_bridge_health(
             bridge_url,
             bridge_secret,
-            target,
-            hints=hints,
-            types=requested_types,
-            timeout=timeout,
-            raw_path=retry_raw_path,
+            timeout=health_timeout,
+            restart_resource_group=bridge_resource_group,
+            restart_vm_name=bridge_vm_name,
+            restart_task_name=bridge_task_name,
+            restart_timeout=bridge_restart_timeout,
         )
+        retry_raw_path = target_dir / f"{safe_name}.retry.raw.jsonl"
+        if retry_health.get("ok"):
+            retry_result = _bridge_analyze_once(
+                bridge_url,
+                bridge_secret,
+                target,
+                hints=hints,
+                types=requested_types,
+                timeout=timeout,
+                raw_path=retry_raw_path,
+            )
+        else:
+            error_text = (
+                f"bridge health not ready before retry after {health_timeout}s: "
+                f"{retry_health.get('error') or retry_health.get('body') or retry_health}"
+            )
+            retry_raw_path.write_text(error_text, encoding="utf-8")
+            retry_result = {
+                "ok": False,
+                "http_status": None,
+                "payload": {},
+                "error": error_text,
+                "elapsed_seconds": 0,
+                "raw_response_path": str(retry_raw_path),
+            }
         retry_result["health_before_retry"] = retry_health
         attempts.append(retry_result)
         result = retry_result
@@ -650,6 +1076,11 @@ def _run_bridge_case(
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "bridge_elapsed_seconds": result.get("elapsed_seconds"),
         "retry_count": max(0, len(attempts) - 1),
+        "health_wait_timeout_seconds": health_timeout,
+        "post_grace_seconds": post_grace,
+        "bridge_restart_resource_group": bridge_resource_group,
+        "bridge_restart_vm_name": bridge_vm_name,
+        "bridge_restart_task_name": bridge_task_name,
         "raw_response_path": result.get("raw_response_path") or str(raw_path),
         "summary_path": str(summary_path),
         "bridge_errors": bridge_errors,
@@ -674,6 +1105,9 @@ def _run_bridge_case(
         f"matched={len(matched_invocables)} total={len(all_invocables)} "
         f"retry_count={item['retry_count']} elapsed={item['elapsed_seconds']}s"
     )
+    if post_grace > 0:
+        print(f"GRACE bridge target {safe_name}: sleeping {post_grace:g}s before next bridge activity")
+        time.sleep(post_grace)
     return item
 
 
@@ -690,6 +1124,12 @@ def cmd_bridge_target_e2e(args: argparse.Namespace) -> int:
         min_invocables=args.min_invocables,
         required=_case_bool(args.required),
         timeout=args.timeout,
+        health_timeout=args.health_timeout,
+        post_grace=args.post_grace,
+        bridge_resource_group=args.bridge_resource_group,
+        bridge_vm_name=args.bridge_vm_name,
+        bridge_task_name=args.bridge_task_name,
+        bridge_restart_timeout=args.bridge_restart_timeout,
         expect_source_type=args.expect_source_type,
         expect_name_contains=args.expect_name_contains,
     )
@@ -718,6 +1158,12 @@ def cmd_direct_bridge_e2e(args: argparse.Namespace) -> int:
             out_dir=out_dir,
             required=required,
             timeout=args.timeout,
+            health_timeout=args.health_timeout,
+            post_grace=args.post_grace,
+            bridge_resource_group=args.bridge_resource_group,
+            bridge_vm_name=args.bridge_vm_name,
+            bridge_task_name=args.bridge_task_name,
+            bridge_restart_timeout=args.bridge_restart_timeout,
         )
         for target, required in [(t, True) for t in required_targets] + [(t, False) for t in optional_targets]
     ]
@@ -779,6 +1225,12 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
     summary = []
     failures = 0
     for case in manifest.get("non_vm_cases", []):
+        proof_level = case.get("proof_level")
+        if proof_level and proof_level not in {"real_execution", "provider_required"}:
+            raise AssertionError(f"{case.get('id', '<unknown>')}: invalid proof_level={proof_level!r}")
+        expected_result = case.get("expected_result")
+        if expected_result and expected_result not in {"sentinel", "provider_required"}:
+            raise AssertionError(f"{case.get('id', '<unknown>')}: invalid expected_result={expected_result!r}")
         case_id = case["id"]
         target = ROOT / case["path"]
         case_out = out_root / case_id
@@ -835,11 +1287,13 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     non_vm_path = Path(args.non_vm_summary)
     windows_path = Path(args.windows_summary)
     gpt_dir = Path(args.gpt_artifact_dir)
+    gpt_matrix_path = Path(args.gpt_matrix_summary)
     deallocation_path = Path(args.vm_deallocation)
     out_path = Path(args.out)
 
     non_vm = _load_json(non_vm_path) if non_vm_path.exists() else {"cases": [], "failures": 1, "missing": str(non_vm_path)}
     windows = _load_json(windows_path) if windows_path.exists() else {"targets": [], "failures": 1, "missing": str(windows_path)}
+    gpt_matrix = _load_json(gpt_matrix_path) if gpt_matrix_path.exists() else {"cases": [], "failures": 1, "missing": str(gpt_matrix_path)}
     transcript_path = gpt_dir / "transcript.json"
     selected_path = gpt_dir / "selected-invocable.json"
     generated_schema_path = gpt_dir / "generated-mcp-schema.json"
@@ -873,6 +1327,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     checks = {
         "non_vm_formats_passed": non_vm_counts["failed"] == 0 and non_vm_counts["total"] > 0 and int(non_vm.get("failures", 0)) == 0,
         "windows_targets_passed": windows_counts["failed"] == 0 and windows_counts["total"] > 0 and int(windows.get("failures", 0)) == 0,
+        "gpt_format_matrix_passed": int(gpt_matrix.get("failures", 1)) == 0 and int(gpt_matrix.get("total", 0)) > 0,
         "gpt_tool_call_seen": tool_call_seen,
         "gpt_sentinel_seen": sentinel_seen,
         "generated_schema_exists": generated_schema_path.exists() and schema_tool_count > 0,
@@ -887,6 +1342,16 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "checks": checks,
         "non_vm": non_vm_counts,
         "windows": windows_counts,
+        "gpt_format_matrix": {
+            "total": gpt_matrix.get("total", 0),
+            "failures": gpt_matrix.get("failures", 1),
+            "failed_ids": gpt_matrix.get("failed_ids", []),
+            "real_execution_passed": gpt_matrix.get("real_execution_passed", 0),
+            "real_execution_total": gpt_matrix.get("real_execution_total", 0),
+            "provider_required_tool_call_passed": gpt_matrix.get("provider_required_tool_call_passed", 0),
+            "provider_required_total": gpt_matrix.get("provider_required_total", 0),
+            "not_live_executed_because_provider_required": gpt_matrix.get("not_live_executed_because_provider_required", []),
+        },
         "gpt": {
             "job_id": job_id,
             "selected_tool": selected_tool,
@@ -898,6 +1363,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "artifacts": {
             "non_vm_summary": str(non_vm_path),
             "windows_summary": str(windows_path),
+            "gpt_format_matrix_summary": str(gpt_matrix_path),
             "transcript": str(transcript_path),
             "selected_invocable": str(selected_path),
             "generated_schema": str(generated_schema_path),
@@ -910,6 +1376,9 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
 
     markdown = Path(args.markdown) if args.markdown else None
     if markdown:
+        gpt_matrix_total = int(gpt_matrix.get("total", 0))
+        gpt_matrix_failures = int(gpt_matrix.get("failures", 1))
+        gpt_matrix_passed = max(0, gpt_matrix_total - gpt_matrix_failures)
         lines = [
             "# Sponsor Demo E2E Summary",
             "",
@@ -917,6 +1386,9 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "",
             f"- Sponsor non-VM formats: {non_vm_counts['passed']}/{non_vm_counts['total']} passed",
             f"- Windows VM targets: {windows_counts['passed']}/{windows_counts['total']} passed",
+            f"- GPT format matrix: {gpt_matrix_passed}/{gpt_matrix_total} passed",
+            f"- Real execution format proofs: {gpt_matrix.get('real_execution_passed', 0)}/{gpt_matrix.get('real_execution_total', 0)}",
+            f"- Provider-required tool-call proofs: {gpt_matrix.get('provider_required_tool_call_passed', 0)}/{gpt_matrix.get('provider_required_total', 0)}",
             f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
             f"- Sentinel seen in tool result: {checks['gpt_sentinel_seen']}",
             f"- Generated schema tools: {schema_tool_count}",
@@ -930,6 +1402,13 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             lines.append(f"- Failed sponsor formats: {', '.join(non_vm_counts['failed_ids'])}")
         if windows_counts["failed_ids"]:
             lines.append(f"- Failed Windows targets: {', '.join(windows_counts['failed_ids'])}")
+        if gpt_matrix.get("failed_ids"):
+            lines.append(f"- Failed GPT format matrix cases: {', '.join(gpt_matrix.get('failed_ids', []))}")
+        if gpt_matrix.get("not_live_executed_because_provider_required"):
+            lines.append(
+                "- Not live-executed because a provider is required: "
+                + ", ".join(gpt_matrix.get("not_live_executed_because_provider_required", []))
+            )
         markdown.parent.mkdir(parents=True, exist_ok=True)
         markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -993,12 +1472,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lease-job-id", default="")
     p.set_defaults(func=cmd_cloud_gpt_e2e)
 
+    p = sub.add_parser("cloud-gpt-format-matrix")
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--manifest", default=str(SPONSOR_MANIFEST))
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/gpt-format-matrix")
+    p.add_argument("--sentinel-prefix", default="")
+    p.add_argument("--timeout", type=int, default=600)
+    p.add_argument("--chat-timeout", type=int, default=240)
+    p.add_argument("--lease-storage-account", default="")
+    p.add_argument("--lease-container", default="")
+    p.add_argument("--lease-job-id", default="")
+    p.set_defaults(func=cmd_cloud_gpt_format_matrix)
+
     p = sub.add_parser("direct-bridge-e2e")
     p.add_argument("--bridge-url", required=True)
     p.add_argument("--bridge-secret", required=True)
     p.add_argument("--targets", nargs="*")
     p.add_argument("--optional-targets", nargs="*")
     p.add_argument("--timeout", type=int, default=240)
+    p.add_argument("--health-timeout", type=int, default=45)
+    p.add_argument("--post-grace", type=float, default=3.0)
+    p.add_argument("--bridge-resource-group", default=os.getenv("RESOURCE_GROUP", ""))
+    p.add_argument("--bridge-vm-name", default=os.getenv("VM_NAME", ""))
+    p.add_argument("--bridge-task-name", default=os.getenv("BRIDGE_TASK_NAME", "MCP-Factory-Bridge-Interactive"))
+    p.add_argument("--bridge-restart-timeout", type=int, default=90)
     p.add_argument("--out", default="")
     p.add_argument("--out-dir", default="ci_artifacts/windows-bridge-e2e")
     p.set_defaults(func=cmd_direct_bridge_e2e)
@@ -1012,6 +1510,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hints", default="github actions bridge e2e")
     p.add_argument("--types", nargs="*")
     p.add_argument("--timeout", type=int, default=180)
+    p.add_argument("--health-timeout", type=int, default=45)
+    p.add_argument("--post-grace", type=float, default=3.0)
+    p.add_argument("--bridge-resource-group", default=os.getenv("RESOURCE_GROUP", ""))
+    p.add_argument("--bridge-vm-name", default=os.getenv("VM_NAME", ""))
+    p.add_argument("--bridge-task-name", default=os.getenv("BRIDGE_TASK_NAME", "MCP-Factory-Bridge-Interactive"))
+    p.add_argument("--bridge-restart-timeout", type=int, default=90)
     p.add_argument("--min-invocables", type=int, default=1)
     p.add_argument("--required", default="true")
     p.add_argument("--expect-source-type", default="")
@@ -1027,6 +1531,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--non-vm-summary", default="ci_artifacts/demo/non-vm/summary.json")
     p.add_argument("--windows-summary", default="ci_artifacts/demo/windows/summary.json")
     p.add_argument("--gpt-artifact-dir", default="ci_artifacts/demo/gpt4o")
+    p.add_argument("--gpt-matrix-summary", default="ci_artifacts/demo/gpt-format-matrix/summary.json")
     p.add_argument("--vm-deallocation", default="ci_artifacts/demo/vm-deallocation.json")
     p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
     p.add_argument("--markdown", default="")

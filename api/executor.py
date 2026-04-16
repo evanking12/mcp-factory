@@ -13,8 +13,12 @@ Exports:
 from __future__ import annotations
 
 import ctypes
+import json
 import logging
+import os
 import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -211,6 +215,171 @@ def _execute_gui(execution: dict, name: str, args: dict) -> str:
     )
 
 
+def _provider_required(kind: str, name: str, detail: str = "") -> str:
+    suffix = f" {detail}" if detail else ""
+    return (
+        f"Provider required: {kind} tool '{name}' was discovered and exposed as an MCP tool, "
+        f"but live execution requires a configured backing provider/endpoint/service.{suffix}"
+    )
+
+
+def _materialize_script(execution: dict, preferred_path: str) -> tuple[str, str | None]:
+    script_content = execution.get("script_content")
+    if preferred_path and Path(preferred_path).exists():
+        return preferred_path, None
+    if not script_content:
+        return preferred_path, None
+    suffix = Path(preferred_path).suffix or ".tmp"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+        fh.write(script_content)
+    return tmp_path, tmp_path
+
+
+def _execute_script_local(execution: dict, name: str, args: dict) -> str:
+    method = execution.get("method", "")
+    script_path = (
+        execution.get("script_path")
+        or execution.get("module_path")
+        or ""
+    )
+    func_name = execution.get("function_name") or execution.get("method_name") or name
+    arg_values = list(args.values())
+    tmp_path: str | None = None
+    try:
+        script_path, tmp_path = _materialize_script(execution, script_path)
+        if method == "python_subprocess":
+            arg_repr = ", ".join(repr(v) for v in arg_values)
+            code = (
+                "import importlib.util; "
+                f"spec=importlib.util.spec_from_file_location('m', r'{script_path}'); "
+                "m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+                f"print(m.{func_name}({arg_repr}))"
+            )
+            cmd = [sys.executable, "-c", code]
+        elif method in ("node", "ts-node"):
+            interp = "ts-node" if method == "ts-node" else "node"
+            if func_name:
+                arg_repr = ", ".join(json.dumps(v) for v in arg_values)
+                code = (
+                    f"const m=require({json.dumps(script_path)}); "
+                    f"Promise.resolve(m[{json.dumps(func_name)}]({arg_repr}))"
+                    ".then(v => { if (v !== undefined) console.log(v); })"
+                    ".catch(e => { console.error(e && e.stack || e); process.exit(1); });"
+                )
+                cmd = [interp, "-e", code]
+            else:
+                cmd = [interp, script_path] + [str(v) for v in arg_values]
+        elif method == "ruby":
+            if func_name:
+                arg_repr = ", ".join(repr(v) for v in arg_values)
+                cmd = ["ruby", "-r", script_path, "-e", f"puts {func_name}({arg_repr})"]
+            else:
+                cmd = ["ruby", script_path] + [str(v) for v in arg_values]
+        elif method == "php":
+            if func_name:
+                arg_repr = ", ".join(json.dumps(v) for v in arg_values)
+                cmd = ["php", "-r", f"require {json.dumps(script_path)}; echo {func_name}({arg_repr});"]
+            else:
+                cmd = ["php", script_path] + [str(v) for v in arg_values]
+        elif method in ("powershell", "cmd_call", "cmd", "cscript"):
+            return _provider_required("Windows script runtime", name, "Run this tool through the Windows bridge.")
+        else:
+            return f"Script error: unsupported method '{method}'"
+
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return r.stdout or r.stderr or f"exit_code={r.returncode}"
+    except FileNotFoundError as exc:
+        return f"Script error: interpreter not found - {exc}"
+    except subprocess.TimeoutExpired:
+        return "Script error: timed out after 30 s"
+    except Exception as exc:
+        return f"Script error: {exc}"
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+def _execute_http_contract(execution: dict, name: str, args: dict) -> str:
+    method = execution.get("method", "")
+    base_url = execution.get("base_url")
+    if not base_url:
+        labels = {
+            "http_request": "OpenAPI/REST endpoint",
+            "jsonrpc": "JSON-RPC endpoint",
+            "soap": "SOAP endpoint",
+        }
+        return _provider_required(labels.get(method, "HTTP endpoint"), name)
+    try:
+        import httpx
+        if method == "http_request":
+            http_method = execution.get("http_method", "get").upper()
+            path = execution.get("path", "/")
+            url = base_url.rstrip("/") + "/" + path.lstrip("/")
+            resp = httpx.request(http_method, url, json=args or None, timeout=15)
+            return resp.text or f"HTTP {resp.status_code}"
+        if method == "jsonrpc":
+            payload = {"jsonrpc": "2.0", "method": name, "params": list(args.values()), "id": 1}
+            resp = httpx.post(base_url.rstrip("/"), json=payload, timeout=15)
+            data = resp.json()
+            if "error" in data:
+                return f"JSON-RPC error: {data['error']}"
+            return json.dumps(data.get("result"), indent=2)
+        if method == "soap":
+            action = execution.get("action", name)
+            params_xml = "".join(f"<{k}>{v}</{k}>" for k, v in args.items())
+            body = (
+                '<?xml version="1.0"?>'
+                '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"'
+                ' xmlns:tns="urn:service">'
+                f'<soapenv:Body><tns:{action}>{params_xml}</tns:{action}></soapenv:Body>'
+                '</soapenv:Envelope>'
+            )
+            resp = httpx.post(
+                base_url.rstrip("/"),
+                content=body.encode(),
+                headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": f'"{action}"'},
+                timeout=15,
+            )
+            return resp.text
+        return f"HTTP error: unsupported method '{method}'"
+    except Exception as exc:
+        return f"HTTP error: {exc}"
+
+
+def _execute_sql_contract(execution: dict, name: str, args: dict) -> str:
+    source_file = execution.get("source_file", "")
+    statement = execution.get("statement", "")
+    if source_file and Path(source_file).suffix.lower() in {".db", ".sqlite", ".sqlite3"} and Path(source_file).exists():
+        try:
+            r = subprocess.run(["sqlite3", source_file, statement], capture_output=True, text=True, timeout=15)
+            return r.stdout or r.stderr or f"exit_code={r.returncode}"
+        except FileNotFoundError:
+            return _provider_required("SQL database", name, "sqlite3 is not installed in this runtime.")
+        except Exception as exc:
+            return f"SQL error: {exc}"
+    return _provider_required("SQL database", name)
+
+
+def _is_windows_path(value: str) -> bool:
+    return bool(value and (":\\" in value or value.startswith("\\\\")))
+
+
+def _should_use_bridge(method: str, execution: dict) -> bool:
+    if not GUI_BRIDGE_URL or not GUI_BRIDGE_SECRET:
+        return False
+    if method in {"dll_import", "gui_action", "com_invoke", "com_dispatch", "dotnet_reflection", "powershell", "cmd_call", "cmd", "cscript"}:
+        return True
+    target = (
+        execution.get("executable_path")
+        or execution.get("target_path")
+        or execution.get("dll_path")
+        or execution.get("exe_path")
+        or ""
+    )
+    return method in {"subprocess", "cli"} and _is_windows_path(str(target))
+
+
 # Cache bridge reachability briefly to avoid hammering /health on every call,
 # but never pin failures forever (transient network blips are common).
 _bridge_reachable: bool | None = None  # None = untested
@@ -300,10 +469,10 @@ def _execute_tool(inv: dict, args: dict) -> str:
     execution = inv.get("execution") or inv.get("mcp", {}).get("execution", {})
     method    = execution.get("method", "")
 
-    # All Windows-native methods (dll_import, gui_action, cli) must run on the
-    # Windows VM.  Forward to the bridge whenever it is configured; only fall
-    # back to local execution when the bridge is absent (e.g., dev on Windows).
-    if GUI_BRIDGE_URL and GUI_BRIDGE_SECRET:
+    # Windows-native methods must run on the Windows VM.  Provider contracts
+    # and portable script runtimes execute locally so they can produce explicit,
+    # deterministic results instead of being accidentally routed to the bridge.
+    if _should_use_bridge(method, execution):
         if not ensure_bridge_ready(timeout_seconds=90):
             return (
                 "Bridge /execute error: Windows analysis VM did not become healthy "
@@ -314,4 +483,19 @@ def _execute_tool(inv: dict, args: dict) -> str:
         return _execute_dll(inv, execution, args)
     if method == "gui_action":
         return _execute_gui(execution, name, args)
+    if method in ("python_subprocess", "node", "ts-node", "ruby", "php", "powershell", "cmd_call", "bash", "cmd", "cscript"):
+        return _execute_script_local(execution, name, args)
+    if method in ("http_request", "jsonrpc", "soap"):
+        return _execute_http_contract(execution, name, args)
+    if method == "sql_exec":
+        return _execute_sql_contract(execution, name, args)
+    if method == "rpc_call":
+        iface = execution.get("interface_uuid") or execution.get("endpoint") or name
+        return _provider_required("RPC endpoint", name, f"Discovered interface: {iface}.")
+    if method == "corba_iiop":
+        iface = execution.get("interface") or name
+        return _provider_required("CORBA ORB/IIOP endpoint", name, f"Discovered interface: {iface}.")
+    if method == "jndi_lookup":
+        lookup = execution.get("lookup_name") or name
+        return _provider_required("JNDI provider", name, f"Discovered binding: {lookup}.")
     return _execute_cli(execution, name, args)

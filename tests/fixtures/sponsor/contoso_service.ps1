@@ -6,6 +6,18 @@
     order management system, and support ticket platform.
 #>
 
+function Invoke-ContosoEchoSentinel {
+    <#
+    .SYNOPSIS
+        Echo a deterministic sentinel for MCP E2E validation.
+    #>
+    param (
+        [Parameter(Mandatory)]
+        [string]$Sentinel
+    )
+    return $Sentinel
+}
+
 function Get-ContosoCustomer {
     <#
     .SYNOPSIS

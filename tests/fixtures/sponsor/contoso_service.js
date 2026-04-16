@@ -5,6 +5,10 @@
 
 'use strict';
 
+function echoSentinel(sentinel) {
+    return sentinel;
+}
+
 /**
  * Retrieve customer profile from Contoso CRM.
  * @param {string} customerId - Unique customer identifier.
@@ -63,6 +67,7 @@ async function getLoyaltyBalance(customerId) {}
 async function submitTicket(customerId, subject, description, priority = 'normal') {}
 
 module.exports = {
+    echoSentinel,
     getCustomerProfile,
     placeOrder,
     cancelOrder,
