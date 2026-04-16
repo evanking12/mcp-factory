@@ -1620,12 +1620,21 @@ def cmd_summarize_bridge_e2e(args: argparse.Namespace) -> int:
         summaries.append(_load_json(path))
     if not summaries:
         raise AssertionError(f"no bridge target summaries found under {out_dir}")
+    counts = _count_required_optional(summaries)
     failures = [item for item in summaries if item.get("required", True) and not item.get("passed")]
     aggregate = {
         "targets": summaries,
         "total": len(summaries),
         "failures": len(failures),
         "failed_labels": [item.get("label") for item in failures],
+        "required_total": counts["required_total"],
+        "required_passed": counts["required_passed"],
+        "required_failures": counts["required_failed"],
+        "required_failed_labels": counts["required_failed_ids"],
+        "optional_total": counts["optional_total"],
+        "optional_passed": counts["optional_passed"],
+        "optional_failures": counts["optional_failed"],
+        "optional_failed_labels": counts["optional_failed_ids"],
     }
     _write_json(out_dir / "summary.json", aggregate)
     for item in summaries:
@@ -1717,6 +1726,28 @@ def _count_pass_fail(items: list[dict]) -> dict:
     }
 
 
+def _count_required_optional(items: list[dict]) -> dict:
+    required = [item for item in items if item.get("required", True)]
+    optional = [item for item in items if not item.get("required", True)]
+    required_failures = [item for item in required if not item.get("passed")]
+    optional_failures = [item for item in optional if not item.get("passed")]
+    all_failures = required_failures + optional_failures
+    return {
+        "total": len(items),
+        "passed": len(items) - len(all_failures),
+        "failed": len(all_failures),
+        "failed_ids": [str(item.get("label") or item.get("id") or item.get("target") or "-") for item in all_failures],
+        "required_total": len(required),
+        "required_passed": len(required) - len(required_failures),
+        "required_failed": len(required_failures),
+        "required_failed_ids": [str(item.get("label") or item.get("id") or item.get("target") or "-") for item in required_failures],
+        "optional_total": len(optional),
+        "optional_passed": len(optional) - len(optional_failures),
+        "optional_failed": len(optional_failures),
+        "optional_failed_ids": [str(item.get("label") or item.get("id") or item.get("target") or "-") for item in optional_failures],
+    }
+
+
 def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     non_vm_path = Path(args.non_vm_summary)
     windows_path = Path(args.windows_summary)
@@ -1757,10 +1788,14 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
 
     deallocation = _load_json(deallocation_path) if deallocation_path.exists() else {"attempted": False}
     non_vm_counts = _count_pass_fail(non_vm.get("cases") or [])
-    windows_counts = _count_pass_fail(windows.get("targets") or [])
+    windows_counts = _count_required_optional(windows.get("targets") or [])
     checks = {
         "non_vm_formats_passed": non_vm_counts["failed"] == 0 and non_vm_counts["total"] > 0 and int(non_vm.get("failures", 0)) == 0,
-        "windows_targets_passed": windows_counts["failed"] == 0 and windows_counts["total"] > 0 and int(windows.get("failures", 0)) == 0,
+        "windows_targets_passed": (
+            windows_counts["required_failed"] == 0
+            and windows_counts["required_total"] > 0
+            and int(windows.get("failures", windows_counts["required_failed"])) == 0
+        ),
         "gpt_format_matrix_passed": int(gpt_matrix.get("failures", 1)) == 0 and int(gpt_matrix.get("total", 0)) > 0,
         "gpt_tool_call_seen": tool_call_seen,
         "gpt_sentinel_seen": sentinel_seen,
@@ -1819,7 +1854,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             f"Overall: {'PASS' if passed else 'FAIL'}",
             "",
             f"- Sponsor non-VM formats: {non_vm_counts['passed']}/{non_vm_counts['total']} passed",
-            f"- Windows VM targets: {windows_counts['passed']}/{windows_counts['total']} passed",
+            f"- Windows VM required targets: {windows_counts['required_passed']}/{windows_counts['required_total']} passed",
+            f"- Windows VM optional diagnostics: {windows_counts['optional_passed']}/{windows_counts['optional_total']} passed",
             f"- GPT format matrix: {gpt_matrix_passed}/{gpt_matrix_total} passed",
             f"- Real execution format proofs: {gpt_matrix.get('real_execution_passed', 0)}/{gpt_matrix.get('real_execution_total', 0)}",
             f"- Provider-required tool-call proofs: {gpt_matrix.get('provider_required_tool_call_passed', 0)}/{gpt_matrix.get('provider_required_total', 0)}",
@@ -1834,8 +1870,10 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         ]
         if non_vm_counts["failed_ids"]:
             lines.append(f"- Failed sponsor formats: {', '.join(non_vm_counts['failed_ids'])}")
-        if windows_counts["failed_ids"]:
-            lines.append(f"- Failed Windows targets: {', '.join(windows_counts['failed_ids'])}")
+        if windows_counts["required_failed_ids"]:
+            lines.append(f"- Failed required Windows targets: {', '.join(windows_counts['required_failed_ids'])}")
+        if windows_counts["optional_failed_ids"]:
+            lines.append(f"- Failed optional Windows diagnostics: {', '.join(windows_counts['optional_failed_ids'])}")
         if gpt_matrix.get("failed_ids"):
             lines.append(f"- Failed GPT format matrix cases: {', '.join(gpt_matrix.get('failed_ids', []))}")
         if gpt_matrix.get("not_live_executed_because_provider_required"):

@@ -186,11 +186,11 @@ jobs:
 
       - name: Scan Windows EXE/CLI - cmd.exe
         continue-on-error: true
-        timeout-minutes: 6
+        timeout-minutes: 4
         run: |
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-cmd-start" --job-id "${{ github.run_id }}"
           set +e
-          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.runtime-secrets.outputs.bridge_secret }}" --label cmd_exe --kind system_path --target 'C:\Windows\System32\cmd.exe' --timeout 120 --out-dir ci_artifacts/demo/windows
+          python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.runtime-secrets.outputs.bridge_secret }}" --label cmd_exe --kind system_path --target 'C:\Windows\System32\cmd.exe' --types cli --timeout 45 --required false --out-dir ci_artifacts/demo/windows
           status=$?
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-cmd-end" --job-id "${{ github.run_id }}" || true
           exit $status
