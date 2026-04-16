@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from api.config import IS_WINDOWS, GUI_BRIDGE_URL, GUI_BRIDGE_SECRET
+from api.vm_lifecycle import ensure_bridge_ready, touch_bridge_activity
 
 logger = logging.getLogger("mcp_factory.api")
 
@@ -269,6 +270,7 @@ def _call_execute_bridge(inv: dict, args: dict) -> str | None:
         return None
     global _bridge_client
     try:
+        touch_bridge_activity("execute", "")
         client = _get_bridge_client()
         t0 = time.perf_counter()
         resp = client.post(
@@ -302,6 +304,11 @@ def _execute_tool(inv: dict, args: dict) -> str:
     # Windows VM.  Forward to the bridge whenever it is configured; only fall
     # back to local execution when the bridge is absent (e.g., dev on Windows).
     if GUI_BRIDGE_URL and GUI_BRIDGE_SECRET:
+        if not ensure_bridge_ready(timeout_seconds=90):
+            return (
+                "Bridge /execute error: Windows analysis VM did not become healthy "
+                "before timeout. Try again in a few minutes."
+            )
         return _call_execute_bridge(inv, args) or "Bridge returned an empty result."
     if method == "dll_import":
         return _execute_dll(inv, execution, args)

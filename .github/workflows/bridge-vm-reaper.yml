@@ -1,0 +1,60 @@
+name: Bridge VM Idle Reaper
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: mcp-factory-rg
+  VM_NAME: mcpfactory-runner-vm
+  STORAGE_ACCOUNT: mcpfactorystore
+  ARTIFACT_CONTAINER: artifacts
+  IDLE_MINUTES: "30"
+
+jobs:
+  reaper:
+    name: Deallocate stale bridge VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deallocate if marker is stale
+        run: |
+          set -euo pipefail
+          state="$(az vm get-instance-view -g "$RESOURCE_GROUP" -n "$VM_NAME" --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" -o tsv || true)"
+          echo "VM power state: ${state:-unknown}"
+          if [ "$state" != "PowerState/running" ]; then
+            exit 0
+          fi
+
+          marker_file="$(mktemp)"
+          if ! az storage blob download \
+            --auth-mode login \
+            --account-name "$STORAGE_ACCOUNT" \
+            --container-name "$ARTIFACT_CONTAINER" \
+            --name "_vm/last_bridge_activity.json" \
+            --file "$marker_file" \
+            --only-show-errors >/dev/null 2>&1; then
+            echo "No marker found; deallocating running bridge VM."
+            az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"
+            exit 0
+          fi
+
+          idle_seconds="$(python -c 'import json, sys, time; marker=json.load(open(sys.argv[1], encoding="utf-8")); print(int(time.time() - float(marker.get("updated_at") or 0)))' "$marker_file")"
+          threshold=$((IDLE_MINUTES * 60))
+          echo "Bridge idle seconds: $idle_seconds threshold: $threshold"
+          if [ "$idle_seconds" -ge "$threshold" ]; then
+            az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"
+          fi

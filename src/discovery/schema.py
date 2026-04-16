@@ -352,10 +352,17 @@ class Invocable:
             }
 
         elif self.source_type == "batch_label":
+            _script_content: Optional[str] = None
+            if self.dll_path:
+                try:
+                    _script_content = Path(self.dll_path).read_text(encoding='utf-8', errors='replace')
+                except OSError:
+                    pass
             return {
                 "method": "cmd_call",
                 "script_path": self.dll_path,
                 "label": self.name,
+                "script_content": _script_content,
                 "example": f"cmd /c call \"{self.dll_path}\" :{self.name}",
             }
 
@@ -422,9 +429,16 @@ class Invocable:
             }
 
         elif self.source_type == "batch_script":
+            _script_content: Optional[str] = None
+            if self.dll_path:
+                try:
+                    _script_content = Path(self.dll_path).read_text(encoding='utf-8', errors='replace')
+                except OSError:
+                    pass
             return {
                 "method": "cmd",
                 "script_path": self.dll_path,
+                "script_content": _script_content,
                 "example": f"cmd /c \"{self.dll_path}\"",
             }
 

@@ -43,6 +43,7 @@ from api.worker import _queue_worker_loop, _analyze_worker
 from api.executor import _execute_tool
 from api.chat import stream_chat
 from api.generate import run_generate
+from api.vm_lifecycle import bridge_idle_reaper_loop
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger("mcp_factory.api")
@@ -142,6 +143,7 @@ def _startup_probe() -> None:
 async def _startup():
     threading.Thread(target=_queue_worker_loop, daemon=True, name="queue-worker").start()
     threading.Thread(target=_startup_probe, daemon=True, name="startup-probe").start()
+    threading.Thread(target=bridge_idle_reaper_loop, daemon=True, name="bridge-idle-reaper").start()
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────

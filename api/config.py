@@ -36,6 +36,20 @@ OPENAI_MAX_TOOLS  = int(os.getenv("OPENAI_MAX_TOOLS", "60"))
 GUI_BRIDGE_URL    = os.getenv("GUI_BRIDGE_URL", "").rstrip("/")
 GUI_BRIDGE_SECRET = os.getenv("GUI_BRIDGE_SECRET", "")
 
+# On-demand Windows VM lifecycle for bridge-backed analysis.  In Azure
+# Container Apps this uses the same managed identity as Blob/OpenAI access.
+AZURE_SUBSCRIPTION_ID = os.getenv("AZURE_SUBSCRIPTION_ID", "")
+AZURE_RESOURCE_GROUP = os.getenv("AZURE_RESOURCE_GROUP", "mcp-factory-rg")
+BRIDGE_VM_NAME = os.getenv("BRIDGE_VM_NAME", "mcpfactory-runner-vm")
+BRIDGE_START_TIMEOUT_SECONDS = int(os.getenv("BRIDGE_START_TIMEOUT_SECONDS", "420"))
+BRIDGE_IDLE_MINUTES = int(os.getenv("BRIDGE_IDLE_MINUTES", "30"))
+ENABLE_BRIDGE_VM_LIFECYCLE = os.getenv("ENABLE_BRIDGE_VM_LIFECYCLE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 # ── Pipeline API key guard (optional) ────────────────────────────────────
 # Set PIPELINE_API_KEY on the container to require a shared key on every
 # request.  Leave unset for open access during local development.

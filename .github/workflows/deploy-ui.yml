@@ -35,6 +35,7 @@ env:
   IDENTITY:      mcp-factory-identity
   PIPELINE_URL:  https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
   IDENTITY_ID:   /subscriptions/abb10328-e7f1-4d4a-9067-c1967fd70429/resourcegroups/mcp-factory-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mcp-factory-identity
+  KEY_VAULT:     mcp-factory-kv
 
 jobs:
   build-and-deploy:
@@ -108,6 +109,20 @@ jobs:
               --memory 0.5Gi \
               --env-vars "PIPELINE_URL=${{ env.PIPELINE_URL }}"
           fi
+
+          az containerapp secret set \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RG }} \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --secrets pipeline-api-key=keyvaultref:https://${{ env.KEY_VAULT }}.vault.azure.net/secrets/pipeline-api-key,identityref:${{ env.IDENTITY_ID }}
+
+          az containerapp update \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RG }} \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --set-env-vars \
+              "PIPELINE_URL=${{ env.PIPELINE_URL }}" \
+              "PIPELINE_KEY=secretref:pipeline-api-key"
 
       - name: Print UI URL
         run: |

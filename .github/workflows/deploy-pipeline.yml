@@ -43,6 +43,10 @@ env:
   IMAGE:      mcpfactoryacr.azurecr.io/mcp-factory-pipeline
   APP_NAME:   mcp-factory-pipeline
   RG:         mcp-factory-rg
+  KEY_VAULT:  mcp-factory-kv
+  BRIDGE_URL: http://20.124.33.45:8090
+  BRIDGE_VM_NAME: mcpfactory-runner-vm
+  IDENTITY_ID: /subscriptions/abb10328-e7f1-4d4a-9067-c1967fd70429/resourceGroups/mcp-factory-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mcp-factory-identity
 
 jobs:
   build-and-deploy:
@@ -90,6 +94,29 @@ jobs:
             --resource-group ${{ env.RG }} \
             --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
             --target-port 8000
+
+          az containerapp secret set \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RG }} \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --secrets \
+              gui-bridge-secret=keyvaultref:https://${{ env.KEY_VAULT }}.vault.azure.net/secrets/gui-bridge-secret,identityref:${{ env.IDENTITY_ID }} \
+              pipeline-api-key=keyvaultref:https://${{ env.KEY_VAULT }}.vault.azure.net/secrets/pipeline-api-key,identityref:${{ env.IDENTITY_ID }}
+
+          az containerapp update \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RG }} \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --set-env-vars \
+              "GUI_BRIDGE_URL=${{ env.BRIDGE_URL }}" \
+              "GUI_BRIDGE_SECRET=secretref:gui-bridge-secret" \
+              "PIPELINE_API_KEY=secretref:pipeline-api-key" \
+              "AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+              "AZURE_RESOURCE_GROUP=${{ env.RG }}" \
+              "BRIDGE_VM_NAME=${{ env.BRIDGE_VM_NAME }}" \
+              "ENABLE_BRIDGE_VM_LIFECYCLE=true" \
+              "BRIDGE_START_TIMEOUT_SECONDS=420" \
+              "BRIDGE_IDLE_MINUTES=30"
 
       - name: Verify deployment
         run: |

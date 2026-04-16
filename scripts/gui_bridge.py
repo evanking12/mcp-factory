@@ -1211,7 +1211,7 @@ def _execute_script_bridge(execution: dict, name: str, args: dict) -> str:
     # host, materialise the embedded script_content into a local temp file.
     _tmp_path: "str | None" = None
     script_content = execution.get("script_content")
-    if script_path and not Path(script_path).exists() and script_content:
+    if script_path and not Path(script_path).exists() and script_content and method != "cmd_call":
         suffix = Path(script_path).suffix or ".tmp"
         fd, _tmp_path = tempfile.mkstemp(suffix=suffix)
         try:
@@ -1262,7 +1262,19 @@ def _execute_script_bridge(execution: dict, name: str, args: dict) -> str:
         elif method == "cmd_call":
             label = execution.get("label", func_name)
             arg_str = " ".join(str(v) for v in arg_values)
-            cmd = ["cmd", "/c", f'call "{script_path}" :{label} {arg_str}'.strip()]
+            if script_content:
+                fd, _tmp_path = tempfile.mkstemp(suffix=".cmd")
+                wrapper = (
+                    "@echo off\n"
+                    f"call :{label} {arg_str}\n"
+                    "exit /b %ERRORLEVEL%\n"
+                    f"{script_content}\n"
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as _f:
+                    _f.write(wrapper)
+                cmd = ["cmd", "/c", _tmp_path]
+            else:
+                cmd = ["cmd", "/c", f'call "{script_path}" :{label} {arg_str}'.strip()]
 
         elif method in ("bash",):
             if func_name:

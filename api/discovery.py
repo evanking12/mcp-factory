@@ -25,6 +25,7 @@ from api.config import (
     ARTIFACT_CONTAINER,
 )
 from api.storage import _upload_to_blob, _get_job_status, _persist_job_status
+from api.vm_lifecycle import ensure_bridge_ready, touch_bridge_activity
 
 logger = logging.getLogger("mcp_factory.api")
 
@@ -37,6 +38,40 @@ def _persist_bridge_warning(job_id: str, message: str) -> None:
         _persist_job_status(job_id, existing, sync=True)
     except Exception as exc:
         logger.warning("[%s] Failed to persist bridge warning: %s", job_id, exc)
+
+
+def _persist_bridge_status(job_id: str, message: str, progress: int) -> None:
+    """Update job status while preserving already-written fields."""
+    try:
+        existing = _get_job_status(job_id) or {}
+        _persist_job_status(job_id, {
+            **existing,
+            "status": "running",
+            "progress": progress,
+            "message": message,
+            "updated_at": time.time(),
+        }, sync=True)
+    except Exception as exc:
+        logger.warning("[%s] Failed to persist bridge status: %s", job_id, exc)
+
+
+_WINDOWS_BRIDGE_EXTENSIONS = {".exe", ".com", ".cmd", ".bat", ".dll", ".tlb", ".olb"}
+_WINDOWS_BRIDGE_HINTS = {"windows", "win32", "registry", "gui", "com", "dcom", "tlb", "ole"}
+
+
+def _needs_windows_bridge(target: Path, hints: str = "") -> bool:
+    """Return True when analysis needs the Windows bridge VM."""
+    if target.suffix.lower() in _WINDOWS_BRIDGE_EXTENSIONS:
+        return True
+
+    target_text = str(target).lower()
+    if target.is_dir() and (":\\" in target_text or target_text.startswith(("c:/", "d:/"))):
+        return True
+    if "\\program files\\" in target_text or "/program files/" in target_text:
+        return True
+
+    hint_text = hints.lower()
+    return any(token in hint_text for token in _WINDOWS_BRIDGE_HINTS)
 
 
 def _extract_invocables(data: Any) -> list:
@@ -166,7 +201,10 @@ def _call_gui_bridge(binary_path: Path, job_id: str, hints: str = "") -> list[di
     payload = {
         "path":    str(binary_path),
         "hints":   hints,
-        "types":   ["gui", "com", "cli", "registry"],
+        "types":   [
+            "gui", "com", "cli", "registry", "dotnet", "rpc", "script",
+            "sql", "wsdl", "idl", "js", "openapi", "jndi", "ghidra",
+        ],
         "content": content_b64,   # None → bridge falls back to system-path lookup
     }
     # Retry up to _BRIDGE_MAX_RETRIES times.  On a cold first upload the bridge
@@ -237,6 +275,7 @@ def _call_gui_bridge(binary_path: Path, job_id: str, hints: str = "") -> list[di
 
             logger.info("[%s] Bridge returned %d invocables (%d after normalization)",
                         job_id, len(raw_invocables), len(invocables))
+            touch_bridge_activity("analyze", job_id)
             return invocables
         except Exception as exc:
             _last_exc = exc
@@ -333,7 +372,8 @@ def _run_discovery(binary_path: Path, job_id: str, hints: str = "") -> dict:
             logger.warning(f"[{job_id}] Blob upload failed for {mcp_file.name}: {exc}")
         print(f"[DIAG {job_id}] artifact upload done {mcp_file.name}", flush=True)
 
-    print(f"[DIAG {job_id}] all artifacts uploaded, calling bridge", flush=True)
+    bridge_required = _needs_windows_bridge(binary_path, hints)
+    print(f"[DIAG {job_id}] all artifacts uploaded, bridge_required={bridge_required}", flush=True)
     print(f"[DIAG {job_id}] GUI_BRIDGE_URL={'SET' if GUI_BRIDGE_URL else 'NOT SET'}", flush=True)
     # Use plain logger.info (no custom_dimensions) here — the AzureLogHandler
     # flushes synchronously and can block 90s if App Insights is slow.
@@ -347,24 +387,31 @@ def _run_discovery(binary_path: Path, job_id: str, hints: str = "") -> dict:
     # ── Update progress before the bridge call so the UI doesn't freeze at 30% ──
     # _call_gui_bridge can block for up to 180s (+ 10s retry sleep); without this
     # update the job appears stuck at the "running 30%" status written in worker.py.
-    if GUI_BRIDGE_URL and GUI_BRIDGE_SECRET:
-        existing = _get_job_status(job_id) or {}
-        _persist_job_status(job_id, {
-            **existing,
-            "status": "running",
-            "progress": 60,
-            "message": "Local analysis complete — calling Windows GUI bridge…",
-            "updated_at": time.time(),
-        }, sync=True)
+    if GUI_BRIDGE_URL and GUI_BRIDGE_SECRET and bridge_required:
+        _persist_bridge_status(job_id, "Local analysis complete - preparing Windows bridge...", 52)
 
     # ── Augment with Windows-only analysis via GUI bridge (if configured) ──
     # The bridge covers GUI buttons, COM/TLB interfaces, Windows EXE CLI help,
     # and registry scan — none of which run in the Linux container.
-    bridge_invocables = _call_gui_bridge(binary_path, job_id, hints)
+    bridge_invocables: list[dict] = []
+    if GUI_BRIDGE_URL and GUI_BRIDGE_SECRET and bridge_required:
+        if ensure_bridge_ready(
+            job_id=job_id,
+            status_callback=lambda message, progress: _persist_bridge_status(job_id, message, progress),
+        ):
+            _persist_bridge_status(job_id, "Windows bridge ready - analyzing target...", 60)
+            bridge_invocables = _call_gui_bridge(binary_path, job_id, hints)
+        else:
+            _persist_bridge_warning(job_id, "Windows VM bridge did not become healthy before timeout")
+    elif GUI_BRIDGE_URL and GUI_BRIDGE_SECRET:
+        logger.info("[%s] STEP 9 \u2014  Bridge skipped; target does not require Windows analysis", job_id)
+
     if not GUI_BRIDGE_URL or not GUI_BRIDGE_SECRET:
         logger.info("[%s] STEP 9 \u2014  Bridge not configured, skipped", job_id)
     elif bridge_invocables:
         logger.info("[%s] STEP 9 \u2713  Bridge returned %d invocables", job_id, len(bridge_invocables))
+    elif not bridge_required:
+        logger.info("[%s] STEP 9 \u2014  Bridge not required for this target", job_id)
     else:
         logger.error("[%s] STEP 9 \u2717  Bridge returned 0 invocables (check NSG outbound rules for port 8090 / errno 110)", job_id)
     if bridge_invocables:

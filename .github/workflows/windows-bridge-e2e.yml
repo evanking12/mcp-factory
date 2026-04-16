@@ -1,0 +1,80 @@
+name: Windows Bridge E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: mcp-factory-rg
+  VM_NAME: mcpfactory-runner-vm
+  KEY_VAULT: mcp-factory-kv
+  BRIDGE_URL: http://20.124.33.45:8090
+
+jobs:
+  bridge-e2e:
+    name: Manual bridge scan verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start bridge VM
+        run: az vm start -g "$RESOURCE_GROUP" -n "$VM_NAME"
+
+      - name: Fetch bridge secret
+        id: bridge-secret
+        run: |
+          secret="$(az keyvault secret show --vault-name "$KEY_VAULT" --name gui-bridge-secret --query value -o tsv)"
+          echo "::add-mask::$secret"
+          echo "secret=$secret" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for bridge health
+        run: |
+          for i in {1..84}; do
+            if curl -fsS -H "X-Bridge-Key: ${{ steps.bridge-secret.outputs.secret }}" "$BRIDGE_URL/health"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Bridge did not become healthy in time" >&2
+          exit 1
+
+      - name: Run direct bridge E2E
+        run: |
+          python scripts/ci_verify.py direct-bridge-e2e \
+            --bridge-url "$BRIDGE_URL" \
+            --bridge-secret "${{ steps.bridge-secret.outputs.secret }}" \
+            --out ci_artifacts/bridge-e2e-summary.json \
+            --targets \
+              'C:\Windows\System32\kernel32.dll' \
+              'C:\Windows\System32\cmd.exe' \
+              'C:\Windows\System32\notepad.exe' \
+              'C:\Windows\System32\shell32.dll'
+
+      - name: Upload bridge E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-bridge-e2e
+          path: ci_artifacts
+          if-no-files-found: ignore
+
+      - name: Deallocate bridge VM
+        if: always()
+        run: az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME"
+

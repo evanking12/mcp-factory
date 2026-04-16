@@ -1,0 +1,105 @@
+name: GPT-4o Tool E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: mcp-factory-rg
+  VM_NAME: mcpfactory-runner-vm
+  KEY_VAULT: mcp-factory-kv
+  BRIDGE_URL: http://20.124.33.45:8090
+  PIPELINE_URL: https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
+
+jobs:
+  gpt-tool-e2e:
+    name: Manual cloud GPT tool-call verification
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start bridge VM
+        shell: pwsh
+        run: az vm start -g "$env:RESOURCE_GROUP" -n "$env:VM_NAME"
+
+      - name: Fetch runtime secrets
+        id: runtime-secrets
+        shell: pwsh
+        run: |
+          $bridgeSecret = az keyvault secret show --vault-name $env:KEY_VAULT --name gui-bridge-secret --query value -o tsv
+          $pipelineKey = az keyvault secret show --vault-name $env:KEY_VAULT --name pipeline-api-key --query value -o tsv
+          Write-Output "::add-mask::$bridgeSecret"
+          Write-Output "::add-mask::$pipelineKey"
+          "bridge_secret=$bridgeSecret" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "pipeline_key=$pipelineKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Wait for bridge health
+        shell: pwsh
+        run: |
+          for ($i = 0; $i -lt 84; $i++) {
+            try {
+              Invoke-RestMethod -Uri "$env:BRIDGE_URL/health" -Headers @{ "X-Bridge-Key" = "${{ steps.runtime-secrets.outputs.bridge_secret }}" } -TimeoutSec 5 | Out-Host
+              exit 0
+            } catch {
+              Start-Sleep -Seconds 5
+            }
+          }
+          throw "Bridge did not become healthy in time"
+
+      - name: Create deterministic CMD target
+        id: target
+        shell: pwsh
+        run: |
+          $sentinel = "MCP_FACTORY_E2E_${{ github.run_id }}"
+          $target = Join-Path $env:RUNNER_TEMP "mcp-factory-e2e.cmd"
+          @(
+            "@echo off",
+            "goto :eof",
+            "REM Echo deterministic sentinel for GPT/tool E2E.",
+            ":EchoSentinel",
+            "echo $sentinel",
+            "exit /b 0"
+          ) | Set-Content -Path $target -Encoding ASCII
+          "sentinel=$sentinel" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "target=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Run cloud GPT tool E2E
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ci_artifacts | Out-Null
+          python scripts/ci_verify.py cloud-gpt-e2e `
+            --base-url "$env:PIPELINE_URL" `
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" `
+            --target "${{ steps.target.outputs.target }}" `
+            --tool-name EchoSentinel `
+            --sentinel "${{ steps.target.outputs.sentinel }}" `
+            --transcript "ci_artifacts/gpt4o-tool-e2e-transcript.json"
+
+      - name: Upload GPT E2E transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt4o-tool-e2e
+          path: ci_artifacts
+          if-no-files-found: ignore
+
+      - name: Deallocate bridge VM
+        if: always()
+        shell: pwsh
+        run: az vm deallocate -g "$env:RESOURCE_GROUP" -n "$env:VM_NAME"
