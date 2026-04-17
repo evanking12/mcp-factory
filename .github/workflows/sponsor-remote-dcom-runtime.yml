@@ -12,12 +12,13 @@ env:
   SERVER_VM_NAME: mcpfactory-runner-vm
   KEY_VAULT: mcp-factory-kv
   PIPELINE_URL: https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
+  SERVER_PUBLIC_TARGET: 20.124.33.45
 
 jobs:
   remote-dcom-runtime:
     name: Controlled remote DCOM activation proof
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: windows-latest
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -35,94 +36,37 @@ jobs:
 
       - name: Fetch pipeline key
         id: runtime-secrets
+        shell: pwsh
         run: |
-          PIPELINE_KEY="$(az keyvault secret show --vault-name "$KEY_VAULT" --name pipeline-api-key --query value -o tsv)"
-          echo "::add-mask::$PIPELINE_KEY"
-          echo "pipeline_key=$PIPELINE_KEY" >> "$GITHUB_OUTPUT"
+          $pipelineKey = az keyvault secret show --vault-name "$env:KEY_VAULT" --name pipeline-api-key --query value -o tsv
+          Write-Output "::add-mask::$pipelineKey"
+          "pipeline_key=$pipelineKey" >> $env:GITHUB_OUTPUT
 
-      - name: Create temporary Windows DCOM client VM
-        id: client
-        timeout-minutes: 25
+      - name: Generate proof credential
+        shell: pwsh
         run: |
-          set -euo pipefail
-          suffix="${GITHUB_RUN_ID: -8}"
-          client_vm="mcp-dcom-${suffix}"
-          client_computer="dcom${suffix}"
-          client_nic="${client_vm}-nic"
-          os_disk="${client_vm}-osdisk"
-          admin_password="$(python - <<'PY'
-          import secrets, string
-          alphabet = string.ascii_letters + string.digits
-          print("Mcp!" + "".join(secrets.choice(alphabet) for _ in range(28)))
-          PY
-          )"
-          dcom_password="$(python - <<'PY'
-          import secrets, string
-          alphabet = string.ascii_letters + string.digits
-          print("Dcom!" + "".join(secrets.choice(alphabet) for _ in range(28)))
-          PY
-          )"
-          echo "::add-mask::$admin_password"
-          echo "::add-mask::$dcom_password"
-
-          server_nic_id="$(az vm show -g "$RESOURCE_GROUP" -n "$SERVER_VM_NAME" --query "networkProfile.networkInterfaces[0].id" -o tsv)"
-          subnet_id="$(az network nic show --ids "$server_nic_id" --query "ipConfigurations[0].subnet.id" -o tsv)"
-          server_private_ip="$(az network nic show --ids "$server_nic_id" --query "ipConfigurations[0].privateIPAddress" -o tsv)"
-
-          az network nic create \
-            -g "$RESOURCE_GROUP" \
-            -n "$client_nic" \
-            --subnet "$subnet_id" \
-            --only-show-errors
-
-          az vm create \
-            -g "$RESOURCE_GROUP" \
-            -n "$client_vm" \
-            --computer-name "$client_computer" \
-            --image Win2022Datacenter \
-            --size Standard_B2s \
-            --admin-username dcomadmin \
-            --admin-password "$admin_password" \
-            --nics "$client_nic" \
-            --os-disk-name "$os_disk" \
-            --storage-sku Standard_LRS \
-            --only-show-errors
-
-          echo "CLIENT_VM=$client_vm" >> "$GITHUB_ENV"
-          echo "CLIENT_NIC=$client_nic" >> "$GITHUB_ENV"
-          echo "CLIENT_OS_DISK=$os_disk" >> "$GITHUB_ENV"
-          echo "SERVER_PRIVATE_IP=$server_private_ip" >> "$GITHUB_ENV"
-          echo "DCOM_PASSWORD=$dcom_password" >> "$GITHUB_ENV"
+          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".ToCharArray()
+          $random = -join (1..28 | ForEach-Object { $chars | Get-Random })
+          $dcomPassword = "Dcom!" + $random
+          Write-Output "::add-mask::$dcomPassword"
+          "DCOM_PASSWORD=$dcomPassword" >> $env:GITHUB_ENV
 
       - name: Run remote DCOM runtime proof
+        shell: pwsh
         timeout-minutes: 20
         run: |
-          python scripts/ci_verify.py windows-remote-dcom-runtime-proof \
-            --resource-group "$RESOURCE_GROUP" \
-            --server-vm-name "$SERVER_VM_NAME" \
-            --client-vm-name "$CLIENT_VM" \
-            --server-target "$SERVER_PRIVATE_IP" \
-            --dcom-username "mcpdcom" \
-            --dcom-password "$DCOM_PASSWORD" \
-            --base-url "$PIPELINE_URL" \
-            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
-            --out ci_artifacts/demo/windows/dcom/dcom.summary.json \
-            --artifact-dir ci_artifacts/demo/windows/dcom \
+          python scripts/ci_verify.py windows-remote-dcom-runtime-proof `
+            --resource-group "$env:RESOURCE_GROUP" `
+            --server-vm-name "$env:SERVER_VM_NAME" `
+            --client-mode local `
+            --server-target "$env:SERVER_PUBLIC_TARGET" `
+            --dcom-username "mcpdcom" `
+            --dcom-password "$env:DCOM_PASSWORD" `
+            --base-url "$env:PIPELINE_URL" `
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" `
+            --out ci_artifacts/demo/windows/dcom/dcom.summary.json `
+            --artifact-dir ci_artifacts/demo/windows/dcom `
             --sentinel "MCP_FACTORY_REMOTE_DCOM_${{ github.run_id }}"
-
-      - name: Cleanup temporary Windows DCOM client VM
-        if: always()
-        run: |
-          set +e
-          if [ -n "${CLIENT_VM:-}" ]; then
-            az vm delete -g "$RESOURCE_GROUP" -n "$CLIENT_VM" --yes --force-deletion true --only-show-errors || true
-          fi
-          if [ -n "${CLIENT_OS_DISK:-}" ]; then
-            az disk delete -g "$RESOURCE_GROUP" -n "$CLIENT_OS_DISK" --yes --only-show-errors || true
-          fi
-          if [ -n "${CLIENT_NIC:-}" ]; then
-            az network nic delete -g "$RESOURCE_GROUP" -n "$CLIENT_NIC" --only-show-errors || true
-          fi
 
       - name: Upload remote DCOM runtime artifacts
         if: always()

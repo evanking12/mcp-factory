@@ -7,9 +7,10 @@ Scope:
   WScript.Shell DCOM proof user on the bridge VM, invokes that COM object from
   a distinct temporary Azure Windows client VM, records the remote activation
   transcript, and cleans proof-only server artifacts.
-- Added focused workflow `Sponsor Remote DCOM Runtime Proof`, which provisions
-  a temporary Windows client VM in the bridge VM subnet, runs the proof, uploads
-  artifacts, and deletes the temporary VM, disk, and NIC in an `always()` step.
+- Added focused workflow `Sponsor Remote DCOM Runtime Proof`, which runs from a
+  distinct GitHub-hosted Windows client context against the bridge VM public
+  endpoint, uploads artifacts, and relies on the proof command to clean the
+  proof-only server user/firewall/registry artifacts.
 - The proof fails closed. It does not claim remote DCOM if activation does not
   occur from a distinct client context or if the remote sentinel read fails.
 
@@ -17,6 +18,12 @@ Local validation before push:
 - `python -m py_compile scripts/ci_verify.py`
 - `python scripts/ci_verify.py windows-remote-dcom-runtime-proof --help`
 - `python -m pytest -q` passed: `36 passed, 5 skipped`.
+
+First focused workflow attempt:
+- Run `24572666172` failed before DCOM activation. The OIDC identity could not
+  read the bridge VM NIC, so the workflow could not provision a temporary
+  same-subnet client VM. The approach was changed to use a GitHub-hosted Windows
+  client as the distinct remote context.
 
 Focused workflow gate:
 - Pending. The tranche is not complete until the focused workflow proves:

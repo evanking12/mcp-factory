@@ -1050,6 +1050,40 @@ def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, t
         }
 
 
+def _run_local_powershell_json(*, script: str, timeout: int) -> dict:
+    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        result = {
+            "attempted": True,
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+        if proc.returncode == 0 and proc.stdout.strip():
+            for line in reversed(proc.stdout.strip().splitlines()):
+                try:
+                    payload = json.loads(line)
+                    if isinstance(payload, dict):
+                        result.update(payload)
+                        break
+                except json.JSONDecodeError:
+                    continue
+            else:
+                result["parse_error"] = "failed to parse JSON payload from local PowerShell output"
+        return result
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+
+
 def _az_tsv(args: list[str], *, timeout: int = 120) -> str:
     proc = subprocess.run(["az", *args, "-o", "tsv"], check=False, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
@@ -2454,6 +2488,8 @@ def cmd_windows_remote_dcom_runtime_proof(args: argparse.Namespace) -> int:
     transcript_path = artifact_dir / "remote-activation-transcript.json"
     sentinel = args.sentinel or f"MCP_FACTORY_REMOTE_DCOM_{uuid.uuid4().hex[:8]}"
     server_target = args.server_target or _get_vm_private_ip(resource_group=args.resource_group, vm_name=args.server_vm_name)
+    if args.client_mode == "azure-vm" and not args.client_vm_name:
+        raise AssertionError("--client-vm-name is required when --client-mode azure-vm")
     cleanup_payload: dict = {"attempted": False}
 
     server_setup = _run_vm_powershell_json(
@@ -2462,17 +2498,21 @@ def cmd_windows_remote_dcom_runtime_proof(args: argparse.Namespace) -> int:
         script=_remote_dcom_server_setup_script(username=args.dcom_username, password=args.dcom_password, sentinel=sentinel),
         timeout=args.timeout,
     )
-    client_invocation = _run_vm_powershell_json(
-        resource_group=args.resource_group,
-        vm_name=args.client_vm_name,
-        script=_remote_dcom_client_script(
-            username=args.dcom_username,
-            password=args.dcom_password,
-            server_target=server_target,
-            sentinel=sentinel,
-        ),
-        timeout=args.timeout,
+    client_script = _remote_dcom_client_script(
+        username=args.dcom_username,
+        password=args.dcom_password,
+        server_target=server_target,
+        sentinel=sentinel,
     )
+    if args.client_mode == "local":
+        client_invocation = _run_local_powershell_json(script=client_script, timeout=args.timeout)
+    else:
+        client_invocation = _run_vm_powershell_json(
+            resource_group=args.resource_group,
+            vm_name=args.client_vm_name,
+            script=client_script,
+            timeout=args.timeout,
+        )
     if args.cleanup:
         cleanup_payload = _run_vm_powershell_json(
             resource_group=args.resource_group,
@@ -2502,6 +2542,7 @@ def cmd_windows_remote_dcom_runtime_proof(args: argparse.Namespace) -> int:
         "sentinel": sentinel,
         "server_vm_name": args.server_vm_name,
         "client_vm_name": args.client_vm_name,
+        "client_mode": args.client_mode,
         "server_target": server_target,
         "prog_id": "WScript.Shell",
         "clsid": server_setup.get("clsid", ""),
@@ -4215,7 +4256,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("windows-remote-dcom-runtime-proof")
     p.add_argument("--resource-group", default=os.getenv("RESOURCE_GROUP", ""))
     p.add_argument("--server-vm-name", default=os.getenv("VM_NAME", ""))
-    p.add_argument("--client-vm-name", required=True)
+    p.add_argument("--client-mode", choices=["azure-vm", "local"], default="azure-vm")
+    p.add_argument("--client-vm-name", default="")
     p.add_argument("--server-target", default="")
     p.add_argument("--dcom-username", default="mcpdcom")
     p.add_argument("--dcom-password", required=True)

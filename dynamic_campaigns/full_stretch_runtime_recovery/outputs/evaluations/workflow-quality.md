@@ -183,7 +183,7 @@ Next correction: require downloaded workflow artifacts to prove deployed
 
 `gm_control_quality`: 2
 
-Evidence: the proof command requires a distinct client VM and fails if the
+Evidence: the proof command requires a distinct client context and fails if the
 remote sentinel is not read through the COM object.
 
 Strongest risk: DCOM authentication, firewall, or Azure networking may block
@@ -194,14 +194,15 @@ failing layer; no local COM fallback is allowed for this tranche.
 
 `context_pressure_result`: 2
 
-Evidence: the proof writes under `ci_artifacts/demo/windows/dcom` and the
-temporary Azure resources are named and cleaned in the focused workflow.
+Evidence: the proof writes under `ci_artifacts/demo/windows/dcom`; after the
+same-subnet client VM approach hit an Azure permission blocker, the focused
+workflow uses GitHub-hosted Windows to avoid creating temporary Azure resources.
 
-Strongest risk: a failed workflow could leave a VM disk or NIC if Azure cleanup
-also fails.
+Strongest risk: public DCOM activation may be blocked by Azure edge routing or
+server firewall/NAT behavior.
 
-Next correction: inspect cleanup logs after the focused workflow, and add a
-manual cleanup command to the tranche summary if needed.
+Next correction: inspect the remote activation transcript and write a blocker
+if the failure is DCOM transport/security rather than workflow code.
 
 `delegation_effectiveness`: 2
 

@@ -14,5 +14,10 @@ Baseline fallback remains Sponsor Demo E2E run `24568108685`.
 
 Local implementation is ready for authoritative workflow validation. The
 current frontier remains `005-remote-dcom-runtime` until the focused remote
-DCOM workflow proves activation/invocation from a temporary Azure Windows client
-VM and a generated GPT proof tool returns the recorded backend result.
+DCOM workflow proves activation/invocation from a distinct Windows client
+context and a generated GPT proof tool returns the recorded backend result.
+
+Run `24572666172` failed before DCOM activation because the OIDC identity could
+not read the bridge VM NIC for same-subnet client provisioning. The next attempt
+uses a GitHub-hosted Windows client context instead of provisioning a temporary
+Azure VM.
