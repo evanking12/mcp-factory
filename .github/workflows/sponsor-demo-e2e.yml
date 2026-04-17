@@ -353,7 +353,6 @@ jobs:
 
       - name: Run Windows GPT tool-call proof matrix
         if: ${{ !inputs.skip_windows_targets && !inputs.skip_gpt_matrix && !inputs.skip_windows_gpt_matrix && inputs.only_windows_target == '' }}
-        continue-on-error: true
         timeout-minutes: 20
         run: |
           set +e
@@ -411,7 +410,6 @@ jobs:
 
       - name: Run repo-ingestion GPT proof
         if: ${{ !inputs.skip_gpt_matrix && !inputs.skip_repo_ingestion && inputs.only_gpt_case == '' }}
-        continue-on-error: true
         timeout-minutes: 15
         run: |
           set +e
