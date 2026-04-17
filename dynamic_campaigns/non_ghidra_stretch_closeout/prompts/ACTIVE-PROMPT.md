@@ -12,7 +12,8 @@ Current frontier:
 - The final artifact proves `remote_dcom_runtime`, GPT matrix `13/13`, Windows
   GPT `5/5`, repo ingestion, LDAP, CORBA ORB/IIOP, MSRPC, local COM, and VM
   deallocation.
-- Remaining gate: report-only reproducibility, then final commit/push closeout.
+- Report-only reproducibility run `24579153369` passed.
+- Remaining gate: commit/push final closeout writeback.
 
 Campaign goals:
 

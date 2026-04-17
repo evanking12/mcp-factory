@@ -3,9 +3,9 @@
 ## gm_control_quality
 
 - score: 3
-- evidence: Full Sponsor Demo E2E run `24578415657` passed with Remote DCOM imported and required.
-- strongest_risk: Report-only reproducibility still needs to be run against the new full artifact.
-- next_correction: Dispatch report-only workflow for run `24578415657`.
+- evidence: Full Sponsor Demo E2E run `24578415657` passed with Remote DCOM imported and required; report-only run `24579153369` re-rendered the final report with `passed=true`.
+- strongest_risk: None for the non-Ghidra closeout gate.
+- next_correction: Keep future claims scoped to non-Ghidra stretch runtime support unless a separate Ghidra campaign is run.
 
 ## context_pressure_result
 
@@ -25,8 +25,8 @@
 
 - score: 3
 - evidence: Full run URL, imported DCOM run, required checks, and claim boundary are recorded.
-- strongest_risk: Canonical links must be kept in sync before closeout.
-- next_correction: Update README, proof index, caveats, and UI links to `24578415657`.
+- strongest_risk: Canonical links can drift in future edits.
+- next_correction: Use report-only workflow after any sponsor report wording change.
 
 ## Dispatch Accountability
 

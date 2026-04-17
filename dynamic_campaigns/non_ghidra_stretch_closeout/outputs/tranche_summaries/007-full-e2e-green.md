@@ -10,6 +10,7 @@
 - URL: `https://github.com/evanking12/mcp-factory/actions/runs/24578415657`
 - Artifact: `sponsor-demo-e2e`
 - Imported Remote DCOM source run: `24577926238`
+- Report-only reproducibility run: `24579153369`
 
 ## Final Summary Gate
 
@@ -23,6 +24,7 @@
 - `repo_ingestion_proof_passed=true`
 - `windows_com_runtime_proof_passed=true`
 - `vm_deallocation_completed=true`
+- report-only re-render from uploaded JSON: pass
 
 Runtime proof highlights:
 
@@ -48,4 +50,4 @@ Still out of scope:
 
 ## Next Prompt
 
-Run report-only reproducibility against `24578415657`, update final canonical docs/UI links, write closeout, commit, and push.
+Non-Ghidra stretch closeout is complete. Keep `24578415657` as the canonical proof bundle and `24579153369` as the report-only reproducibility check.

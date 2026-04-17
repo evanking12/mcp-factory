@@ -6,6 +6,7 @@
 - URL: https://github.com/evanking12/mcp-factory/actions/runs/24578415657
 - Artifact: `sponsor-demo-e2e`
 - Focused Remote DCOM source proof: `24577926238`
+- Report-only reproducibility: `24579153369`
 
 ## What Passed
 
@@ -20,6 +21,7 @@
 - CORBA ORB/IIOP runtime: pass
 - MSRPC runtime: pass
 - Bridge VM deallocation: pass
+- Report-only re-render from uploaded JSON: pass
 
 ## Truthful Final Claim
 
