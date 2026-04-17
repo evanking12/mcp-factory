@@ -7,12 +7,12 @@ Baseline canonical green Sponsor Demo E2E run is
 
 Current frontier:
 
-- Focused run `24575880821` proved Azure same-subnet client VM creation and
-  cleanup are working.
-- It exposed a Run Command payload parsing issue rather than a permissions
-  blocker.
-- Commit the parser fix, rerun focused Remote DCOM, then promote only if the
-  parsed artifact proves `remote_dcom_runtime`.
+- Focused runs `24575880821` and `24576385559` proved Azure same-subnet client
+  VM creation and cleanup are working.
+- Run `24576385559` preserved Run Command output and exposed Windows-side
+  setup problems: server registry setup and denied `Start-Process -Credential`.
+- Commit the scheduled-task credential execution fix, rerun focused Remote
+  DCOM, then promote only if the parsed artifact proves `remote_dcom_runtime`.
 
 Campaign goals:
 

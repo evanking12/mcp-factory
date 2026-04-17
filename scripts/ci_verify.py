@@ -2352,7 +2352,9 @@ try {{
 if (-not $isAdmin) {{
     Add-LocalGroupMember -Group "Administrators" -Member $username
 }}
-New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Force | Out-Null
+if (-not (Test-Path "HKLM:\\SOFTWARE\\Microsoft\\Ole")) {{
+    New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Force | Out-Null
+}}
 New-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Name "EnableDCOM" -PropertyType String -Value "Y" -Force | Out-Null
 New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Force | Out-Null
 New-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Name "LocalAccountTokenFilterPolicy" -PropertyType DWord -Value 1 -Force | Out-Null
@@ -2454,17 +2456,36 @@ try {{
     if (-not $isAdmin) {{ Add-LocalGroupMember -Group "Administrators" -Member $username }}
 }} catch {{ }}
 try {{ Start-Service seclogon -ErrorAction SilentlyContinue }} catch {{ }}
-$cred = New-Object System.Management.Automation.PSCredential(".\\$username", $secure)
 $encoded = {_ps_quote(encoded)}
 $inner = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
 Set-Content -Path $scriptPath -Value $inner -Encoding UTF8
 $powerShellPath = Join-Path $env:SystemRoot "System32\\WindowsPowerShell\\v1.0\\powershell.exe"
-$argumentList = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-$proc = Start-Process -FilePath $powerShellPath -Credential $cred -ArgumentList $argumentList -LoadUserProfile -Wait -PassThru
+$taskName = "MCPFactoryRemoteDcomProof-" + ([Guid]::NewGuid().ToString("N"))
+$taskRun = "`"$powerShellPath`" -NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+$taskStart = (Get-Date).AddMinutes(1).ToString("HH:mm")
+$taskCreateOutput = & schtasks.exe /Create /TN $taskName /TR $taskRun /SC ONCE /ST $taskStart /RU ".\\$username" /RP $password /RL HIGHEST /F 2>&1
+$taskCreateExit = $LASTEXITCODE
+if ($taskCreateExit -ne 0) {{
+    [ordered]@{{
+        passed = $false
+        runtime_mode = "remote_dcom_runtime"
+        proof_level = "remote_dcom_runtime"
+        dcom_surface = "remote_activation_invocation"
+        remote_dcom_activation_claimed = $true
+        client_computer_name = $env:COMPUTERNAME
+        task_create_exit_code = $taskCreateExit
+        task_create_output = ($taskCreateOutput -join "`n")
+        error = "failed to create scheduled task for local DCOM proof user"
+    }} | ConvertTo-Json -Depth 12 -Compress
+    exit 0
+}}
+$taskRunOutput = & schtasks.exe /Run /TN $taskName 2>&1
+$taskRunExit = $LASTEXITCODE
 for ($i = 0; $i -lt 60; $i++) {{
     if (Test-Path $proofPath) {{ break }}
     Start-Sleep -Seconds 2
 }}
+& schtasks.exe /Delete /TN $taskName /F | Out-Null
 if (-not (Test-Path $proofPath)) {{
     [ordered]@{{
         passed = $false
@@ -2473,20 +2494,23 @@ if (-not (Test-Path $proofPath)) {{
         dcom_surface = "remote_activation_invocation"
         remote_dcom_activation_claimed = $true
         client_computer_name = $env:COMPUTERNAME
-        proof_exit_code = $proc.ExitCode
+        task_create_exit_code = $taskCreateExit
+        task_run_exit_code = $taskRunExit
+        task_run_output = ($taskRunOutput -join "`n")
         error = "remote DCOM proof file was not created"
     }} | ConvertTo-Json -Depth 12 -Compress
     exit 0
 }}
 $proof = Get-Content -Path $proofPath -Raw | ConvertFrom-Json
 [ordered]@{{
-    passed = ([bool]$proof.passed -and $proc.ExitCode -eq 0)
+    passed = ([bool]$proof.passed -and $taskCreateExit -eq 0 -and $taskRunExit -eq 0)
     runtime_mode = "remote_dcom_runtime"
     proof_level = "remote_dcom_runtime"
     dcom_surface = "remote_activation_invocation"
     remote_dcom_activation_claimed = $true
     client_computer_name = $env:COMPUTERNAME
-    proof_exit_code = $proc.ExitCode
+    task_create_exit_code = $taskCreateExit
+    task_run_exit_code = $taskRunExit
     proof_path = $proofPath
     proof = $proof
 }} | ConvertTo-Json -Depth 20 -Compress

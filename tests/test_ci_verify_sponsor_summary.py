@@ -503,6 +503,17 @@ def test_non_ghidra_dcom_campaign_and_workflow_use_same_subnet_client() -> None:
     workflow = (ROOT / ".github" / "workflows" / "sponsor-remote-dcom-runtime.yml").read_text(encoding="utf-8")
     active_prompt = (campaign / "prompts" / "ACTIVE-PROMPT.md").read_text(encoding="utf-8")
     ui = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
+    client_script = ci_verify._remote_dcom_client_script(
+        username="mcpdcom",
+        password="Password!12345",
+        server_target="10.1.0.4",
+        sentinel="MCP_FACTORY_REMOTE_DCOM_TEST",
+    )
+    server_script = ci_verify._remote_dcom_server_setup_script(
+        username="mcpdcom",
+        password="Password!12345",
+        sentinel="MCP_FACTORY_REMOTE_DCOM_TEST",
+    )
 
     assert (campaign / "CAMPAIGN.md").exists()
     assert (campaign / "outputs" / "tranche_summaries" / "000-start.md").exists()
@@ -520,6 +531,9 @@ def test_non_ghidra_dcom_campaign_and_workflow_use_same_subnet_client() -> None:
     assert "azure-client-cleanup.json" in workflow
     assert "remote_dcom_runtime" in ui
     assert "CI Proof Bundle" in ui
+    assert "schtasks.exe /Create" in client_script
+    assert "Start-Process -FilePath $powerShellPath -Credential" not in client_script
+    assert 'Test-Path "HKLM:\\SOFTWARE\\Microsoft\\Ole"' in server_script
 
 
 def test_required_remote_dcom_missing_fails_final_summary(tmp_path: Path) -> None:
