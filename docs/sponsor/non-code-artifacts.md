@@ -44,8 +44,8 @@ change:
 Runtime-shaped proof means GPT-4o called a generated tool and the backend
 returned a live hosted result from a deterministic provider endpoint that
 validates the relevant request shape. JSON-RPC, SOAP, SQL, controlled
-LDAP/JNDI bind/search/lookup, and controlled CORBA ORB/IIOP are
-runtime-backed; RPC remains XML-RPC runtime proof; COM/DCOM uses Windows local
-COM proof. This is not a claim that generalized CORBA estate migration,
-DCE/MSRPC, enterprise LDAP migration, or remote DCOM infrastructure has been
-deployed unless the report explicitly says so.
+LDAP/JNDI bind/search/lookup, controlled CORBA ORB/IIOP, and controlled
+DCE/RPC-compatible RPC IDL are runtime-backed; COM/DCOM uses Windows local COM
+proof. This is not a claim that generalized CORBA estate migration, arbitrary
+MSRPC estate support, enterprise LDAP migration, or remote DCOM infrastructure
+has been deployed unless the report explicitly says so.

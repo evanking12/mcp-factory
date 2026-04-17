@@ -3,7 +3,8 @@
 These endpoints are intentionally small and predictable. They provide live,
 runtime-backed or runtime-shaped backing services for generated MCP tools while
 avoiding claims that the capstone performs generalized CORBA estate migration,
-DCE/MSRPC, enterprise directory migration, or remote DCOM infrastructure.
+arbitrary enterprise MSRPC estate support, enterprise directory migration, or
+remote DCOM infrastructure.
 """
 
 from __future__ import annotations
@@ -34,6 +35,12 @@ from api.ldap_runtime import (
     ldap_lookup,
     ldap_search,
 )
+from api.msrpc_runtime import (
+    CONTOSO_MSRPC_IDL,
+    MsrpcRuntimeUnavailable,
+    msrpc_invoke,
+    msrpc_runtime_enabled,
+)
 
 router = APIRouter(prefix="/api/legacy", tags=["legacy-provider"])
 
@@ -44,7 +51,7 @@ PROVIDERS = {
     "soap": "SOAP/WSDL envelope-validating Contoso runtime",
     "sql": "SQLite-backed Contoso runtime",
     "corba": "CORBA ORB/IIOP Contoso runtime" if corba_orb_enabled() else "CORBA IDL object-registry runtime-shaped provider",
-    "rpc": "XML-RPC hosted Contoso runtime",
+    "rpc": "DCE/RPC-compatible Contoso runtime" if msrpc_runtime_enabled() else "XML-RPC hosted Contoso runtime",
     "jndi": "LDAPv3-compatible JNDI binding runtime",
 }
 PROVIDER_MODES = {
@@ -53,7 +60,7 @@ PROVIDER_MODES = {
     "soap": "real_runtime",
     "sql": "real_runtime",
     "corba": "corba_orb_runtime" if corba_orb_enabled() else "corba_idl_runtime",
-    "rpc": "xmlrpc_runtime",
+    "rpc": "msrpc_runtime" if msrpc_runtime_enabled() else "xmlrpc_runtime",
     "jndi": "ldap_runtime",
 }
 
@@ -302,7 +309,7 @@ def legacy_health() -> dict[str, Any]:
         "enabled_providers": sorted(PROVIDERS),
         "providers": PROVIDERS,
         "provider_modes": PROVIDER_MODES,
-        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime", "corba_orb_runtime"}),
+        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "msrpc_runtime", "corba_idl_runtime", "corba_orb_runtime"}),
         "adapter_backed": sorted(k for k, v in PROVIDER_MODES.items() if v == "adapter_backed"),
     }
 
@@ -557,6 +564,31 @@ async def rpc_provider(procedure: str, request: Request) -> Response:
     if method_name not in RPC_METHODS:
         fault = xmlrpc.client.Fault(404, f"RPC method not declared in IDL: {method_name}")
         return Response(content=xmlrpc.client.dumps(fault), media_type="text/xml", status_code=200)
+    if PROVIDER_MODES["rpc"] == "msrpc_runtime":
+        try:
+            msrpc_result = msrpc_invoke(method_name, extract_sentinel(parsed_args))
+        except MsrpcRuntimeUnavailable as exc:
+            return Response(
+                content=json.dumps({
+                    "provider": "rpc",
+                    "runtime_mode": "msrpc_runtime",
+                    "error": str(exc),
+                    "notes": "MSRPC runtime is required for this stretch proof and was not downgraded.",
+                }),
+                media_type="application/json",
+                status_code=503,
+            )
+        result = build_legacy_result("rpc", method_name, parsed_args)
+        result.update({
+            "runtime_mode": "msrpc_runtime",
+            "transport": "dcerpc",
+            "idl_interface": "ContosoRpcSupport",
+            "declared_method": method_name,
+            "msrpc_invocation": msrpc_result,
+            "sentinel": extract_sentinel(parsed_args),
+            "result": msrpc_result["client_result"],
+        })
+        return Response(content=json.dumps(result), media_type="application/json")
     result = build_legacy_result("rpc", method_name, parsed_args)
     result.update({
         "runtime_mode": PROVIDER_MODES["rpc"],
@@ -565,6 +597,11 @@ async def rpc_provider(procedure: str, request: Request) -> Response:
         "declared_method": method_name,
     })
     return Response(content=xmlrpc.client.dumps((result,), methodresponse=True), media_type="text/xml")
+
+
+@router.get("/rpc/idl")
+def rpc_idl_provider() -> Response:
+    return Response(content=CONTOSO_MSRPC_IDL, media_type="text/plain")
 
 
 @router.post("/jndi/bind")

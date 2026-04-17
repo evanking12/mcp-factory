@@ -334,7 +334,7 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
                         "soap_wsdl": "real_runtime",
                         "sql": "real_runtime",
                         "jndi": "ldap_runtime",
-                        "rpc_idl_contract": "xmlrpc_runtime",
+                        "rpc_idl_contract": "msrpc_runtime",
                         "corba_idl": "corba_orb_runtime",
                     }.get(case_id, "local_runtime"),
                 }
@@ -357,7 +357,7 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
                 "ldap_runtime": 1,
                 "real_runtime": 3,
                 "validated_runtime": 1,
-                "xmlrpc_runtime": 1,
+                "msrpc_runtime": 1,
             },
             "runtime_backed_cases": cases,
             "adapter_backed_cases": [],

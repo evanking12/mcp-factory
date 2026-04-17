@@ -33,7 +33,7 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     assert health["provider_modes"]["sql"] == "real_runtime"
     assert health["provider_modes"]["rest"] == "validated_runtime"
     assert health["provider_modes"]["jndi"] == "ldap_runtime"
-    assert health["provider_modes"]["rpc"] == "xmlrpc_runtime"
+    assert health["provider_modes"]["rpc"] in {"xmlrpc_runtime", "msrpc_runtime"}
     assert health["provider_modes"]["corba"] in {"corba_idl_runtime", "corba_orb_runtime"}
 
     assert sentinel in client.post("/api/legacy/rest/tickets", json={"sentinel": sentinel}).text
@@ -175,10 +175,16 @@ def test_jndi_and_rpc_runtime_modes_are_explicit() -> None:
     rpc_payload = xmlrpc.client.dumps(({"sentinel": "MCP_FACTORY_RPC"},), methodname="RpcCreateTicket")
     rpc = client.post("/api/legacy/rpc/RpcCreateTicket", content=rpc_payload, headers={"Content-Type": "text/xml"})
     assert rpc.status_code == 200
-    values, _method = xmlrpc.client.loads(rpc.text.encode("utf-8"))
-    assert values[0]["runtime_mode"] == "xmlrpc_runtime"
-    assert values[0]["transport"] == "xmlrpc"
-    assert "MCP_FACTORY_RPC" in values[0]["sentinel"]
+    if rpc.headers.get("content-type", "").startswith("application/json"):
+        rpc_json = rpc.json()
+        assert rpc_json["runtime_mode"] == "msrpc_runtime"
+        assert rpc_json["msrpc_invocation"]["wire_protocol"].startswith("DCE/RPC")
+        assert "MCP_FACTORY_RPC" in rpc.text
+    else:
+        values, _method = xmlrpc.client.loads(rpc.text.encode("utf-8"))
+        assert values[0]["runtime_mode"] == "xmlrpc_runtime"
+        assert values[0]["transport"] == "xmlrpc"
+        assert "MCP_FACTORY_RPC" in values[0]["sentinel"]
 
     missing_payload = xmlrpc.client.dumps(({"sentinel": "MCP_FACTORY_RPC"},), methodname="RpcMissing")
     missing = client.post("/api/legacy/rpc/RpcMissing", content=missing_payload, headers={"Content-Type": "text/xml"})

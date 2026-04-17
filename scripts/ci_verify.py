@@ -304,7 +304,7 @@ RUNTIME_MODE_BY_FORMAT_CASE = {
     "soap_wsdl": "real_runtime",
     "sql": "real_runtime",
     "jndi": "ldap_runtime",
-    "rpc_idl_contract": "xmlrpc_runtime",
+    "rpc_idl_contract": "msrpc_runtime",
     "corba_idl": "corba_orb_runtime",
     "python": "local_runtime",
     "javascript": "local_runtime",
@@ -1757,7 +1757,7 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     runtime_backed_cases = [
         item["id"]
         for item in summaries
-        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime", "corba_orb_runtime", "local_runtime"}
+        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "msrpc_runtime", "corba_idl_runtime", "corba_orb_runtime", "local_runtime"}
     ]
     aggregate = {
         "cases": summaries,
@@ -1939,6 +1939,79 @@ def cmd_corba_orb_runtime_proof(args: argparse.Namespace) -> int:
     if not passed:
         raise AssertionError(f"CORBA ORB runtime proof failed checks: {[name for name, ok in checks.items() if not ok]}")
     print(f"OK CORBA ORB runtime proof: artifacts={artifact_dir}")
+    return 0
+
+
+def cmd_msrpc_runtime_proof(args: argparse.Namespace) -> int:
+    base_url = args.base_url.rstrip("/")
+    artifact_dir = Path(args.artifact_dir)
+    matrix_out = Path(args.matrix_out)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = args.sentinel or f"MCP_FACTORY_MSRPC_{uuid.uuid4().hex[:8]}"
+    key = args.pipeline_key or ""
+
+    print(f"START MSRPC runtime proof: base_url={base_url}")
+    health = _http_json("GET", f"{base_url}/api/legacy/health", key=key, timeout=args.timeout)
+    provider_modes = health.get("provider_modes") or {}
+    if provider_modes.get("rpc") != "msrpc_runtime":
+        raise AssertionError(f"legacy provider rpc mode is not msrpc_runtime: {provider_modes.get('rpc')!r}")
+
+    idl = _http_bytes("GET", f"{base_url}/api/legacy/rpc/idl", key=key, timeout=args.timeout).decode("utf-8")
+    invocation = _http_json(
+        "POST",
+        f"{base_url}/api/legacy/rpc/RpcCreateTicket",
+        key=key,
+        body={"sentinel": sentinel},
+        timeout=args.timeout,
+    )
+    msrpc = invocation.get("msrpc_invocation") or {}
+    server_log = msrpc.get("server_log") or []
+    checks = {
+        "provider_mode_is_msrpc_runtime": provider_modes.get("rpc") == "msrpc_runtime",
+        "idl_has_contoso_interface": "interface ContosoRpcSupport" in idl and "uuid(" in idl,
+        "binding_is_ncacn_ip_tcp": str(msrpc.get("binding", "")).startswith("ncacn_ip_tcp:"),
+        "wire_protocol_is_dcerpc": str(msrpc.get("wire_protocol", "")).startswith("DCE/RPC"),
+        "server_registered_interface": any("registered uuid=" in str(item) for item in server_log),
+        "client_result_has_sentinel": sentinel in json.dumps(invocation, sort_keys=True),
+        "provider_result_mode": invocation.get("runtime_mode") == "msrpc_runtime",
+    }
+    passed = all(checks.values())
+    (artifact_dir / "contoso_rpc.idl").write_text(idl, encoding="utf-8")
+    _write_json(artifact_dir / "endpoint-registration.json", {
+        "binding": msrpc.get("binding"),
+        "interface_uuid": msrpc.get("interface_uuid"),
+        "interface_version": msrpc.get("interface_version"),
+        "server_log": server_log,
+    })
+    _write_json(artifact_dir / "client-invocation.json", invocation)
+    summary = {
+        "id": "msrpc_runtime",
+        "passed": passed,
+        "proof_level": "real_runtime",
+        "runtime_mode": "msrpc_runtime",
+        "provider": "rpc",
+        "wire_protocol": "DCE/RPC v5 over ncacn_ip_tcp",
+        "rpc_stack": msrpc.get("rpc_stack", "impacket"),
+        "sentinel": sentinel,
+        "checks": checks,
+        "artifacts": {
+            "idl": str(artifact_dir / "contoso_rpc.idl"),
+            "endpoint_registration": str(artifact_dir / "endpoint-registration.json"),
+            "client_invocation": str(artifact_dir / "client-invocation.json"),
+        },
+        "notes": "Controlled DCE/RPC-compatible proof for deterministic Contoso RPC IDL, not arbitrary enterprise MSRPC estate support.",
+    }
+    _write_json(artifact_dir / "summary.json", summary)
+
+    matrix = _load_optional_summary(matrix_out)
+    if not isinstance(matrix, dict) or matrix.get("missing"):
+        matrix = {}
+    matrix["msrpc_runtime"] = summary
+    matrix["passed"] = all(bool(value.get("passed")) for value in matrix.values() if isinstance(value, dict) and "passed" in value)
+    _write_json(matrix_out, matrix)
+    if not passed:
+        raise AssertionError(f"MSRPC runtime proof failed checks: {[name for name, ok in checks.items() if not ok]}")
+    print(f"OK MSRPC runtime proof: artifacts={artifact_dir}")
     return 0
 
 
@@ -2614,6 +2687,7 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
             "lookup_runtime",
             "ldap_runtime",
             "xmlrpc_runtime",
+            "msrpc_runtime",
             "corba_idl_runtime",
             "corba_orb_runtime",
             "adapter_backed",
@@ -2868,7 +2942,7 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json",
                 "docs/sponsor/caveats.md",
             ],
-            "notes": "JSON-RPC, SOAP, SQL, controlled LDAP/JNDI bind/search/lookup, and controlled CORBA ORB/IIOP are runtime-backed when their focused artifacts are present; REST is route-validated and RPC uses XML-RPC wire responses. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
+            "notes": "JSON-RPC, SOAP, SQL, controlled LDAP/JNDI bind/search/lookup, controlled CORBA ORB/IIOP, and controlled DCE/RPC-compatible RPC IDL are runtime-backed when their focused artifacts are present. REST is route-validated. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
         },
         {
             "requirement": "1.c",
@@ -3101,7 +3175,7 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
         },
         "runtime_modes": {
             "cases_by_mode": dict(sorted(runtime_modes.items())),
-            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, controlled LDAP-compatible bind/search/lookup, XML-RPC wire responses, CORBA IDL runtime-shaped validation, and any remaining adapter-backed legacy protocol modeling.",
+            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, controlled LDAP-compatible bind/search/lookup, controlled DCE/RPC-compatible RPC, CORBA ORB/IIOP proof, and any remaining adapter-backed legacy protocol modeling.",
         },
     }
 
@@ -3762,6 +3836,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sentinel", default="")
     p.add_argument("--timeout", type=int, default=90)
     p.set_defaults(func=cmd_corba_orb_runtime_proof)
+
+    p = sub.add_parser("msrpc-runtime-proof")
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/legacy/msrpc")
+    p.add_argument("--matrix-out", default="ci_artifacts/demo/legacy-runtime-matrix/summary.json")
+    p.add_argument("--sentinel", default="")
+    p.add_argument("--timeout", type=int, default=90)
+    p.set_defaults(func=cmd_msrpc_runtime_proof)
 
     p = sub.add_parser("windows-gpt-tool-matrix")
     p.add_argument("--base-url", required=True)

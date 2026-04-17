@@ -131,3 +131,50 @@ review unless final evidence records the deployed runtime.
 
 Next correction: focused artifact parsing must record the deployed mode and
 client result before tranche completion.
+
+## 004 MSRPC Runtime
+
+`gm_control_quality`: 2
+
+Evidence: the implementation adds a distinct MSRPC proof command and workflow
+instead of relabeling the previous XML-RPC fallback.
+
+Strongest risk: the DCE/RPC server path uses Impacket APIs that local Windows
+validation cannot execute authoritatively.
+
+Next correction: deployed focused workflow must prove
+`runtime_mode=msrpc_runtime`, `wire_protocol=DCE/RPC v5 over ncacn_ip_tcp`,
+endpoint registration, server log, client invocation, and GPT transcript.
+
+`context_pressure_result`: 2
+
+Evidence: the tranche writes expected artifacts under
+`ci_artifacts/demo/legacy/msrpc`.
+
+Strongest risk: package import, callback registration, or dynamic port handling
+may differ inside the Linux ACA.
+
+Next correction: if focused workflow fails, inspect its logs and patch the
+actual DCE/RPC runtime path rather than downgrading to `xmlrpc_runtime`.
+
+`delegation_effectiveness`: 2
+
+Evidence: no subagents were dispatched because this turn did not authorize
+delegation.
+
+Strongest risk: MSRPC troubleshooting could benefit from parallel API/package
+research if the deployed proof fails.
+
+Next correction: keep the tranche local unless explicit delegation
+authorization appears.
+
+`operator_reviewability`: 2
+
+Evidence: provider health, manifest, final summary modes, focused command, and
+workflow all target one runtime mode: `msrpc_runtime`.
+
+Strongest risk: fallback XML-RPC remains for local disabled runtime mode and
+could confuse review if final artifacts are not checked.
+
+Next correction: require downloaded workflow artifacts to prove deployed
+`msrpc_runtime` before tranche closeout.

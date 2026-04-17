@@ -406,6 +406,17 @@ jobs:
             --matrix-out ci_artifacts/demo/legacy-runtime-matrix/summary.json \
             --sentinel "MCP_FACTORY_CORBA_ORB_${{ github.run_id }}"
 
+      - name: Run MSRPC runtime proof
+        if: ${{ !inputs.skip_gpt_matrix && (inputs.only_gpt_case == '' || inputs.only_gpt_case == 'rpc_idl_contract') }}
+        timeout-minutes: 5
+        run: |
+          python scripts/ci_verify.py msrpc-runtime-proof \
+            --base-url "$PIPELINE_URL" \
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
+            --artifact-dir ci_artifacts/demo/legacy/msrpc \
+            --matrix-out ci_artifacts/demo/legacy-runtime-matrix/summary.json \
+            --sentinel "MCP_FACTORY_MSRPC_${{ github.run_id }}"
+
       - name: Run GPT per-format proof matrix
         if: ${{ !inputs.skip_gpt_matrix }}
         continue-on-error: true

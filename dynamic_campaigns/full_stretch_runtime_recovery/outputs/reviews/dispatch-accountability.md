@@ -14,6 +14,21 @@ Why not dispatched:
 - `authorization_absent`
 - `critical_path_better_kept_local`
 
+## 004 MSRPC Runtime
+
+Roles considered:
+- implementation worker
+- DCE/RPC runtime verifier
+- CI verifier
+- campaign scribe
+
+Roles dispatched:
+- none
+
+Why not dispatched:
+- `authorization_absent`
+- `critical_path_better_kept_local`
+
 ## 002 LDAP Runtime
 
 Roles considered:

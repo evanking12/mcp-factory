@@ -21,8 +21,9 @@ does not claim.
   and lookup runtime. It proves directory-style lookup behavior over an LDAP
   wire roundtrip, not production enterprise LDAP operations, identity
   infrastructure, or directory migration.
-- RPC IDL is runtime-shaped through real XML-RPC `methodCall`, `methodResponse`,
-  and `fault` envelopes. It is not DCE/RPC or MSRPC infrastructure.
+- RPC IDL is runtime-backed through a controlled DCE/RPC-compatible
+  `ncacn_ip_tcp` proof service for deterministic Contoso RPC IDL. It is not
+  arbitrary enterprise MSRPC estate support.
 - CORBA IDL is runtime-backed through a controlled OmniORB/IIOP proof service
   for deterministic Contoso IDL. It proves ORB object registration, IOR object
   references, and client invocation for the fixture, but it is not generalized
