@@ -220,6 +220,22 @@ def _arg(payload: dict[str, Any], name: str, default: Any = None) -> Any:
     return default
 
 
+def _int_arg(payload: dict[str, Any], name: str, default: int) -> int:
+    value = _arg(payload, name, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_arg(payload: dict[str, Any], name: str, default: float) -> float:
+    value = _arg(payload, name, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 async def _json_or_query(request: Request, extra: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = dict(request.query_params)
     if request.method in {"POST", "PUT", "PATCH"}:
@@ -351,12 +367,12 @@ async def sql_provider(operation: str, request: Request) -> JSONResponse:
     with _sqlite_connection() as conn:
         op = operation.lower()
         if op == "getcustomerinfo":
-            customer_id = int(_arg(payload, "customer_id", _arg(payload, "customerId", 1)) or 1)
+            customer_id = _int_arg(payload, "customer_id", _int_arg(payload, "customerId", 1))
             customer = _rows(conn.execute("SELECT * FROM Customers WHERE id = ?", (customer_id,)))
             orders = _rows(conn.execute("SELECT id, status, total, created_at FROM Orders WHERE customer_id = ? ORDER BY created_at DESC", (customer_id,)))
             result: Any = {"customer": customer, "orders": orders}
         elif op == "createsupportticket":
-            customer_id = int(_arg(payload, "customer_id", _arg(payload, "customerId", 1)) or 1)
+            customer_id = _int_arg(payload, "customer_id", _int_arg(payload, "customerId", 1))
             subject = str(_arg(payload, "subject", "Sponsor proof ticket"))
             description = str(_arg(payload, "description", sentinel))
             priority = str(_arg(payload, "priority", "Normal"))
@@ -366,7 +382,7 @@ async def sql_provider(operation: str, request: Request) -> JSONResponse:
             )
             result = {"ticket_id": cur.lastrowid, "status": "Open"}
         elif op == "createorder":
-            customer_id = int(_arg(payload, "customer_id", _arg(payload, "customerId", 1)) or 1)
+            customer_id = _int_arg(payload, "customer_id", _int_arg(payload, "customerId", 1))
             address = str(_arg(payload, "shipping_address", _arg(payload, "shippingAddress", "1 Contoso Way")))
             coupon = _arg(payload, "coupon_code", _arg(payload, "couponCode", None))
             cur = conn.execute(
@@ -375,13 +391,13 @@ async def sql_provider(operation: str, request: Request) -> JSONResponse:
             )
             result = {"order_id": cur.lastrowid, "status": "Pending"}
         elif op == "getorderdetails":
-            order_id = int(_arg(payload, "order_id", _arg(payload, "orderId", 1001)) or 1001)
+            order_id = _int_arg(payload, "order_id", _int_arg(payload, "orderId", 1001))
             order = _rows(conn.execute("SELECT * FROM Orders WHERE id = ?", (order_id,)))
             line_items = _rows(conn.execute("SELECT * FROM OrderLineItems WHERE order_id = ?", (order_id,)))
             result = {"order": order, "line_items": line_items}
         elif op == "calculatediscount":
-            order_total = float(_arg(payload, "order_total", _arg(payload, "orderTotal", 100)) or 100)
-            loyalty_years = int(_arg(payload, "loyalty_years", _arg(payload, "loyaltyYears", 3)) or 3)
+            order_total = _float_arg(payload, "order_total", _float_arg(payload, "orderTotal", 100.0))
+            loyalty_years = _int_arg(payload, "loyalty_years", _int_arg(payload, "loyaltyYears", 3))
             rate = 0.15 if loyalty_years > 5 else 0.10 if loyalty_years > 2 else 0.05
             result = {"discount": round(order_total * rate, 2), "rate": rate}
         elif op == "customerordersummary":

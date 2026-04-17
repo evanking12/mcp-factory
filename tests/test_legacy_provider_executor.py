@@ -124,6 +124,19 @@ def test_sql_runtime_uses_sqlite_and_returns_deterministic_contoso_data() -> Non
     assert data["result"]["customer"][0]["name"] == "Ada Lovelace"
     assert "MCP_FACTORY_SQL_RUNTIME" in data["proof"]
 
+    gpt_style = client.post(
+        "/api/legacy/sql/GetCustomerInfo",
+        json={
+            "args": {
+                "customer_id": "MCP_FACTORY_SQL_AS_CUSTOMER_ID",
+                "include_orders": "MCP_FACTORY_SQL_AS_CUSTOMER_ID",
+            }
+        },
+    )
+    assert gpt_style.status_code == 200
+    assert gpt_style.json()["result"]["customer"][0]["id"] == 1
+    assert "MCP_FACTORY_SQL_AS_CUSTOMER_ID" in gpt_style.json()["proof"]
+
     ticket = client.post(
         "/api/legacy/sql/CreateSupportTicket",
         json={"customerId": 1, "subject": "Runtime proof", "description": "MCP_FACTORY_SQL_TICKET"},
