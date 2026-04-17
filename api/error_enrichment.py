@@ -39,6 +39,8 @@ def _category_from_text(text: str) -> tuple[str | None, str]:
         return "no_executable", "blocking"
     if "schema" in lower and ("mismatch" in lower or "invalid" in lower):
         return "schema_mismatch", "recoverable"
+    if "<soapenv:fault" in lower or "<soap:fault" in lower or "<fault" in lower or "soap fault" in lower:
+        return "soap_fault", "recoverable"
     if "hresult" in lower:
         return "hresult", "recoverable"
     if "winerror" in lower or "win32" in lower:
@@ -109,6 +111,7 @@ def build_error_payload(
         "unknown_tool": "Generate/register the selected invocables before chatting, or call a tool name from the generated schema.",
         "no_executable": "Select an invocable with an executable path or rerun discovery for this target.",
         "schema_mismatch": "Regenerate the schema and retry with the parameter names shown in the generated tool.",
+        "soap_fault": "Inspect the SOAP fault, then retry with values that match the WSDL operation contract.",
         "provider_required": "Enable the matching hosted provider runtime before treating this as a passing live execution proof.",
         "exception": "Inspect the backend trace and retry with the generated schema's required arguments.",
     }
@@ -128,4 +131,3 @@ def build_error_payload(
         "suggestion": suggestions.get(category, "Inspect the backend trace and retry with corrected arguments."),
         "human": human,
     }
-

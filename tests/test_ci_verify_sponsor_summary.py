@@ -318,8 +318,9 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     ui = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
     api = (ROOT / "api" / "main.py").read_text(encoding="utf-8")
 
-    for route in ["/api/analyze", "/api/analyze-path", "/api/generate", "/api/chat", "/api/download/{job_id}/{filename}"]:
+    for route in ["/api/analyze", "/api/analyze-path", "/api/generate", "/api/chat", "/api/execute", "/api/download/{job_id}/{filename}"]:
         assert route in api
+        assert route in ui or route == "/api/download/{job_id}/{filename}"
     assert "/api/chat/stream" in ui
     assert "provider required fallback" in ui
     assert "live execution" in ui
@@ -327,6 +328,11 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     assert "GitHub Actions proof bundle is separate from app /api/download job artifacts" in ui
     assert "`/api/download/${state.jobId}/${encodeURIComponent" in ui
     assert "schemaBlob" in ui
+    assert "mcpServerBlob" in ui
+    assert "mcpJsonBlob" in ui
+    assert "download-server-btn" in ui
+    assert "download-mcp-json-btn" in ui
+    assert "json.dumps({'type': 'error', 'message': message})" in ui
     assert "Load SOAP/WSDL Showcase" in ui
     assert "Legacy Protocol Showcase" in ui
     assert "24578415657" in ui

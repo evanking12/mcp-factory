@@ -6,6 +6,7 @@ pipeline container (PIPELINE_URL env var).
 
 from __future__ import annotations
 
+import json
 import os
 import logging
 from typing import Any
@@ -640,6 +641,8 @@ _HTML = r"""<!DOCTYPE html>
       <div class="btn-row" style="margin-top:18px">
         <button class="btn btn-secondary" id="back3-btn">← Back</button>
         <button class="btn btn-primary" id="run-proof-btn">Run Canonical Proof</button>
+        <button class="btn btn-secondary" id="download-server-btn">Download MCP Server</button>
+        <button class="btn btn-secondary" id="download-mcp-json-btn">Download mcp.json</button>
         <button class="btn btn-success" id="download-btn">⬇ Download Schema JSON</button>
         <button class="btn btn-secondary" id="transcript-btn">⬇ Transcript</button>
         <button class="btn btn-secondary" id="restart-btn">↺ Start Over</button>
@@ -660,6 +663,8 @@ const state = {
   invocables: [],      // raw list from discovery
   tools: [],           // generated MCP tool schemas
   schemaBlob: null,
+  mcpServerBlob: null,
+  mcpJsonBlob: null,
   messages: [],        // chat history [{role, content}]
   demoFile: null,
   demoMode: false,
@@ -1048,6 +1053,8 @@ $('generate-btn').addEventListener('click', async () => {
     const data = await res.json();
     state.tools = data.mcp_schema?.tools ?? [];
     state.schemaBlob = data.schema_blob;
+    state.mcpServerBlob = data.mcp_server_blob;
+    state.mcpJsonBlob = data.mcp_json_blob;
     $('schema-preview').textContent = JSON.stringify(data.mcp_schema, null, 2);
     if (state.demoMode) {
       const toolName = state.tools[0]?.function?.name || state.tools[0]?.name || selected[0]?.name || 'echo_sentinel';
@@ -1255,10 +1262,22 @@ $('chat-input').addEventListener('keydown', e => {
 
 // ── Download ──────────────────────────────────────────────
 $('download-btn').addEventListener('click', () => {
-  if (!state.jobId) return;
-  const filename = state.schemaBlob ? state.schemaBlob.split('/').pop() : 'mcp_schema.json';
-  window.location.href = `/api/download/${state.jobId}/${encodeURIComponent(filename || 'mcp_schema.json')}`;
+  downloadJobBlob(state.schemaBlob, 'mcp_schema.json');
 });
+
+$('download-server-btn').addEventListener('click', () => {
+  downloadJobBlob(state.mcpServerBlob, 'mcp_server.py');
+});
+
+$('download-mcp-json-btn').addEventListener('click', () => {
+  downloadJobBlob(state.mcpJsonBlob, 'mcp.json');
+});
+
+function downloadJobBlob(blobPath, fallbackName) {
+  if (!state.jobId) return;
+  const filename = blobPath ? blobPath.split('/').pop() : fallbackName;
+  window.location.href = `/api/download/${state.jobId}/${encodeURIComponent(filename || fallbackName)}`;
+}
 
 $('transcript-btn').addEventListener('click', () => {
   const lines = state.messages
@@ -1281,7 +1300,7 @@ $('back3-btn').addEventListener('click',  () => showSection(2));
 
 $('restart-btn').addEventListener('click', () => {
   state.jobId = null; state.invocables = []; state.tools = [];
-  state.schemaBlob = null; state.messages = [];
+  state.schemaBlob = null; state.mcpServerBlob = null; state.mcpJsonBlob = null; state.messages = [];
   state.demoFile = null; state.demoMode = false;
   fileInput.value = ''; $('file-name').textContent = '';
   $('dir-path').value = ''; $('hints').value = '';
@@ -1373,6 +1392,12 @@ async def proxy_chat(body: dict[str, Any]) -> JSONResponse:
     return await _proxy_json("/api/chat", body)
 
 
+@app.post("/api/execute")
+async def proxy_execute(body: dict[str, Any]) -> JSONResponse:
+    """Proxy direct tool execution to the pipeline /api/execute."""
+    return await _proxy_json("/api/execute", body)
+
+
 @app.post("/api/chat/stream")
 async def proxy_chat_stream(request: Request):
     """Proxy the streaming SSE chat endpoint — pipes bytes through as they arrive."""
@@ -1384,7 +1409,8 @@ async def proxy_chat_stream(request: Request):
             async with c.stream("POST", "/api/chat", json=body) as r:
                 if r.status_code != 200:
                     err = await r.aread()
-                    yield f'data: {{"type":"error","message":"Pipeline {r.status_code}: {err.decode()[:200]}"}}\n\n'.encode()
+                    message = f"Pipeline {r.status_code}: {err.decode(errors='replace')[:200]}"
+                    yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n".encode()
                     return
                 async for chunk in r.aiter_bytes():
                     yield chunk

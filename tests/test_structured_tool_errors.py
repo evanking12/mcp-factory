@@ -32,6 +32,16 @@ def test_error_payload_classifies_no_executable():
     assert payload["suggestion"]
 
 
+def test_error_payload_classifies_soap_fault():
+    payload = build_error_payload(
+        "SubmitTicket",
+        "<soapenv:Envelope><soapenv:Body><soapenv:Fault><faultstring>Bad request</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>",
+    )
+    assert payload is not None
+    assert payload["category"] == "soap_fault"
+    assert "WSDL" in payload["suggestion"]
+
+
 def test_execute_tool_traced_preserves_plain_result_and_adds_error():
     inv = {
         "name": "LaunchThing",
@@ -64,4 +74,3 @@ def test_generated_mcp_server_formats_error_payloads():
     assert "_format_tool_result" in server
     assert "_tool_error_payload" in server
     assert 'json.dumps({"error": payload}' in server
-

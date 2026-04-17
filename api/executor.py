@@ -22,6 +22,7 @@ import tempfile
 import time
 import xmlrpc.client
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 from api.config import (
     IS_WINDOWS,
@@ -379,7 +380,7 @@ def _execute_http_contract(execution: dict, name: str, args: dict) -> str:
             return json.dumps(data.get("result"), indent=2)
         if method == "soap":
             action = execution.get("action", name)
-            params_xml = "".join(f"<{k}>{v}</{k}>" for k, v in args.items())
+            params_xml = "".join(f"<{k}>{_xml_escape(str(v))}</{k}>" for k, v in args.items())
             body = (
                 '<?xml version="1.0"?>'
                 '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"'
