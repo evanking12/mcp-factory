@@ -1,0 +1,56 @@
+name: Sponsor Demo Report Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Existing Sponsor Demo E2E run ID to re-render"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  report-only:
+    name: Re-render sponsor report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download sponsor-demo-e2e artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ci_artifacts/demo
+          gh run download "${{ inputs.run_id }}" \
+            --repo evanking12/mcp-factory \
+            --name sponsor-demo-e2e \
+            --dir ci_artifacts/demo
+
+      - name: Re-render final reports
+        run: |
+          python scripts/ci_verify.py summarize-sponsor-demo \
+            --non-vm-summary ci_artifacts/demo/non-vm/summary.json \
+            --windows-summary ci_artifacts/demo/windows/summary.json \
+            --gpt-artifact-dir ci_artifacts/demo/gpt4o \
+            --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
+            --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
+            --out ci_artifacts/demo/final-summary.json \
+            --markdown ci_artifacts/demo/final-summary.md \
+            --html ci_artifacts/demo/sponsor-report.html
+          cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponsor-demo-report-only
+          path: ci_artifacts/demo
+          if-no-files-found: error

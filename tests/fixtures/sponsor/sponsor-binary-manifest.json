@@ -2,17 +2,17 @@
   "schema_version": 1,
   "description": "Sponsor-facing coverage manifest for MCP Factory project requirement categories.",
   "proof_semantics": {
-    "real_execution": "The generated tool is selected by the LLM and returns a deterministic sentinel from local executable/script execution.",
-    "provider_required": "The format is discovered and a tool schema is generated; the LLM selects the tool and the expected result states that a live provider, endpoint, service, or database is required. This is not a claim of local live execution for that protocol."
+    "real_execution": "The generated tool is selected by the LLM and returns a deterministic sentinel from local executable/script execution or from a hosted deterministic legacy provider adapter.",
+    "provider_required": "Fallback only: the format is discovered and a tool schema is generated, but the legacy provider adapters are disabled or unreachable."
   },
   "non_vm_cases": [
-    { "id": "openapi", "kind": "file", "category": "OpenAPI/REST", "path": "tests/fixtures/sponsor/contoso_api.yaml", "min_invocables": 1, "expect_source_type": "openapi_operation", "proof_level": "provider_required", "expected_result": "provider_required" },
-    { "id": "jsonrpc", "kind": "file", "category": "JSON/JSON-RPC", "path": "tests/fixtures/sponsor/contoso_jsonrpc.json", "min_invocables": 1, "expect_source_type": "jsonrpc_method", "proof_level": "provider_required", "expected_result": "provider_required" },
-    { "id": "soap_wsdl", "kind": "file", "category": "SOAP/WSDL", "path": "tests/fixtures/sponsor/contoso_service.wsdl", "min_invocables": 1, "expect_source_type": "soap_operation", "proof_level": "provider_required", "expected_result": "provider_required" },
-    { "id": "corba_idl", "kind": "file", "category": "CORBA/IDL", "path": "tests/fixtures/sponsor/contoso_service.idl", "min_invocables": 1, "expect_source_type": "corba_method", "proof_level": "provider_required", "expected_result": "provider_required" },
-    { "id": "rpc_idl_contract", "kind": "file", "category": "RPC IDL contract", "path": "tests/fixtures/sponsor/contoso_rpc.idl", "min_invocables": 1, "expect_source_type": "rpc", "proof_level": "provider_required", "expected_result": "provider_required" },
-    { "id": "jndi", "kind": "file", "category": "JNDI", "path": "tests/fixtures/sponsor/contoso_jndi.properties", "min_invocables": 1, "proof_level": "provider_required", "expected_result": "provider_required" },
-    { "id": "sql", "kind": "file", "category": "SQL source executable", "path": "tests/fixtures/sponsor/contoso_db.sql", "min_invocables": 1, "proof_level": "provider_required", "expected_result": "provider_required" },
+    { "id": "openapi", "kind": "file", "category": "OpenAPI/REST", "path": "tests/fixtures/sponsor/contoso_api.yaml", "min_invocables": 1, "expect_source_type": "openapi_operation", "proof_level": "real_execution", "expected_result": "sentinel" },
+    { "id": "jsonrpc", "kind": "file", "category": "JSON/JSON-RPC", "path": "tests/fixtures/sponsor/contoso_jsonrpc.json", "min_invocables": 1, "expect_source_type": "jsonrpc_method", "proof_level": "real_execution", "expected_result": "sentinel" },
+    { "id": "soap_wsdl", "kind": "file", "category": "SOAP/WSDL", "path": "tests/fixtures/sponsor/contoso_service.wsdl", "min_invocables": 1, "expect_source_type": "soap_operation", "proof_level": "real_execution", "expected_result": "sentinel" },
+    { "id": "corba_idl", "kind": "file", "category": "CORBA/IDL", "path": "tests/fixtures/sponsor/contoso_service.idl", "min_invocables": 1, "expect_source_type": "corba_method", "proof_level": "real_execution", "expected_result": "sentinel" },
+    { "id": "rpc_idl_contract", "kind": "file", "category": "RPC IDL contract", "path": "tests/fixtures/sponsor/contoso_rpc.idl", "min_invocables": 1, "expect_source_type": "rpc", "proof_level": "real_execution", "expected_result": "sentinel" },
+    { "id": "jndi", "kind": "file", "category": "JNDI", "path": "tests/fixtures/sponsor/contoso_jndi.properties", "min_invocables": 1, "proof_level": "real_execution", "expected_result": "sentinel" },
+    { "id": "sql", "kind": "file", "category": "SQL source executable", "path": "tests/fixtures/sponsor/contoso_db.sql", "min_invocables": 1, "proof_level": "real_execution", "expected_result": "sentinel" },
     { "id": "python", "kind": "file", "category": "Python JIT executable", "path": "tests/fixtures/sponsor/contoso_service.py", "min_invocables": 1, "expect_source_type": "python_function", "preferred_tool_name": "echo_sentinel", "proof_level": "real_execution", "expected_result": "sentinel" },
     { "id": "javascript", "kind": "file", "category": "JavaScript JIT executable", "path": "tests/fixtures/sponsor/contoso_service.js", "min_invocables": 1, "expect_source_type": "js_function", "preferred_tool_name": "echoSentinel", "proof_level": "real_execution", "expected_result": "sentinel" },
     { "id": "ruby", "kind": "file", "category": "Ruby JIT executable", "path": "tests/fixtures/sponsor/contoso_service.rb", "min_invocables": 1, "expect_source_type": "ruby_method", "preferred_tool_name": "echo_sentinel", "proof_level": "real_execution", "expected_result": "sentinel" },

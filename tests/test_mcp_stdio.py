@@ -35,6 +35,8 @@ pytest.importorskip("mcp", reason="mcp not installed — skipping MCP stdio test
 
 # Absolute path to the generated notepad MCP stdio server
 SERVER_PATH = Path(__file__).parent.parent / "generated" / "notepad" / "mcp_stdio.py"
+if not SERVER_PATH.exists():
+    pytest.skip(f"generated Notepad MCP stdio server not found: {SERVER_PATH}", allow_module_level=True)
 
 EXPECTED_TOOLS = {
     "type_text",

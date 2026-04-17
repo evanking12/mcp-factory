@@ -8,6 +8,7 @@ schema shape, tool-call events, sentinel output, and downloadable artifacts.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -1243,6 +1244,8 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     summaries: list[dict] = []
     for case in manifest.get("non_vm_cases", []):
         case_id = case["id"]
+        if args.only_case and case_id != args.only_case:
+            continue
         case_dir = out_root / case_id
         case_dir.mkdir(parents=True, exist_ok=True)
         sentinel = f"{sentinel_prefix}_{case_id}"
@@ -1430,6 +1433,7 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
             if item.get("passed") and item.get("tool_call_seen") and item.get("provider_required_seen")
         ),
         "not_live_executed_because_provider_required": [item["id"] for item in provider_cases],
+        "all_required_cases_live_execution": len(provider_cases) == 0 and len(real_cases) == len(summaries),
     }
     _write_json(out_root / "summary.json", aggregate)
     if failures:
@@ -1994,6 +1998,7 @@ def _build_requirement_matrix(
     provider_passed = int(gpt_matrix.get("provider_required_tool_call_passed", 0))
     provider_total = int(gpt_matrix.get("provider_required_total", 0))
     gpt_ok = int(gpt_matrix.get("failures", 1)) == 0 and int(gpt_matrix.get("total", 0)) > 0
+    all_live_ok = gpt_ok and provider_total == 0 and real_total >= 13 and real_passed == real_total
     windows_ok = windows_counts.get("required_failed") == 0 and windows_counts.get("required_total", 0) > 0
     non_vm_ok = non_vm_counts.get("failed") == 0 and non_vm_counts.get("total", 0) > 0
     gpt_tool_ok = bool(checks.get("gpt_tool_call_seen") and checks.get("gpt_sentinel_seen") and schema_tool_count > 0)
@@ -2014,10 +2019,11 @@ def _build_requirement_matrix(
         {
             "requirement": "1.b",
             "summary": "RPC, JNDI, COM/DCOM, SOAP, CORBA, JSON/JSON-RPC technologies are considered.",
-            "implementation_surface": "Format providers discover schemas and generate provider-required tool calls; COM/TLB is scanned on Windows.",
-            "proof_type": "provider_required",
-            "status": _matrix_status(provider_total >= 7 and provider_passed == provider_total and windows_ok),
+            "implementation_surface": "Format providers discover schemas and generate live adapter-backed tool calls; COM/TLB is scanned on Windows.",
+            "proof_type": "live_execution",
+            "status": _matrix_status(all_live_ok and windows_ok),
             "artifact_paths": [
+                "ci_artifacts/demo/gpt-format-matrix/openapi/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/jsonrpc/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/soap_wsdl/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/corba_idl/summary.json",
@@ -2025,7 +2031,7 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/gpt-format-matrix/jndi/summary.json",
                 "ci_artifacts/demo/windows/stdole2_tlb/stdole2_tlb.summary.json",
             ],
-            "notes": "Provider-required protocols prove discovery, schema generation, tool-call selection, and expected provider-required result; they are not local live service executions.",
+            "notes": "Legacy REST, JSON-RPC, SOAP, CORBA, RPC, JNDI, and SQL cases use deterministic hosted providers; COM/DCOM remains Windows discovery evidence.",
         },
         {
             "requirement": "1.c",
@@ -2039,19 +2045,19 @@ def _build_requirement_matrix(
         {
             "requirement": "1.d",
             "summary": "SQL source files are considered candidate executables.",
-            "implementation_surface": "SQL fixture discovery and provider-required GPT tool proof.",
-            "proof_type": "provider_required",
-            "status": _matrix_status(gpt_ok),
+            "implementation_surface": "SQL fixture discovery and hosted SQL-provider GPT tool proof.",
+            "proof_type": "live_execution",
+            "status": _matrix_status(gpt_ok and real_passed == real_total and provider_total == 0),
             "artifact_paths": [
                 "ci_artifacts/demo/non-vm/sql/contoso_db_sql_file_mcp.json",
                 "ci_artifacts/demo/gpt-format-matrix/sql/summary.json",
             ],
-            "notes": "SQL is represented as a generated tool requiring a configured database provider for live execution.",
+            "notes": "SQL is represented as a generated tool backed by the deterministic legacy SQL provider in CI.",
         },
         {
             "requirement": "1.e",
             "summary": "JavaScript, Python, Ruby, PHP, PowerShell, CMD/BAT and other JIT/script executables are valid scope.",
-            "implementation_surface": "GPT matrix runs real execution sentinel proofs for six script formats.",
+            "implementation_surface": "GPT matrix runs real execution sentinel proofs for script formats plus hosted legacy adapters.",
             "proof_type": "live_execution",
             "status": _matrix_status(real_total >= 6 and real_passed == real_total),
             "artifact_paths": [
@@ -2222,11 +2228,11 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
     return {
         "live_execution": {
             "cases": real_cases,
-            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution.",
+            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution or a hosted legacy provider adapter.",
         },
         "provider_required": {
             "cases": provider_cases,
-            "meaning": "The format is discovered and a tool schema is generated; the LLM calls the tool, and the tool result correctly reports that a live provider, endpoint, service, or database is required.",
+            "meaning": "The format is discovered and a tool schema is generated; providers are disabled or unreachable, so the tool reports that a live provider, endpoint, service, or database is required.",
         },
     }
 
@@ -2248,6 +2254,75 @@ def _append_proof_semantics(lines: list[str], semantics: dict) -> None:
     lines.append(
         "- Provider-required means discovery, schema generation, LLM tool-call selection, and expected provider-required result were proven; it does not claim local live execution of the protocol or database."
     )
+    if not provider.get("cases"):
+        lines.append("- Required provider-required cases: 0. Current required format proofs are live execution proofs.")
+
+
+def _render_sponsor_report_html(markdown_text: str) -> str:
+    """Render a small self-contained HTML report from the final markdown."""
+    lines = markdown_text.splitlines()
+    body: list[str] = []
+    in_table = False
+
+    def close_table() -> None:
+        nonlocal in_table
+        if in_table:
+            body.append("</tbody></table>")
+            in_table = False
+
+    for line in lines:
+        if line.startswith("|") and line.endswith("|"):
+            cells = [html.escape(cell.strip()).replace("&lt;br&gt;", "<br>") for cell in line.strip("|").split("|")]
+            if all(set(cell.replace("-", "").strip()) == set() for cell in cells):
+                continue
+            if not in_table:
+                body.append("<table><tbody>")
+                in_table = True
+            tag = "th" if any(cell.lower() in {"requirement", "status", "proof", "target"} for cell in cells) else "td"
+            body.append("<tr>" + "".join(f"<{tag}>{cell}</{tag}>" for cell in cells) + "</tr>")
+            continue
+        close_table()
+        if line.startswith("# "):
+            body.append(f"<h1>{html.escape(line[2:].strip())}</h1>")
+        elif line.startswith("## "):
+            body.append(f"<h2>{html.escape(line[3:].strip())}</h2>")
+        elif line.startswith("- "):
+            body.append(f"<p class=\"bullet\">{html.escape(line[2:].strip())}</p>")
+        elif line.strip():
+            body.append(f"<p>{html.escape(line.strip())}</p>")
+    close_table()
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sponsor Demo Report</title>
+  <style>
+    body { font-family: "Segoe UI", system-ui, sans-serif; margin: 32px; color: #172033; background: #f7f8fb; }
+    main { max-width: 1180px; margin: 0 auto; background: white; border: 1px solid #d9deea; border-radius: 8px; padding: 28px; }
+    h1 { margin: 0 0 16px; font-size: 2rem; }
+    h2 { margin-top: 30px; border-top: 1px solid #e5e8f0; padding-top: 20px; }
+    p { line-height: 1.5; }
+    .bullet::before { content: "- "; color: #3467eb; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 24px; font-size: 0.9rem; }
+    th, td { border: 1px solid #d9deea; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2ff; }
+    code { background: #eef1f6; border-radius: 4px; padding: 1px 4px; }
+  </style>
+</head>
+<body><main>
+""" + "\n".join(body) + "\n</main></body></html>\n"
+
+
+def cmd_render_sponsor_report(args: argparse.Namespace) -> int:
+    markdown_path = Path(args.markdown)
+    if not markdown_path.exists():
+        raise AssertionError(f"markdown report missing: {markdown_path}")
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(_render_sponsor_report_html(markdown_path.read_text(encoding="utf-8")), encoding="utf-8")
+    print(f"OK sponsor report html: {out_path}")
+    return 0
 
 
 def _build_mcp_llm_story(
@@ -2430,6 +2505,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "provider_required_tool_call_passed": gpt_matrix.get("provider_required_tool_call_passed", 0),
             "provider_required_total": gpt_matrix.get("provider_required_total", 0),
             "not_live_executed_because_provider_required": gpt_matrix.get("not_live_executed_because_provider_required", []),
+            "all_required_cases_live_execution": bool(gpt_matrix.get("all_required_cases_live_execution")),
         },
         "gpt": {
             "job_id": job_id,
@@ -2526,7 +2602,13 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
                 f"{item.get('health_before_session_id')} | {item.get('post_grace_session_id')} |"
             )
         markdown.parent.mkdir(parents=True, exist_ok=True)
-        markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        markdown_text = "\n".join(lines) + "\n"
+        markdown.write_text(markdown_text, encoding="utf-8")
+        html_arg = getattr(args, "html", "") or ""
+        if html_arg:
+            html_path = Path(html_arg)
+            html_path.parent.mkdir(parents=True, exist_ok=True)
+            html_path.write_text(_render_sponsor_report_html(markdown_text), encoding="utf-8")
 
     print(f"Sponsor Demo E2E {'PASS' if passed else 'FAIL'}: summary={out_path}")
     if not passed:
@@ -2599,6 +2681,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lease-storage-account", default="")
     p.add_argument("--lease-container", default="")
     p.add_argument("--lease-job-id", default="")
+    p.add_argument("--only-case", default="")
     p.set_defaults(func=cmd_cloud_gpt_format_matrix)
 
     p = sub.add_parser("direct-bridge-e2e")
@@ -2655,7 +2738,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--vm-deallocation", default="ci_artifacts/demo/vm-deallocation.json")
     p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
     p.add_argument("--markdown", default="")
+    p.add_argument("--html", default="")
     p.set_defaults(func=cmd_summarize_sponsor_demo)
+
+    p = sub.add_parser("render-sponsor-report")
+    p.add_argument("--markdown", default="ci_artifacts/demo/final-summary.md")
+    p.add_argument("--out", default="ci_artifacts/demo/sponsor-report.html")
+    p.set_defaults(func=cmd_render_sponsor_report)
 
     return parser
 

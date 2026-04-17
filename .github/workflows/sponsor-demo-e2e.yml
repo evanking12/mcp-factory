@@ -2,10 +2,32 @@ name: Sponsor Demo E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_windows_targets:
+        description: "Skip Windows bridge target scans for fast non-VM iteration"
+        type: boolean
+        default: false
+      skip_gpt_matrix:
+        description: "Skip GPT per-format matrix for Windows/report iteration"
+        type: boolean
+        default: false
+      only_windows_target:
+        description: "Run one Windows target label only, for example notepad_exe"
+        type: string
+        default: ""
+      only_gpt_case:
+        description: "Run one GPT matrix case only, for example jsonrpc"
+        type: string
+        default: ""
+      report_only_run_id:
+        description: "Download an existing sponsor-demo-e2e artifact by run ID and re-render reports"
+        type: string
+        default: ""
 
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 concurrency:
   group: bridge-vm-e2e
@@ -22,8 +44,52 @@ env:
   ARTIFACT_CONTAINER: artifacts
 
 jobs:
+  report-only:
+    name: Re-render sponsor report from existing artifact
+    if: ${{ github.event.inputs.report_only_run_id != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download existing sponsor artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ci_artifacts/demo
+          gh run download "${{ github.event.inputs.report_only_run_id }}" \
+            --repo evanking12/mcp-factory \
+            --name sponsor-demo-e2e \
+            --dir ci_artifacts/demo
+
+      - name: Re-render sponsor report
+        run: |
+          python scripts/ci_verify.py summarize-sponsor-demo \
+            --non-vm-summary ci_artifacts/demo/non-vm/summary.json \
+            --windows-summary ci_artifacts/demo/windows/summary.json \
+            --gpt-artifact-dir ci_artifacts/demo/gpt4o \
+            --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
+            --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
+            --out ci_artifacts/demo/final-summary.json \
+            --markdown ci_artifacts/demo/final-summary.md \
+            --html ci_artifacts/demo/sponsor-report.html
+          cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload re-rendered sponsor report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponsor-demo-report-only
+          path: ci_artifacts/demo
+          if-no-files-found: error
+
   non-vm-sponsor-coverage:
     name: Non-VM sponsor-required formats
+    if: ${{ github.event.inputs.report_only_run_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -75,6 +141,7 @@ jobs:
 
   vm-gpt-demo-e2e:
     name: VM bridge, MCP generation, and GPT tool proof
+    if: ${{ github.event.inputs.report_only_run_id == '' }}
     needs: non-vm-sponsor-coverage
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -100,9 +167,11 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Lease before VM start
+        if: ${{ !inputs.skip_windows_targets }}
         run: python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-before-vm-start" --job-id "${{ github.run_id }}"
 
       - name: Start bridge VM
+        if: ${{ !inputs.skip_windows_targets }}
         timeout-minutes: 6
         run: |
           echo "Starting VM $VM_NAME"
@@ -120,6 +189,7 @@ jobs:
           echo "pipeline_key=$pipeline_key" >> "$GITHUB_OUTPUT"
 
       - name: Wait for bridge health
+        if: ${{ !inputs.skip_windows_targets }}
         timeout-minutes: 8
         run: |
           for i in {1..84}; do
@@ -135,7 +205,7 @@ jobs:
           exit 1
 
       - name: Capture preflight diagnostics
-        if: always()
+        if: ${{ always() && !inputs.skip_windows_targets }}
         timeout-minutes: 3
         run: |
           mkdir -p ci_artifacts/demo/preflight
@@ -158,6 +228,7 @@ jobs:
             -o tsv > ci_artifacts/demo/preflight/vm-bridge-task.txt || true
 
       - name: Seed registry fixture
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'registry_contoso') }}
         timeout-minutes: 3
         run: |
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-seed-registry" --job-id "${{ github.run_id }}"
@@ -174,6 +245,7 @@ jobs:
             -o tsv
 
       - name: Scan Windows DLL - kernel32.dll
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'kernel32_dll') }}
         continue-on-error: true
         timeout-minutes: 7
         run: |
@@ -185,6 +257,7 @@ jobs:
           exit $status
 
       - name: Scan Windows EXE/CLI - cmd.exe
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'cmd_exe') }}
         continue-on-error: true
         timeout-minutes: 4
         run: |
@@ -196,6 +269,7 @@ jobs:
           exit $status
 
       - name: Scan Windows GUI EXE - notepad.exe
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'notepad_exe') }}
         continue-on-error: true
         timeout-minutes: 7
         run: |
@@ -207,6 +281,7 @@ jobs:
           exit $status
 
       - name: Scan Windows shell DLL - shell32.dll
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'shell32_dll') }}
         continue-on-error: true
         timeout-minutes: 7
         run: |
@@ -218,6 +293,7 @@ jobs:
           exit $status
 
       - name: Scan COM/DCOM TLB - stdole2.tlb
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'stdole2_tlb') }}
         continue-on-error: true
         timeout-minutes: 6
         run: |
@@ -229,6 +305,7 @@ jobs:
           exit $status
 
       - name: Scan registry inventory target
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'registry_contoso') }}
         continue-on-error: true
         timeout-minutes: 5
         run: |
@@ -240,6 +317,7 @@ jobs:
           exit $status
 
       - name: Scan installed directory target
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'system32_directory') }}
         continue-on-error: true
         timeout-minutes: 5
         run: |
@@ -251,6 +329,7 @@ jobs:
           exit $status
 
       - name: Summarize Windows target results
+        if: ${{ always() && !inputs.skip_windows_targets }}
         continue-on-error: true
         run: |
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-windows-summary-start" --job-id "${{ github.run_id }}"
@@ -261,6 +340,7 @@ jobs:
           exit $status
 
       - name: Run GPT per-format proof matrix
+        if: ${{ !inputs.skip_gpt_matrix }}
         continue-on-error: true
         timeout-minutes: 40
         run: |
@@ -275,7 +355,8 @@ jobs:
             --sentinel-prefix "MCP_FACTORY_FORMAT_${{ github.run_id }}" \
             --lease-storage-account "$STORAGE_ACCOUNT" \
             --lease-container "$ARTIFACT_CONTAINER" \
-            --lease-job-id "${{ github.run_id }}"
+            --lease-job-id "${{ github.run_id }}" \
+            --only-case "${{ inputs.only_gpt_case }}"
           status=$?
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-gpt-format-matrix-end" --job-id "${{ github.run_id }}" || true
           exit $status
@@ -302,6 +383,7 @@ jobs:
           PY
 
       - name: Create deterministic CMD target
+        if: ${{ !inputs.skip_gpt_matrix }}
         id: target
         run: |
           sentinel="MCP_FACTORY_DEMO_${{ github.run_id }}"
@@ -319,6 +401,7 @@ jobs:
           echo "Created deterministic CMD target at $target"
 
       - name: Run GPT-4o MCP tool proof
+        if: ${{ !inputs.skip_gpt_matrix }}
         continue-on-error: true
         timeout-minutes: 15
         run: |
@@ -368,7 +451,7 @@ jobs:
           PY
 
       - name: Capture failure diagnostics
-        if: failure()
+        if: ${{ failure() && !inputs.skip_windows_targets }}
         timeout-minutes: 4
         run: |
           mkdir -p ci_artifacts/demo/failure
@@ -390,7 +473,7 @@ jobs:
             -o tsv > ci_artifacts/demo/failure/vm-bridge-task.txt || true
 
       - name: Clean registry fixture
-        if: always()
+        if: ${{ always() && !inputs.skip_windows_targets }}
         run: |
           az vm run-command invoke \
             -g "$RESOURCE_GROUP" \
@@ -401,7 +484,7 @@ jobs:
             -o tsv || true
 
       - name: Deallocate bridge VM
-        if: always()
+        if: ${{ always() && !inputs.skip_windows_targets }}
         run: |
           mkdir -p ci_artifacts/demo
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-before-deallocate" --job-id "${{ github.run_id }}" || true
@@ -422,7 +505,7 @@ jobs:
           exit $status
 
       - name: Write final sponsor demo summary
-        if: always()
+        if: ${{ always() && !inputs.skip_windows_targets && !inputs.skip_gpt_matrix && inputs.only_windows_target == '' && inputs.only_gpt_case == '' }}
         run: |
           set +e
           python scripts/ci_verify.py summarize-sponsor-demo \
@@ -432,12 +515,29 @@ jobs:
             --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
-            --markdown ci_artifacts/demo/final-summary.md
+            --markdown ci_artifacts/demo/final-summary.md \
+            --html ci_artifacts/demo/sponsor-report.html
           status=$?
           if [ -f ci_artifacts/demo/final-summary.md ]; then
             cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
           exit $status
+
+      - name: Write partial iteration summary
+        if: ${{ always() && (inputs.skip_windows_targets || inputs.skip_gpt_matrix || inputs.only_windows_target != '' || inputs.only_gpt_case != '') }}
+        run: |
+          mkdir -p ci_artifacts/demo
+          cat > ci_artifacts/demo/partial-iteration-summary.md <<'EOF'
+          # Sponsor Demo Partial Iteration
+
+          This run used one or more fast-iteration controls and is not the canonical final sponsor gate.
+
+          - skip_windows_targets: ${{ inputs.skip_windows_targets }}
+          - skip_gpt_matrix: ${{ inputs.skip_gpt_matrix }}
+          - only_windows_target: `${{ inputs.only_windows_target }}`
+          - only_gpt_case: `${{ inputs.only_gpt_case }}`
+          EOF
+          cat ci_artifacts/demo/partial-iteration-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sponsor demo artifacts
         if: always()

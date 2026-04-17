@@ -43,6 +43,7 @@ from api.worker import _queue_worker_loop, _analyze_worker
 from api.executor import _execute_tool
 from api.chat import stream_chat
 from api.generate import run_generate
+from api.legacy_provider import router as legacy_provider_router
 from api.vm_lifecycle import bridge_idle_reaper_loop
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -67,6 +68,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(legacy_provider_router)
 
 
 @app.middleware("http")

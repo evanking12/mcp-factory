@@ -134,6 +134,17 @@ _HTML = r"""<!DOCTYPE html>
     }
     header .logo { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
     header .tagline { font-size: 0.85rem; color: var(--muted); }
+    header .spacer { flex: 1; }
+    header .proof-link {
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 10px;
+      font-size: 0.8rem;
+      text-decoration: none;
+      background: var(--surface2);
+    }
+    header .proof-link:hover { border-color: var(--accent); }
 
     /* ── Step bar ──────────────────────────────── */
     .step-bar {
@@ -395,6 +406,13 @@ _HTML = r"""<!DOCTYPE html>
 <header>
   <span class="logo">⚙ MCP Factory</span>
   <span class="tagline">Binary → MCP tool schema, AI-powered</span>
+  <span class="spacer"></span>
+  <a class="proof-link"
+     href="https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml"
+     target="_blank" rel="noopener"
+     title="GitHub Actions proof bundle is separate from app /api/download job artifacts.">
+    CI Proof Bundle
+  </a>
 </header>
 
 <!-- Step indicator -->
@@ -775,14 +793,13 @@ function flattenInvocables(raw) {
   return [];
 }
 
-const PROVIDER_REQUIRED_SOURCES = new Set([
-  'openapi_operation', 'jsonrpc_method', 'soap_operation',
-  'corba_method', 'rpc', 'jndi', 'sql', 'sql_statement'
-]);
+const PROVIDER_REQUIRED_SOURCES = new Set([]);
 
 const LIVE_EXECUTION_SOURCES = new Set([
   'python_function', 'js_function', 'ruby_method', 'php_function',
-  'powershell_function', 'batch_label', 'cli', 'registry'
+  'powershell_function', 'batch_label', 'cli', 'registry',
+  'openapi_operation', 'jsonrpc_method', 'soap_operation',
+  'corba_method', 'rpc', 'jndi', 'sql', 'sql_statement'
 ]);
 
 function executionMethod(inv) {
@@ -793,7 +810,7 @@ function proofBadge(inv) {
   const source = String(inv.source_type ?? '').toLowerCase();
   const method = String(executionMethod(inv)).toLowerCase();
   if (inv.proof_level === 'provider_required' || inv.provider_required || PROVIDER_REQUIRED_SOURCES.has(source) || method.includes('provider_required')) {
-    return { label: 'provider required', cls: 'proof-provider' };
+    return { label: 'provider required fallback', cls: 'proof-provider' };
   }
   if (inv.proof_level === 'real_execution' || LIVE_EXECUTION_SOURCES.has(source) || method.includes('script') || method.includes('subprocess')) {
     return { label: 'live execution', cls: 'proof-live' };

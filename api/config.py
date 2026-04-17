@@ -56,6 +56,21 @@ ENABLE_BRIDGE_VM_LIFECYCLE = os.getenv("ENABLE_BRIDGE_VM_LIFECYCLE", "true").low
 # The UI container forwards X-Pipeline-Key from its own UI_API_KEY secret.
 PIPELINE_API_KEY = os.getenv("PIPELINE_API_KEY", "")
 
+# Deterministic legacy providers used by the sponsor proof matrix.  In Azure
+# Container Apps this points back at the pipeline API container so discovered
+# REST, JSON-RPC, SOAP, SQL, RPC, CORBA, and JNDI tools can return real tool
+# results instead of stopping at "provider required".
+LEGACY_PROVIDER_BASE_URL = os.getenv(
+    "LEGACY_PROVIDER_BASE_URL",
+    "http://127.0.0.1:8000/api/legacy",
+).rstrip("/")
+ENABLE_LEGACY_PROVIDERS = os.getenv("ENABLE_LEGACY_PROVIDERS", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 # ── App Insights connection string ─────────────────────────────────────────
 APPINSIGHTS_CONN = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
 

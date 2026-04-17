@@ -256,10 +256,113 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     for route in ["/api/analyze", "/api/analyze-path", "/api/generate", "/api/chat", "/api/download/{job_id}/{filename}"]:
         assert route in api
     assert "/api/chat/stream" in ui
-    assert "provider required" in ui
+    assert "provider required fallback" in ui
     assert "live execution" in ui
+    assert "CI Proof Bundle" in ui
+    assert "GitHub Actions proof bundle is separate from app /api/download job artifacts" in ui
     assert "`/api/download/${state.jobId}/${encodeURIComponent" in ui
     assert "schemaBlob" in ui
+
+
+def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    cases = [
+        "openapi",
+        "jsonrpc",
+        "soap_wsdl",
+        "corba_idl",
+        "rpc_idl_contract",
+        "jndi",
+        "sql",
+        "python",
+        "javascript",
+        "ruby",
+        "php",
+        "powershell",
+        "cmd",
+    ]
+    _write(
+        Path(args.gpt_matrix_summary),
+        {
+            "cases": [
+                {
+                    "id": case_id,
+                    "passed": True,
+                    "proof_level": "real_execution",
+                    "tool_call_seen": True,
+                    "tool_result_seen": True,
+                    "sentinel_seen": True,
+                }
+                for case_id in cases
+            ],
+            "total": len(cases),
+            "failures": 0,
+            "failed_ids": [],
+            "real_execution_cases": cases,
+            "real_execution_total": len(cases),
+            "real_execution_passed": len(cases),
+            "provider_required_cases": [],
+            "provider_required_total": 0,
+            "provider_required_tool_call_passed": 0,
+            "not_live_executed_because_provider_required": [],
+            "all_required_cases_live_execution": True,
+        },
+    )
+    _write(
+        Path(args.windows_summary),
+        {
+            "targets": [
+                {"label": "kernel32_dll", "required": True, "passed": True},
+                {"label": "system32_directory", "required": True, "passed": True},
+                {"label": "registry_contoso", "required": True, "passed": True},
+                {"label": "stdole2_tlb", "required": True, "passed": True},
+            ],
+            "failures": 0,
+        },
+    )
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    summary = ci_verify._load_json(Path(args.out))
+    text = Path(args.markdown).read_text(encoding="utf-8")
+
+    assert summary["gpt_format_matrix"]["real_execution_passed"] == 13
+    assert summary["gpt_format_matrix"]["provider_required_total"] == 0
+    assert summary["proof_semantics"]["provider_required"]["cases"] == []
+    assert "Real execution format proofs: 13/13" in text
+    assert "Required provider-required cases: 0" in text
+
+
+def test_sponsor_report_html_rendering(tmp_path: Path) -> None:
+    markdown = tmp_path / "final-summary.md"
+    html = tmp_path / "sponsor-report.html"
+    markdown.write_text("# Sponsor Demo E2E Summary\n\nOverall: PASS\n\n| Requirement | Status |\n|---|---|\n| 1.b | pass |\n", encoding="utf-8")
+
+    rc = ci_verify.cmd_render_sponsor_report(SimpleNamespace(markdown=str(markdown), out=str(html)))
+
+    assert rc == 0
+    rendered = html.read_text(encoding="utf-8")
+    assert "<h1>Sponsor Demo E2E Summary</h1>" in rendered
+    assert "<table>" in rendered
+    assert "1.b" in rendered
+
+
+def test_sponsor_workflows_expose_fast_iteration_controls() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "sponsor-demo-e2e.yml").read_text(encoding="utf-8")
+    report_only = (ROOT / ".github" / "workflows" / "sponsor-demo-report-only.yml").read_text(encoding="utf-8")
+    fixture = (ROOT / ".github" / "workflows" / "sponsor-report-fixture.yml").read_text(encoding="utf-8")
+
+    for token in [
+        "skip_windows_targets",
+        "skip_gpt_matrix",
+        "only_windows_target",
+        "only_gpt_case",
+        "report_only_run_id",
+        "--only-case",
+        "sponsor-report.html",
+    ]:
+        assert token in workflow
+    assert "gh run download" in report_only
+    assert "tests/test_legacy_provider_executor.py" in fixture
 
 
 def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:

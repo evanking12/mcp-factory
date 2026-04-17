@@ -22,7 +22,14 @@ import tempfile
 import time
 from pathlib import Path
 
-from api.config import IS_WINDOWS, GUI_BRIDGE_URL, GUI_BRIDGE_SECRET
+from api.config import (
+    IS_WINDOWS,
+    GUI_BRIDGE_URL,
+    GUI_BRIDGE_SECRET,
+    PIPELINE_API_KEY,
+    ENABLE_LEGACY_PROVIDERS,
+    LEGACY_PROVIDER_BASE_URL,
+)
 from api.vm_lifecycle import ensure_bridge_ready, touch_bridge_activity
 
 logger = logging.getLogger("mcp_factory.api")
@@ -223,6 +230,28 @@ def _provider_required(kind: str, name: str, detail: str = "") -> str:
     )
 
 
+def _legacy_provider_url(path: str) -> str | None:
+    if not ENABLE_LEGACY_PROVIDERS or not LEGACY_PROVIDER_BASE_URL:
+        return None
+    return LEGACY_PROVIDER_BASE_URL.rstrip("/") + "/" + path.lstrip("/")
+
+
+def _legacy_provider_headers() -> dict[str, str]:
+    if PIPELINE_API_KEY:
+        return {"X-Pipeline-Key": PIPELINE_API_KEY}
+    return {}
+
+
+def _path_with_args(path: str, args: dict) -> tuple[str, dict]:
+    remaining = dict(args or {})
+    for key, value in list(remaining.items()):
+        token = "{" + str(key) + "}"
+        if token in path:
+            path = path.replace(token, str(value))
+            remaining.pop(key, None)
+    return path, remaining
+
+
 def _materialize_script(execution: dict, preferred_path: str) -> tuple[str, str | None]:
     script_content = execution.get("script_content")
     if preferred_path and Path(preferred_path).exists():
@@ -304,23 +333,44 @@ def _execute_http_contract(execution: dict, name: str, args: dict) -> str:
     method = execution.get("method", "")
     base_url = execution.get("base_url")
     if not base_url:
-        labels = {
-            "http_request": "OpenAPI/REST endpoint",
-            "jsonrpc": "JSON-RPC endpoint",
-            "soap": "SOAP endpoint",
-        }
-        return _provider_required(labels.get(method, "HTTP endpoint"), name)
+        if method == "http_request":
+            base_url = _legacy_provider_url("rest")
+        elif method == "jsonrpc":
+            base_url = _legacy_provider_url("jsonrpc")
+        elif method == "soap":
+            base_url = _legacy_provider_url("soap")
+        if not base_url:
+            labels = {
+                "http_request": "OpenAPI/REST endpoint",
+                "jsonrpc": "JSON-RPC endpoint",
+                "soap": "SOAP endpoint",
+            }
+            return _provider_required(labels.get(method, "HTTP endpoint"), name)
     try:
         import httpx
         if method == "http_request":
             http_method = execution.get("http_method", "get").upper()
             path = execution.get("path", "/")
+            path, remaining_args = _path_with_args(path, args or {})
             url = base_url.rstrip("/") + "/" + path.lstrip("/")
-            resp = httpx.request(http_method, url, json=args or None, timeout=15)
+            request_kwargs = {
+                "headers": _legacy_provider_headers(),
+                "timeout": 15,
+            }
+            if http_method == "GET":
+                request_kwargs["params"] = remaining_args or None
+            else:
+                request_kwargs["json"] = remaining_args or None
+            resp = httpx.request(http_method, url, **request_kwargs)
             return resp.text or f"HTTP {resp.status_code}"
         if method == "jsonrpc":
-            payload = {"jsonrpc": "2.0", "method": name, "params": list(args.values()), "id": 1}
-            resp = httpx.post(base_url.rstrip("/"), json=payload, timeout=15)
+            payload = {
+                "jsonrpc": "2.0",
+                "method": execution.get("method_name") or name,
+                "params": args or {},
+                "id": 1,
+            }
+            resp = httpx.post(base_url.rstrip("/"), json=payload, headers=_legacy_provider_headers(), timeout=15)
             data = resp.json()
             if "error" in data:
                 return f"JSON-RPC error: {data['error']}"
@@ -338,7 +388,11 @@ def _execute_http_contract(execution: dict, name: str, args: dict) -> str:
             resp = httpx.post(
                 base_url.rstrip("/"),
                 content=body.encode(),
-                headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": f'"{action}"'},
+                headers={
+                    **_legacy_provider_headers(),
+                    "Content-Type": "text/xml; charset=utf-8",
+                    "SOAPAction": f'"{action}"',
+                },
                 timeout=15,
             )
             return resp.text
@@ -358,7 +412,39 @@ def _execute_sql_contract(execution: dict, name: str, args: dict) -> str:
             return _provider_required("SQL database", name, "sqlite3 is not installed in this runtime.")
         except Exception as exc:
             return f"SQL error: {exc}"
+    provider_url = _legacy_provider_url(f"sql/{name}")
+    if provider_url:
+        try:
+            import httpx
+            payload = {"args": args or {}, "statement": statement, "source_file": source_file}
+            resp = httpx.post(provider_url, json=payload, headers=_legacy_provider_headers(), timeout=15)
+            return resp.text or f"HTTP {resp.status_code}"
+        except Exception as exc:
+            return _provider_required("SQL database", name, f"Legacy provider unreachable: {exc}.")
     return _provider_required("SQL database", name)
+
+
+def _execute_legacy_contract(kind: str, endpoint: str, name: str, args: dict, execution: dict) -> str:
+    provider_url = _legacy_provider_url(endpoint)
+    if not provider_url:
+        labels = {
+            "rpc": "RPC endpoint",
+            "corba": "CORBA ORB/IIOP endpoint",
+            "jndi": "JNDI provider",
+        }
+        return _provider_required(labels.get(kind, "legacy provider"), name)
+    try:
+        import httpx
+        payload = {"args": args or {}, **(execution or {})}
+        resp = httpx.post(provider_url, json=payload, headers=_legacy_provider_headers(), timeout=15)
+        return resp.text or f"HTTP {resp.status_code}"
+    except Exception as exc:
+        labels = {
+            "rpc": "RPC endpoint",
+            "corba": "CORBA ORB/IIOP endpoint",
+            "jndi": "JNDI provider",
+        }
+        return _provider_required(labels.get(kind, "legacy provider"), name, f"Legacy provider unreachable: {exc}.")
 
 
 def _is_windows_path(value: str) -> bool:
@@ -490,12 +576,9 @@ def _execute_tool(inv: dict, args: dict) -> str:
     if method == "sql_exec":
         return _execute_sql_contract(execution, name, args)
     if method == "rpc_call":
-        iface = execution.get("interface_uuid") or execution.get("endpoint") or name
-        return _provider_required("RPC endpoint", name, f"Discovered interface: {iface}.")
+        return _execute_legacy_contract("rpc", f"rpc/{name}", name, args, execution)
     if method == "corba_iiop":
-        iface = execution.get("interface") or name
-        return _provider_required("CORBA ORB/IIOP endpoint", name, f"Discovered interface: {iface}.")
+        return _execute_legacy_contract("corba", f"corba/{name}", name, args, execution)
     if method == "jndi_lookup":
-        lookup = execution.get("lookup_name") or name
-        return _provider_required("JNDI provider", name, f"Discovered binding: {lookup}.")
+        return _execute_legacy_contract("jndi", "jndi/lookup", name, args, execution)
     return _execute_cli(execution, name, args)

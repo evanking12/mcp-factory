@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from api import executor
+from api.legacy_provider import router
+
+
+def _client() -> TestClient:
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_legacy_provider_routes_echo_sentinel() -> None:
+    client = _client()
+    sentinel = "MCP_FACTORY_LEGACY_SENTINEL"
+
+    health = client.get("/api/legacy/health").json()
+    assert health["status"] == "ok"
+    assert set(["rest", "jsonrpc", "soap", "sql", "corba", "rpc", "jndi"]).issubset(health["enabled_providers"])
+
+    assert sentinel in client.post("/api/legacy/rest/tickets", json={"sentinel": sentinel}).text
+    assert sentinel in client.post(
+        "/api/legacy/jsonrpc",
+        json={"jsonrpc": "2.0", "method": "createTicket", "params": {"sentinel": sentinel}, "id": 7},
+    ).text
+    assert sentinel in client.post("/api/legacy/soap", content=f"<Envelope>{sentinel}</Envelope>").text
+    assert sentinel in client.post("/api/legacy/sql/GetCustomerInfo", json={"sentinel": sentinel}).text
+    assert sentinel in client.post("/api/legacy/corba/getCustomer", json={"sentinel": sentinel}).text
+    assert sentinel in client.post("/api/legacy/rpc/RpcCreateTicket", json={"sentinel": sentinel}).text
+    assert sentinel in client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/Contoso", "sentinel": sentinel}).text
+
+
+class _Resp:
+    def __init__(self, text: str, status_code: int = 200, payload: dict | None = None) -> None:
+        self.text = text
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload if self._payload is not None else json.loads(self.text)
+
+
+def test_executor_routes_openapi_jsonrpc_soap_to_legacy_provider(monkeypatch) -> None:
+    calls: list[tuple[str, str, dict]] = []
+
+    monkeypatch.setattr(executor, "ENABLE_LEGACY_PROVIDERS", True)
+    monkeypatch.setattr(executor, "LEGACY_PROVIDER_BASE_URL", "http://legacy.local/api/legacy")
+    monkeypatch.setattr(executor, "PIPELINE_API_KEY", "secret")
+
+    def fake_request(method: str, url: str, **kwargs):
+        calls.append((method, url, kwargs))
+        assert kwargs["headers"]["X-Pipeline-Key"] == "secret"
+        return _Resp("MCP_FACTORY_REST")
+
+    def fake_post(url: str, **kwargs):
+        calls.append(("POST", url, kwargs))
+        assert kwargs["headers"]["X-Pipeline-Key"] == "secret"
+        if url.endswith("/jsonrpc"):
+            return _Resp("", payload={"jsonrpc": "2.0", "id": 1, "result": {"sentinel": "MCP_FACTORY_JSONRPC"}})
+        return _Resp("MCP_FACTORY_SOAP")
+
+    monkeypatch.setattr("httpx.request", fake_request)
+    monkeypatch.setattr("httpx.post", fake_post)
+
+    assert "MCP_FACTORY_REST" in executor._execute_tool(
+        {"name": "getCustomer", "execution": {"method": "http_request", "path": "/customers/{customerId}", "http_method": "GET"}},
+        {"customerId": "MCP_FACTORY_REST"},
+    )
+    assert "MCP_FACTORY_JSONRPC" in executor._execute_tool(
+        {"name": "getCustomerProfile", "execution": {"method": "jsonrpc"}},
+        {"sentinel": "MCP_FACTORY_JSONRPC"},
+    )
+    assert "MCP_FACTORY_SOAP" in executor._execute_tool(
+        {"name": "GetCustomer", "execution": {"method": "soap", "action": "GetCustomer"}},
+        {"sentinel": "MCP_FACTORY_SOAP"},
+    )
+
+    assert calls[0][1] == "http://legacy.local/api/legacy/rest/customers/MCP_FACTORY_REST"
+    assert calls[1][1] == "http://legacy.local/api/legacy/jsonrpc"
+    assert calls[2][1] == "http://legacy.local/api/legacy/soap"
+
+
+def test_executor_routes_sql_corba_rpc_jndi_to_legacy_provider(monkeypatch) -> None:
+    urls: list[str] = []
+
+    monkeypatch.setattr(executor, "ENABLE_LEGACY_PROVIDERS", True)
+    monkeypatch.setattr(executor, "LEGACY_PROVIDER_BASE_URL", "http://legacy.local/api/legacy")
+    monkeypatch.setattr(executor, "PIPELINE_API_KEY", "")
+
+    def fake_post(url: str, **kwargs):
+        urls.append(url)
+        return _Resp("MCP_FACTORY_LEGACY")
+
+    monkeypatch.setattr("httpx.post", fake_post)
+
+    cases = [
+        ({"name": "GetCustomerInfo", "execution": {"method": "sql_exec", "statement": "SELECT 1"}}, "sql/GetCustomerInfo"),
+        ({"name": "getCustomer", "execution": {"method": "corba_iiop"}}, "corba/getCustomer"),
+        ({"name": "RpcCreateTicket", "execution": {"method": "rpc_call"}}, "rpc/RpcCreateTicket"),
+        ({"name": "jdbc/ContosoCustomerDB", "execution": {"method": "jndi_lookup"}}, "jndi/lookup"),
+    ]
+    for inv, suffix in cases:
+        assert "MCP_FACTORY_LEGACY" in executor._execute_tool(inv, {"sentinel": "MCP_FACTORY_LEGACY"})
+        assert urls[-1].endswith(suffix)
