@@ -305,6 +305,14 @@ _HTML = r"""<!DOCTYPE html>
     .inv-name { font-size: 0.88rem; font-weight: 600; color: var(--accent); font-family: monospace; }
     .inv-sig  { font-size: 0.78rem; color: var(--muted); margin-top: 2px; font-family: monospace; word-break: break-all; }
     .inv-doc  { font-size: 0.8rem; color: var(--text); margin-top: 3px; }
+    .inv-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+    .inv-meta span {
+      font-size: 0.68rem; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 2px 6px; background: rgba(255,255,255,.025);
+    }
+    .inv-meta .proof-live { color: var(--green); border-color: rgba(62,207,142,.4); }
+    .inv-meta .proof-provider { color: #d8b36a; border-color: rgba(216,179,106,.45); }
     .inv-tier {
       font-size: 0.68rem; font-weight: 700;
       padding: 1px 7px; border-radius: 12px; flex-shrink: 0; margin-top: 2px;
@@ -444,7 +452,7 @@ _HTML = r"""<!DOCTYPE html>
           placeholder="C:\Windows\System32\notepad.exe  or  C:\Program Files\AppD\"
           autocomplete="off" />
         <div style="font-size:.75rem;color:var(--muted);margin-top:4px">
-          ⚠ Path must be accessible from the pipeline server. Use file upload for cloud deployments.
+          Path must be accessible to the pipeline server or Windows bridge VM context. Use file upload when the cloud environment cannot reach that path.
         </div>
       </div>
       <div class="form-row">
@@ -720,6 +728,9 @@ function flattenInvocables(raw) {
       signature: inv.signature ?? inv.description ?? inv.name ?? '',
       parameters: inv.parameters ?? [],
       execution: inv.execution ?? {},
+      source_type: inv.source_type ?? inv.kind ?? '',
+      confidence: inv.confidence ?? inv.confidence_score ?? inv.score ?? null,
+      proof_level: inv.proof_level ?? '',
       tier: inv.tier ?? inv.confidence_tier ?? 2,
     };
   }
@@ -736,10 +747,12 @@ function flattenInvocables(raw) {
     name: t.function?.name ?? t.name,
     signature: t.function?.description ?? '',
     doc: t.function?.description ?? '',
-    parameters: Object.entries(t.function?.parameters?.properties ?? {}).map(([k,v])=>({name:k,type:v.type})),
-    tier: 1,
-    execution: t.execution ?? {},
-  }));
+      parameters: Object.entries(t.function?.parameters?.properties ?? {}).map(([k,v])=>({name:k,type:v.type})),
+      tier: 1,
+      execution: t.execution ?? {},
+      source_type: t.source_type ?? t.kind ?? '',
+      proof_level: t.proof_level ?? '',
+    }));
 
   // Legacy flat object {name: {signature, doc, …}}
   // Guard against top-level metadata/summary keys sneaking in.
@@ -754,9 +767,43 @@ function flattenInvocables(raw) {
         parameters: info.parameters ?? [],
         tier: info.tier ?? 2,
         execution: info.execution ?? {},
+        source_type: info.source_type ?? info.kind ?? '',
+        confidence: info.confidence ?? info.confidence_score ?? info.score ?? null,
+        proof_level: info.proof_level ?? '',
       }));
   }
   return [];
+}
+
+const PROVIDER_REQUIRED_SOURCES = new Set([
+  'openapi_operation', 'jsonrpc_method', 'soap_operation',
+  'corba_method', 'rpc', 'jndi', 'sql', 'sql_statement'
+]);
+
+const LIVE_EXECUTION_SOURCES = new Set([
+  'python_function', 'js_function', 'ruby_method', 'php_function',
+  'powershell_function', 'batch_label', 'cli', 'registry'
+]);
+
+function executionMethod(inv) {
+  return inv.execution?.method ?? inv.execution?.type ?? inv.execution?.kind ?? inv.execution_method ?? '';
+}
+
+function proofBadge(inv) {
+  const source = String(inv.source_type ?? '').toLowerCase();
+  const method = String(executionMethod(inv)).toLowerCase();
+  if (inv.proof_level === 'provider_required' || inv.provider_required || PROVIDER_REQUIRED_SOURCES.has(source) || method.includes('provider_required')) {
+    return { label: 'provider required', cls: 'proof-provider' };
+  }
+  if (inv.proof_level === 'real_execution' || LIVE_EXECUTION_SOURCES.has(source) || method.includes('script') || method.includes('subprocess')) {
+    return { label: 'live execution', cls: 'proof-live' };
+  }
+  return { label: 'discovery', cls: '' };
+}
+
+function confidenceLabel(inv) {
+  if (inv.confidence !== null && inv.confidence !== undefined && inv.confidence !== '') return `confidence ${inv.confidence}`;
+  return `tier ${inv.tier ?? 2}`;
 }
 
 function buildInvocablesList() {
@@ -775,6 +822,9 @@ function buildInvocablesList() {
     const tier = inv.tier ?? 2;
     const tierLabel = ['','T1','T2','T3'][tier] ?? 'T?';
     const tierClass = `tier-${Math.min(tier,3)}`;
+    const source = inv.source_type || inv.kind || 'unknown source';
+    const method = executionMethod(inv) || 'default execution';
+    const proof = proofBadge(inv);
 
     item.innerHTML = `
       <input type="checkbox" id="cb${idx}" checked />
@@ -783,6 +833,12 @@ function buildInvocablesList() {
         ${inv.signature && inv.signature !== inv.name
           ? `<div class="inv-sig">${esc(inv.signature)}</div>` : ''}
         ${inv.doc ? `<div class="inv-doc">${esc(inv.doc)}</div>` : ''}
+        <div class="inv-meta">
+          <span>${esc(source)}</span>
+          <span>${esc(method)}</span>
+          <span>${esc(confidenceLabel(inv))}</span>
+          <span class="${proof.cls}">${esc(proof.label)}</span>
+        </div>
       </div>
       <span class="inv-tier ${tierClass}">${tierLabel}</span>
     `;
@@ -795,7 +851,9 @@ function buildInvocablesList() {
   });
 
   updateSelCount();
-  $('component-name').value = $('file-input').files[0]?.name.replace(/\.\w+$/,'') ?? 'mcp-component';
+  const pathParts = $('dir-path').value.trim().split(/[\\\\/]/).filter(Boolean);
+  const sourceName = $('file-input').files[0]?.name ?? pathParts[pathParts.length - 1] ?? 'mcp-component';
+  $('component-name').value = sourceName.replace(/\.\w+$/,'') || 'mcp-component';
 }
 
 function updateSelCount() {
@@ -980,7 +1038,8 @@ $('chat-input').addEventListener('keydown', e => {
 // ── Download ──────────────────────────────────────────────
 $('download-btn').addEventListener('click', () => {
   if (!state.jobId) return;
-  window.location.href = `/api/download/${state.jobId}/mcp_schema.json`;
+  const filename = state.schemaBlob ? state.schemaBlob.split('/').pop() : 'mcp_schema.json';
+  window.location.href = `/api/download/${state.jobId}/${encodeURIComponent(filename || 'mcp_schema.json')}`;
 });
 
 $('transcript-btn').addEventListener('click', () => {

@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "description": "Sponsor-facing coverage manifest for MCP Factory project requirement categories.",
+  "proof_semantics": {
+    "real_execution": "The generated tool is selected by the LLM and returns a deterministic sentinel from local executable/script execution.",
+    "provider_required": "The format is discovered and a tool schema is generated; the LLM selects the tool and the expected result states that a live provider, endpoint, service, or database is required. This is not a claim of local live execution for that protocol."
+  },
   "non_vm_cases": [
     { "id": "openapi", "kind": "file", "category": "OpenAPI/REST", "path": "tests/fixtures/sponsor/contoso_api.yaml", "min_invocables": 1, "expect_source_type": "openapi_operation", "proof_level": "provider_required", "expected_result": "provider_required" },
     { "id": "jsonrpc", "kind": "file", "category": "JSON/JSON-RPC", "path": "tests/fixtures/sponsor/contoso_jsonrpc.json", "min_invocables": 1, "expect_source_type": "jsonrpc_method", "proof_level": "provider_required", "expected_result": "provider_required" },
@@ -18,7 +22,7 @@
   ],
   "vm_cases": [
     { "id": "kernel32_dll", "kind": "system_path", "category": "Windows DLL", "target": "C:\\Windows\\System32\\kernel32.dll", "min_invocables": 1 },
-    { "id": "cmd_exe", "kind": "system_path", "category": "Windows EXE/CLI", "target": "C:\\Windows\\System32\\cmd.exe", "min_invocables": 1 },
+    { "id": "cmd_exe", "kind": "system_path", "category": "Windows EXE/CLI diagnostic", "target": "C:\\Windows\\System32\\cmd.exe", "min_invocables": 1, "required": false, "proof_role": "optional_diagnostic", "notes": "Broad cmd.exe introspection is diagnostic only; deterministic CMD/BAT support is required through non_vm_cases.cmd." },
     { "id": "notepad_exe", "kind": "system_path", "category": "Windows GUI EXE", "target": "C:\\Windows\\System32\\notepad.exe", "min_invocables": 1 },
     { "id": "shell32_dll", "kind": "system_path", "category": "Windows shell DLL", "target": "C:\\Windows\\System32\\shell32.dll", "min_invocables": 1 },
     { "id": "stdole2_tlb", "kind": "system_path", "category": "COM/DCOM Type Library", "target": "C:\\Windows\\System32\\stdole2.tlb", "min_invocables": 1, "expect_source_type": "com" },

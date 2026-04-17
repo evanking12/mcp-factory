@@ -1,26 +1,19 @@
-# Active Prompt: 002-diagnostics
+# Active Prompt: 008-campaign-closeout
 
-Add diagnosable timing and recovery evidence to Windows target summaries and final sponsor markdown.
+Write campaign closeout and durable blocker notes after final green Sponsor Demo E2E.
 
 ## Required Work
 
-- Add top-level timing breakdown fields to each Windows target summary:
-  - `health_wait_seconds`
-  - `session_check_seconds`
-  - `session_cache_used`
-  - `bridge_analyzer_seconds`
-  - `retry_seconds`
-  - `restart_seconds`
-  - `vm_restart_seconds`
-  - `post_grace_seconds`
-  - `timeout_or_failure_classification`
-- Add final markdown sections for slow targets, optional failures, required failures, bridge recovery events, and session/cache proof.
-- Classify optional diagnostics clearly.
+- Rerun Sponsor Demo E2E after all changes.
+- Download and parse artifact.
+- Record green run URL, artifact paths, known risks, optional diagnostics, and UI/backend verification.
+- Add family-blocker writebacks for cmd.exe analyzer instability, bridge recovery/Azure Run Command risk, and fragmented requirement evidence.
+- Update README Sponsor Demo section with canonical final run and artifact interpretation.
 
 ## Passing Criteria
 
 - `python -m py_compile scripts/ci_verify.py scripts/gui_bridge.py`
-- focused diagnostics tests pass.
-- Target summaries explain `cmd_exe` and `notepad_exe` wall time without reading raw logs.
-- Final summary says whether slowness came from analyzer time, bridge recovery, VM restart, or timeout.
-- Campaign tranche `002-diagnostics` is written.
+- Campaign closeout exists.
+- README references canonical final run and artifact model.
+- GitHub Actions report is green and diagnosable.
+- Worktree is clean after commit/push.

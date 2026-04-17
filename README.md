@@ -135,6 +135,15 @@ az containerapp update --name mcp-factory-ui --resource-group mcp-factory-rg --i
 
 The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml). The workflow uploads a GitHub Actions artifact named `sponsor-demo-e2e`.
 
+Interpret the artifact as the canonical sponsor proof bundle:
+
+- `final-summary.md` is the sponsor-readable report. It includes overall pass/fail, slow-target diagnostics, bridge/session proof, and a requirement-to-proof matrix.
+- `final-summary.json` is the machine-readable form of the same gate.
+- Real execution sentinel proofs are required for Python, JavaScript, Ruby, PHP, PowerShell, and CMD/BAT.
+- Provider-required tool-call proofs are required for OpenAPI, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, and SQL. These prove discovery, schema generation, LLM tool-call selection, and the expected "provider required" result; they do not claim local live execution of an external protocol service or database.
+- Target input supports both uploaded files and installed paths/directories. Installed paths must be accessible to the server or Windows bridge VM context performing discovery; `system32_directory` is the required installed-directory proof for requirement `2.a`.
+- `cmd_exe` is an optional Windows diagnostic. The required CMD/BAT evidence is the deterministic `.cmd` fixture in the GPT format matrix.
+
 Key artifact paths:
 
 - `ci_artifacts/demo/final-summary.md`

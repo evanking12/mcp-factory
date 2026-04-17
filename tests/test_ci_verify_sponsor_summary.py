@@ -207,3 +207,113 @@ def test_final_summary_markdown_contains_diagnostic_sections(tmp_path: Path) -> 
     assert "notepad_exe" in text
     assert "## Bridge Recovery Events" in text
     assert "## Session And Cache Proof" in text
+
+
+def test_final_summary_contains_requirement_matrix(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    _write(
+        Path(args.windows_summary),
+        {
+            "targets": [
+                {"label": "kernel32_dll", "required": True, "passed": True},
+                {"label": "system32_directory", "required": True, "passed": True},
+                {"label": "registry_contoso", "required": True, "passed": True},
+                {"label": "stdole2_tlb", "required": True, "passed": True},
+            ],
+            "failures": 0,
+        },
+    )
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    summary = ci_verify._load_json(Path(args.out))
+    matrix = summary["requirement_matrix"]
+
+    assert len(matrix) >= 15
+    assert all(row.get("artifact_paths") or row.get("notes") for row in matrix)
+    by_req = {row["requirement"]: row for row in matrix}
+    assert by_req["2.a"]["status"] == "pass"
+    assert "ci_artifacts/demo/windows/system32_directory/system32_directory.summary.json" in by_req["2.a"]["artifact_paths"]
+    assert by_req["1.e"]["proof_type"] == "live_execution"
+
+    text = Path(args.markdown).read_text(encoding="utf-8")
+    assert "## Requirement Proof Matrix" in text
+    assert "system32_directory" in text
+
+
+def test_docs_and_ui_state_installed_path_caveat() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    ui = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
+
+    assert "system32_directory" in readme
+    assert "server or Windows bridge VM context" in readme
+    assert "pipeline server or Windows bridge VM context" in ui
+
+
+def test_ui_backend_route_and_semantics_alignment() -> None:
+    ui = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
+    api = (ROOT / "api" / "main.py").read_text(encoding="utf-8")
+
+    for route in ["/api/analyze", "/api/analyze-path", "/api/generate", "/api/chat", "/api/download/{job_id}/{filename}"]:
+        assert route in api
+    assert "/api/chat/stream" in ui
+    assert "provider required" in ui
+    assert "live execution" in ui
+    assert "`/api/download/${state.jobId}/${encodeURIComponent" in ui
+    assert "schemaBlob" in ui
+
+
+def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    _write(
+        Path(args.gpt_matrix_summary),
+        {
+            "cases": [
+                {"id": "cmd", "passed": True, "proof_level": "real_execution"},
+                {"id": "openapi", "passed": True, "proof_level": "provider_required"},
+            ],
+            "total": 2,
+            "failures": 0,
+            "failed_ids": [],
+            "real_execution_cases": ["cmd"],
+            "real_execution_total": 1,
+            "real_execution_passed": 1,
+            "provider_required_cases": ["openapi"],
+            "provider_required_total": 1,
+            "provider_required_tool_call_passed": 1,
+            "not_live_executed_because_provider_required": ["openapi"],
+        },
+    )
+    _write(Path(args.windows_summary), {"targets": [{"label": "kernel32_dll", "required": True, "passed": True}], "failures": 0})
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    summary = ci_verify._load_json(Path(args.out))
+
+    assert summary["proof_semantics"]["live_execution"]["cases"] == ["cmd"]
+    assert summary["proof_semantics"]["provider_required"]["cases"] == ["openapi"]
+    text = Path(args.markdown).read_text(encoding="utf-8")
+    assert "## Proof Semantics" in text
+    assert "does not claim local live execution" in text
+
+
+def test_final_summary_contains_mcp_llm_story(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    _write(Path(args.windows_summary), {"targets": [{"label": "kernel32_dll", "required": True, "passed": True}], "failures": 0})
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    summary = ci_verify._load_json(Path(args.out))
+    story = summary["mcp_llm_proof_story"]
+
+    assert story["passed"] is True
+    assert story["canonical_live_proof"] == "deterministic_cmd_fixture"
+    assert [step["step"] for step in story["steps"]] == [
+        "target_supplied",
+        "invocables_discovered",
+        "mcp_schema_generated",
+        "llm_called_tool",
+        "tool_result_returned",
+        "artifact_downloaded",
+    ]
+    assert story["schema_tool_count"] == 1
+    text = Path(args.markdown).read_text(encoding="utf-8")
+    assert "## MCP Generation And LLM Invocation" in text
+    assert "downloaded-mcp-schema.json" in text

@@ -1,6 +1,6 @@
 # Tranche 002: Diagnostics
 
-Status: local gate passed; CI rerun pending
+Status: passed
 
 ## Blocker
 
@@ -34,4 +34,11 @@ Add machine-readable timing breakdown fields to every Windows target summary and
   - Optional Diagnostic Failures
   - Bridge Recovery Events
   - Session And Cache Proof
-- Status: pending CI artifact verification.
+- CI rerun URL: `https://github.com/evanking12/mcp-factory/actions/runs/24540377217`
+- Artifact path: GitHub Actions artifact `sponsor-demo-e2e`, downloaded locally to `C:\Users\evanw\AppData\Local\Temp\sponsor-demo-e2e-24540377217`
+- CI artifact verification:
+  - `final-summary.json` has `passed=true`.
+  - Every `windows/*/*.summary.json` contains all requested timing fields.
+  - `final-summary.md` contains the slow target, required failure, optional failure, bridge recovery, and session/cache sections.
+  - Slow target causes were visible without logs: `kernel32_dll` was dominated by `session_check`; `notepad_exe` was dominated by `analyzer`.
+- Status: passed.
