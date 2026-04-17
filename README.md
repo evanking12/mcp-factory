@@ -135,7 +135,7 @@ az containerapp update --name mcp-factory-ui --resource-group mcp-factory-rg --i
 
 The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml). The workflow uploads a GitHub Actions artifact named `sponsor-demo-e2e`.
 
-Canonical green run: [24541068734](https://github.com/evanking12/mcp-factory/actions/runs/24541068734). The legacy-provider live-green campaign will replace this link with the next full green run after all 13 non-VM cases are live execution proofs.
+Canonical green run: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216).
 
 Interpret the artifact as the canonical sponsor proof bundle:
 
@@ -144,6 +144,7 @@ Interpret the artifact as the canonical sponsor proof bundle:
 - `final-summary.json` is the machine-readable form of the same gate.
 - Real execution sentinel proofs are required for all 13 non-VM cases: OpenAPI/REST, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, SQL, Python, JavaScript, Ruby, PHP, PowerShell, and CMD/BAT.
 - OpenAPI, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, and SQL use deterministic hosted legacy provider adapters in the pipeline API. A "provider required" result is now a fallback only when those adapters are disabled or unreachable, not a passing required sponsor result.
+- The canonical run above reports `13/13` live execution format proofs and `0` required provider-required cases.
 - Target input supports both uploaded files and installed paths/directories. Installed paths must be accessible to the server or Windows bridge VM context performing discovery; `system32_directory` is the required installed-directory proof for requirement `2.a`.
 - `cmd_exe` is an optional Windows diagnostic. The required CMD/BAT evidence is the deterministic `.cmd` fixture in the GPT format matrix.
 
