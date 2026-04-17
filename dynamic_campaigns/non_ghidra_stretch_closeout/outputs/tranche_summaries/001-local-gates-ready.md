@@ -9,6 +9,13 @@ Implemented:
   `Microsoft.Resources/subscriptions/resourcegroups/read`. The workflow now uses
   the known `eastus` location instead, so the next run reaches the intended
   VM/NIC/subnet permission checks.
+- Second focused run `24574822111` confirmed the intended permission blocker:
+  the workflow identity lacked `Microsoft.Network/networkInterfaces/read` on
+  the bridge NIC. The principal was granted `Network Contributor` and
+  `Virtual Machine Contributor` on `mcp-factory-rg`.
+- Third focused run `24574883953` passed preflight and created/cleaned the NIC,
+  but `az vm create` rejected a NIC name. The workflow now passes the NIC
+  resource ID.
 - Full Sponsor Demo E2E accepts `remote_dcom_run_id` and imports the focused
   `sponsor-remote-dcom-runtime` artifact.
 - Final Sponsor Demo summary can require Remote DCOM with

@@ -477,7 +477,8 @@ def test_non_ghidra_dcom_campaign_and_workflow_use_same_subnet_client() -> None:
     assert "az network nic create" in workflow
     assert "az vm create" in workflow
     assert '--subnet "$SUBNET_ID"' in workflow
-    assert '--nics "$CLIENT_NIC_NAME"' in workflow
+    assert "CLIENT_NIC_ID" in workflow
+    assert '--nics "$client_nic_id"' in workflow
     assert '--os-disk-name "$CLIENT_OS_DISK_NAME"' in workflow
     assert "az vm delete" in workflow
     assert "azure-preflight.json" in workflow
