@@ -89,7 +89,8 @@ jobs:
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \
-            --html ci_artifacts/demo/sponsor-report.html
+            --html ci_artifacts/demo/sponsor-report.html \
+            --canonical-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.inputs.report_only_run_id }}"
           cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload re-rendered sponsor report
@@ -559,7 +560,8 @@ jobs:
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \
-            --html ci_artifacts/demo/sponsor-report.html
+            --html ci_artifacts/demo/sponsor-report.html \
+            --canonical-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           status=$?
           if [ -f ci_artifacts/demo/final-summary.md ]; then
             cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"

@@ -2,11 +2,10 @@
 
 This is the static landing page for sponsor proof artifacts.
 
-## Canonical Baseline
+## Canonical Green Run
 
-- Canonical green run: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
-- Runtime expansion target: the next full green `Sponsor Demo E2E` run on
-  `73c8b80` or newer replaces this baseline as canonical after closeout.
+- Canonical green run: [24547284139](https://github.com/evanking12/mcp-factory/actions/runs/24547284139)
+- Historical baseline fallback: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
 - Workflow: [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml)
 - Artifact name: `sponsor-demo-e2e`
 
