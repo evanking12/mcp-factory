@@ -7,12 +7,12 @@ Baseline canonical green Sponsor Demo E2E run is
 
 Current frontier:
 
-- Focused runs through `24577375644` prove Azure same-subnet client VM creation,
-  bridge startup, scheduled-task execution, and cleanup are working.
-- Run `24577375644` proved server setup but showed `WScript.Shell` is not a
-  valid remote activation surface here (`80040154`).
-- Commit the WMI-over-DCOM proof-surface change, rerun focused Remote DCOM,
-  then promote only if the parsed artifact proves `remote_dcom_runtime`.
+- Focused run `24577926238` passed Remote DCOM through a controlled
+  same-subnet Azure client VM using WMI over DCOM.
+- The focused artifact proves `remote_dcom_runtime`, distinct client/server
+  context, sentinel match, GPT `tool_call`, backend `tool_result`, and cleanup.
+- Next gate: run full Sponsor Demo E2E with `remote_dcom_run_id=24577926238`
+  and promote docs/UI canonical links only after that full run is green.
 
 Campaign goals:
 
