@@ -2,8 +2,8 @@
 
 These endpoints are intentionally small and predictable. They provide live,
 runtime-backed or runtime-shaped backing services for generated MCP tools while
-avoiding claims that the capstone deploys production CORBA ORB/IIOP, DCE/MSRPC,
-enterprise directory migration, or remote DCOM infrastructure.
+avoiding claims that the capstone performs generalized CORBA estate migration,
+DCE/MSRPC, enterprise directory migration, or remote DCOM infrastructure.
 """
 
 from __future__ import annotations
@@ -18,6 +18,12 @@ from xml.etree import ElementTree as ET
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from api.corba_runtime import (
+    CONTOSO_CORBA_IDL,
+    CorbaRuntimeUnavailable,
+    corba_orb_invoke,
+    corba_runtime_available,
+)
 from api.ldap_runtime import (
     BASE_DN,
     LDAP_BINDINGS as JNDI_BINDINGS,
@@ -37,7 +43,7 @@ PROVIDERS = {
     "jsonrpc": "JSON-RPC 2.0 hosted Contoso runtime",
     "soap": "SOAP/WSDL envelope-validating Contoso runtime",
     "sql": "SQLite-backed Contoso runtime",
-    "corba": "CORBA IDL object-registry runtime-shaped provider",
+    "corba": "CORBA ORB/IIOP Contoso runtime" if corba_runtime_available() else "CORBA IDL object-registry runtime-shaped provider",
     "rpc": "XML-RPC hosted Contoso runtime",
     "jndi": "LDAPv3-compatible JNDI binding runtime",
 }
@@ -46,7 +52,7 @@ PROVIDER_MODES = {
     "jsonrpc": "real_runtime",
     "soap": "real_runtime",
     "sql": "real_runtime",
-    "corba": "corba_idl_runtime",
+    "corba": "corba_orb_runtime" if corba_runtime_available() else "corba_idl_runtime",
     "rpc": "xmlrpc_runtime",
     "jndi": "ldap_runtime",
 }
@@ -296,7 +302,7 @@ def legacy_health() -> dict[str, Any]:
         "enabled_providers": sorted(PROVIDERS),
         "providers": PROVIDERS,
         "provider_modes": PROVIDER_MODES,
-        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime"}),
+        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime", "corba_orb_runtime"}),
         "adapter_backed": sorted(k for k, v in PROVIDER_MODES.items() if v == "adapter_backed"),
     }
 
@@ -471,6 +477,40 @@ async def corba_provider(operation: str, request: Request) -> JSONResponse:
         )
     interface_name, method_name, obj = matched
     result = build_legacy_result("corba", method_name, payload)
+    if PROVIDER_MODES["corba"] == "corba_orb_runtime":
+        try:
+            orb_result = corba_orb_invoke(interface_name, method_name, extract_sentinel(payload))
+        except CorbaRuntimeUnavailable as exc:
+            return JSONResponse(
+                {
+                    "provider": "corba",
+                    "runtime_mode": "corba_orb_runtime",
+                    "error": str(exc),
+                    "notes": "CORBA ORB runtime is required for this stretch proof and was not downgraded.",
+                },
+                status_code=503,
+            )
+        result.update({
+            "runtime_mode": "corba_orb_runtime",
+            "idl_module": "ContosoSupport",
+            "interface": interface_name,
+            "repository_id": obj["repository_id"],
+            "object_ref": orb_result["object_reference"],
+            "allowed_operation": True,
+            "corba_request": {
+                "object_key": interface_name,
+                "operation": method_name,
+                "repository_id": obj["repository_id"],
+                "args": payload.get("args", payload),
+            },
+            "corba_response": {
+                "reply_status": "NO_EXCEPTION",
+                "operation": method_name,
+                "result": orb_result["client_result"],
+            },
+            "orb_invocation": orb_result,
+        })
+        return JSONResponse(result)
     result.update({
         "runtime_mode": PROVIDER_MODES["corba"],
         "idl_module": "Contoso.CustomerService",
@@ -491,6 +531,11 @@ async def corba_provider(operation: str, request: Request) -> JSONResponse:
         },
     })
     return JSONResponse(result)
+
+
+@router.get("/corba/idl")
+def corba_idl_provider() -> Response:
+    return Response(content=CONTOSO_CORBA_IDL, media_type="text/plain")
 
 
 @router.post("/rpc/{procedure}")

@@ -11,3 +11,4 @@ openai>=1.30.0
 applicationinsights>=0.11.10
 opencensus-ext-azure>=1.1.13
 mcp>=1.0
+jeteve-omniorb==4.3.3.post7; platform_system == 'Linux' and platform_machine == 'x86_64'

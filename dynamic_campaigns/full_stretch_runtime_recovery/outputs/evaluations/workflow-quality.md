@@ -85,3 +85,49 @@ Strongest risk: runtime naming drift between manifest, provider health, GPT
 matrix, and final summary.
 
 Next correction: focused artifact parsing must confirm `runtime_mode=ldap_runtime`.
+
+## 003 CORBA ORB Runtime
+
+`gm_control_quality`: 2
+
+Evidence: the implementation adds a distinct CORBA proof command and workflow
+instead of relabeling the previous object-registry provider.
+
+Strongest risk: local Windows cannot execute the Linux OmniORB wheel, so local
+validation cannot prove the ORB path.
+
+Next correction: deployed focused workflow must prove `corba_orb_runtime`,
+`wire_protocol=IIOP`, IOR object reference, server log, and client invocation.
+
+`context_pressure_result`: 2
+
+Evidence: the tranche writes expected artifacts under
+`ci_artifacts/demo/legacy/corba_orb`.
+
+Strongest risk: generated IDL module names or OmniORB binary path may differ
+inside the deployed container.
+
+Next correction: if focused workflow fails, inspect logs and patch the actual
+generated/import path rather than downgrading to `corba_idl_runtime`.
+
+`delegation_effectiveness`: 2
+
+Evidence: no subagents were dispatched because this turn did not authorize
+delegation.
+
+Strongest risk: ORB troubleshooting may benefit from parallel package/runtime
+exploration if it fails in CI.
+
+Next correction: keep local unless explicitly authorized or the blocker becomes
+toolchain-specific.
+
+`operator_reviewability`: 2
+
+Evidence: provider health, final summary modes, focused command, and workflow
+have one runtime mode target: `corba_orb_runtime`.
+
+Strongest risk: fallback mode remains for local Windows, which could confuse
+review unless final evidence records the deployed runtime.
+
+Next correction: focused artifact parsing must record the deployed mode and
+client result before tranche completion.

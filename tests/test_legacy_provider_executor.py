@@ -34,7 +34,7 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     assert health["provider_modes"]["rest"] == "validated_runtime"
     assert health["provider_modes"]["jndi"] == "ldap_runtime"
     assert health["provider_modes"]["rpc"] == "xmlrpc_runtime"
-    assert health["provider_modes"]["corba"] == "corba_idl_runtime"
+    assert health["provider_modes"]["corba"] in {"corba_idl_runtime", "corba_orb_runtime"}
 
     assert sentinel in client.post("/api/legacy/rest/tickets", json={"sentinel": sentinel}).text
     assert sentinel in client.post(
@@ -191,10 +191,13 @@ def test_corba_idl_runtime_validates_object_registry() -> None:
     ok = client.post("/api/legacy/corba/ICustomerService_getCustomer", json={"sentinel": "MCP_FACTORY_CORBA"})
     assert ok.status_code == 200
     data = ok.json()
-    assert data["runtime_mode"] == "corba_idl_runtime"
+    assert data["runtime_mode"] in {"corba_idl_runtime", "corba_orb_runtime"}
     assert data["repository_id"] == "IDL:contoso.com/CustomerService/ICustomerService:1.0"
     assert data["corba_response"]["reply_status"] == "NO_EXCEPTION"
     assert "MCP_FACTORY_CORBA" in data["sentinel"]
+    if data["runtime_mode"] == "corba_orb_runtime":
+        assert data["orb_invocation"]["wire_protocol"] == "IIOP"
+        assert data["orb_invocation"]["object_reference"].startswith("IOR:")
 
     rejected = client.post("/api/legacy/corba/deleteEverything", json={"sentinel": "MCP_FACTORY_CORBA"})
     assert rejected.status_code == 404

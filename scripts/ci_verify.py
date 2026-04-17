@@ -305,7 +305,7 @@ RUNTIME_MODE_BY_FORMAT_CASE = {
     "sql": "real_runtime",
     "jndi": "ldap_runtime",
     "rpc_idl_contract": "xmlrpc_runtime",
-    "corba_idl": "corba_idl_runtime",
+    "corba_idl": "corba_orb_runtime",
     "python": "local_runtime",
     "javascript": "local_runtime",
     "ruby": "local_runtime",
@@ -1757,7 +1757,7 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     runtime_backed_cases = [
         item["id"]
         for item in summaries
-        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime", "local_runtime"}
+        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime", "corba_orb_runtime", "local_runtime"}
     ]
     aggregate = {
         "cases": summaries,
@@ -1867,6 +1867,78 @@ def cmd_ldap_runtime_proof(args: argparse.Namespace) -> int:
     if not passed:
         raise AssertionError(f"LDAP runtime proof failed checks: {[name for name, ok in checks.items() if not ok]}")
     print(f"OK LDAP runtime proof: artifacts={artifact_dir}")
+    return 0
+
+
+def cmd_corba_orb_runtime_proof(args: argparse.Namespace) -> int:
+    base_url = args.base_url.rstrip("/")
+    artifact_dir = Path(args.artifact_dir)
+    matrix_out = Path(args.matrix_out)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = args.sentinel or f"MCP_FACTORY_CORBA_ORB_{uuid.uuid4().hex[:8]}"
+    key = args.pipeline_key or ""
+
+    print(f"START CORBA ORB runtime proof: base_url={base_url}")
+    health = _http_json("GET", f"{base_url}/api/legacy/health", key=key, timeout=args.timeout)
+    provider_modes = health.get("provider_modes") or {}
+    if provider_modes.get("corba") != "corba_orb_runtime":
+        raise AssertionError(f"legacy provider corba mode is not corba_orb_runtime: {provider_modes.get('corba')!r}")
+
+    idl = _http_bytes("GET", f"{base_url}/api/legacy/corba/idl", key=key, timeout=args.timeout).decode("utf-8")
+    invocation = _http_json(
+        "POST",
+        f"{base_url}/api/legacy/corba/ICustomerService_getCustomer",
+        key=key,
+        body={"sentinel": sentinel},
+        timeout=args.timeout,
+    )
+    orb_invocation = invocation.get("orb_invocation") or {}
+    server_log = orb_invocation.get("server_log") or []
+    checks = {
+        "provider_mode_is_corba_orb_runtime": provider_modes.get("corba") == "corba_orb_runtime",
+        "idl_has_contoso_interface": "interface CustomerService" in idl and "module ContosoSupport" in idl,
+        "object_reference_is_ior": str(orb_invocation.get("object_reference", "")).startswith("IOR:"),
+        "wire_protocol_is_iiop": orb_invocation.get("wire_protocol") == "IIOP",
+        "server_registered_object": any("registered ICustomerService" in str(item) for item in server_log),
+        "client_result_has_sentinel": sentinel in json.dumps(invocation, sort_keys=True),
+        "provider_result_mode": invocation.get("runtime_mode") == "corba_orb_runtime",
+    }
+    passed = all(checks.values())
+    (artifact_dir / "contoso_support.idl").write_text(idl, encoding="utf-8")
+    (artifact_dir / "object-reference.txt").write_text(str(orb_invocation.get("object_reference", "")), encoding="utf-8")
+    (artifact_dir / "orb-server.log").write_text("\n".join(str(item) for item in server_log), encoding="utf-8")
+    _write_json(artifact_dir / "health.json", health)
+    _write_json(artifact_dir / "client-invocation.json", invocation)
+    summary = {
+        "id": "corba_orb_runtime",
+        "passed": passed,
+        "proof_level": "real_runtime",
+        "runtime_mode": "corba_orb_runtime",
+        "provider": "corba",
+        "wire_protocol": "IIOP",
+        "orb": orb_invocation.get("orb", "OmniORB"),
+        "sentinel": sentinel,
+        "checks": checks,
+        "artifacts": {
+            "idl": str(artifact_dir / "contoso_support.idl"),
+            "object_reference": str(artifact_dir / "object-reference.txt"),
+            "server_log": str(artifact_dir / "orb-server.log"),
+            "client_invocation": str(artifact_dir / "client-invocation.json"),
+            "health": str(artifact_dir / "health.json"),
+        },
+        "notes": "Controlled OmniORB/IIOP proof for deterministic Contoso IDL, not generalized CORBA estate support.",
+    }
+    _write_json(artifact_dir / "summary.json", summary)
+
+    matrix = _load_optional_summary(matrix_out)
+    if not isinstance(matrix, dict) or matrix.get("missing"):
+        matrix = {}
+    matrix["corba_orb_runtime"] = summary
+    matrix["passed"] = all(bool(value.get("passed")) for value in matrix.values() if isinstance(value, dict) and "passed" in value)
+    _write_json(matrix_out, matrix)
+    if not passed:
+        raise AssertionError(f"CORBA ORB runtime proof failed checks: {[name for name, ok in checks.items() if not ok]}")
+    print(f"OK CORBA ORB runtime proof: artifacts={artifact_dir}")
     return 0
 
 
@@ -2543,12 +2615,13 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
             "ldap_runtime",
             "xmlrpc_runtime",
             "corba_idl_runtime",
+            "corba_orb_runtime",
             "adapter_backed",
             "unknown",
         }:
             raise AssertionError(f"{case.get('id', '<unknown>')}: invalid runtime_mode={runtime_mode!r}")
         if case.get("id") == "corba_idl" and runtime_mode == "adapter_backed":
-            raise AssertionError("corba_idl: stale runtime_mode='adapter_backed'; expected corba_idl_runtime")
+            raise AssertionError("corba_idl: stale runtime_mode='adapter_backed'; expected corba_orb_runtime or corba_idl_runtime")
         expected_result = case.get("expected_result")
         if expected_result and expected_result not in {"sentinel", "provider_required"}:
             raise AssertionError(f"{case.get('id', '<unknown>')}: invalid expected_result={expected_result!r}")
@@ -2795,7 +2868,7 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json",
                 "docs/sponsor/caveats.md",
             ],
-            "notes": "JSON-RPC, SOAP, SQL, and controlled LDAP/JNDI bind/search/lookup are runtime-backed; REST is route-validated; RPC uses XML-RPC wire responses; CORBA uses an IDL object-registry runtime-shaped provider. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
+            "notes": "JSON-RPC, SOAP, SQL, controlled LDAP/JNDI bind/search/lookup, and controlled CORBA ORB/IIOP are runtime-backed when their focused artifacts are present; REST is route-validated and RPC uses XML-RPC wire responses. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
         },
         {
             "requirement": "1.c",
@@ -3680,6 +3753,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sentinel", default="")
     p.add_argument("--timeout", type=int, default=60)
     p.set_defaults(func=cmd_ldap_runtime_proof)
+
+    p = sub.add_parser("corba-orb-runtime-proof")
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/legacy/corba_orb")
+    p.add_argument("--matrix-out", default="ci_artifacts/demo/legacy-runtime-matrix/summary.json")
+    p.add_argument("--sentinel", default="")
+    p.add_argument("--timeout", type=int, default=90)
+    p.set_defaults(func=cmd_corba_orb_runtime_proof)
 
     p = sub.add_parser("windows-gpt-tool-matrix")
     p.add_argument("--base-url", required=True)

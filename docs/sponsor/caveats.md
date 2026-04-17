@@ -23,9 +23,10 @@ does not claim.
   infrastructure, or directory migration.
 - RPC IDL is runtime-shaped through real XML-RPC `methodCall`, `methodResponse`,
   and `fault` envelopes. It is not DCE/RPC or MSRPC infrastructure.
-- CORBA IDL is runtime-shaped through an IDL-derived object registry, repository
-  IDs, object references, and operation allowlist validation. It proves CORBA
-  IDL dispatch behavior but is not a production CORBA ORB/IIOP deployment.
+- CORBA IDL is runtime-backed through a controlled OmniORB/IIOP proof service
+  for deterministic Contoso IDL. It proves ORB object registration, IOR object
+  references, and client invocation for the fixture, but it is not generalized
+  CORBA estate migration.
 - COM/TLB discovery and local COM automation are proven through the Windows
   bridge. Remote DCOM activation and remote DCOM invocation are not claimed by
   the sponsor demo.

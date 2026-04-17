@@ -335,7 +335,7 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
                         "sql": "real_runtime",
                         "jndi": "ldap_runtime",
                         "rpc_idl_contract": "xmlrpc_runtime",
-                        "corba_idl": "corba_idl_runtime",
+                        "corba_idl": "corba_orb_runtime",
                     }.get(case_id, "local_runtime"),
                 }
                 for case_id in cases
@@ -352,7 +352,7 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
             "not_live_executed_because_provider_required": [],
             "all_required_cases_live_execution": True,
             "runtime_mode_counts": {
-                "corba_idl_runtime": 1,
+                "corba_orb_runtime": 1,
                 "local_runtime": 6,
                 "ldap_runtime": 1,
                 "real_runtime": 3,
@@ -385,13 +385,13 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
     assert summary["gpt_format_matrix"]["runtime_mode_counts"]["real_runtime"] == 3
     assert summary["gpt_format_matrix"]["adapter_backed_cases"] == []
     assert summary["proof_semantics"]["provider_required"]["cases"] == []
-    assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["corba_idl_runtime"] == ["corba_idl"]
+    assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["corba_orb_runtime"] == ["corba_idl"]
     assert summary["com_runtime"]["passed"] is True
     assert summary["stretch_goals_passed"] is False
     assert "ldap_runtime" in summary["stretch_proof_matrix"]["not_yet_run_ids"]
     assert "Real execution format proofs: 13/13" in text
     assert "Required provider-required cases: 0" in text
-    assert "Runtime mode `corba_idl_runtime`: corba_idl" in text
+    assert "Runtime mode `corba_orb_runtime`: corba_idl" in text
     assert "## COM/DCOM Surface Proof" in text
     assert "## Stretch Goal Proof Matrix" in text
 
@@ -451,7 +451,7 @@ def test_pushback_docs_and_index_reference_caveats() -> None:
     assert "sponsor-report.html" in proof_index
     assert "SOAP is now runtime-backed" in caveats
     assert "SQLite-backed" in caveats
-    assert "CORBA IDL is runtime-shaped" in caveats
+    assert "CORBA IDL is runtime-backed" in caveats
     assert "Remote DCOM activation" in caveats
     assert "$150/month" in non_code
     assert "FERPA" in non_code
