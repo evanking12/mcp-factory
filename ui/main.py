@@ -525,8 +525,8 @@ _HTML = r"""<!DOCTYPE html>
         <div class="proof-grid">
           <div class="proof-cell runtime"><strong>Runtime-backed</strong><span>JSON-RPC, SOAP, SQL</span></div>
           <div class="proof-cell runtime"><strong>Validated runtime</strong><span>OpenAPI/REST route and method proof</span></div>
-          <div class="proof-cell shaped"><strong>Hard legacy</strong><span>LDAP runtime, CORBA ORB, controlled MSRPC</span></div>
-          <div class="proof-cell observed"><strong>Windows proof</strong><span>COM/TLB discovery, local COM automation, Windows GPT 5/5</span></div>
+          <div class="proof-cell shaped"><strong>Hard legacy</strong><span>ldap_runtime, corba_orb_runtime, msrpc_runtime, remote_dcom_runtime</span></div>
+          <div class="proof-cell observed"><strong>Windows proof</strong><span>COM/TLB discovery, local COM automation, controlled Remote DCOM fixture, Windows GPT 5/5</span></div>
           <div class="proof-cell runtime"><strong>GPT matrix</strong><span>13/13 tool_call + tool_result proofs</span></div>
           <div class="proof-cell runtime"><strong>Repo proof</strong><span>Directory/repo fixture ingestion passes</span></div>
         </div>

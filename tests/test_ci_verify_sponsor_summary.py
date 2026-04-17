@@ -425,13 +425,18 @@ def test_sponsor_workflows_expose_fast_iteration_controls() -> None:
         "only_windows_gpt_target",
         "skip_repo_ingestion",
         "report_only_run_id",
+        "remote_dcom_run_id",
         "--only-case",
         "windows-gpt-tool-matrix",
         "repo-ingestion-gpt-proof",
         "sponsor-report.html",
         "--canonical-run-url",
+        "--require-remote-dcom",
+        "sponsor-remote-dcom-runtime",
         "windows-com-runtime-proof",
         "--com-runtime-summary",
+        "--stretch-runtime-summary",
+        "--remote-dcom-summary",
     ]:
         assert token in workflow
     assert "windows-com-runtime-proof" in com_workflow
@@ -456,6 +461,82 @@ def test_pushback_docs_and_index_reference_caveats() -> None:
     assert "$150/month" in non_code
     assert "FERPA" in non_code
     assert "docs/sponsor/proof-index.md" in readme
+
+
+def test_non_ghidra_dcom_campaign_and_workflow_use_same_subnet_client() -> None:
+    campaign = ROOT / "dynamic_campaigns" / "non_ghidra_stretch_closeout"
+    workflow = (ROOT / ".github" / "workflows" / "sponsor-remote-dcom-runtime.yml").read_text(encoding="utf-8")
+    active_prompt = (campaign / "prompts" / "ACTIVE-PROMPT.md").read_text(encoding="utf-8")
+    ui = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
+
+    assert (campaign / "CAMPAIGN.md").exists()
+    assert (campaign / "outputs" / "tranche_summaries" / "000-start.md").exists()
+    assert "No Ghidra work" in active_prompt
+    assert "--client-mode azure-vm" in workflow
+    assert "--client-mode local" not in workflow
+    assert "az network nic create" in workflow
+    assert "az vm create" in workflow
+    assert '--subnet "$SUBNET_ID"' in workflow
+    assert '--nics "$CLIENT_NIC_NAME"' in workflow
+    assert '--os-disk-name "$CLIENT_OS_DISK_NAME"' in workflow
+    assert "az vm delete" in workflow
+    assert "azure-preflight.json" in workflow
+    assert "azure-client-cleanup.json" in workflow
+    assert "remote_dcom_runtime" in ui
+    assert "CI Proof Bundle" in ui
+
+
+def test_required_remote_dcom_missing_fails_final_summary(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    args.require_remote_dcom = True
+
+    with pytest.raises(AssertionError):
+        ci_verify.cmd_summarize_sponsor_demo(args)
+
+    summary = ci_verify._load_json(Path(args.out))
+    assert summary["passed"] is False
+    assert summary["checks"]["remote_dcom_runtime_proof_passed"] is False
+    assert summary["required_remote_dcom"] is True
+
+
+def test_required_remote_dcom_passes_when_runtime_and_gpt_proof_exist(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    args.require_remote_dcom = True
+    _write(
+        Path(args.windows_summary),
+        {
+            "targets": [
+                {"label": "kernel32_dll", "required": True, "passed": True},
+                {"label": "system32_directory", "required": True, "passed": True},
+            ],
+            "failures": 0,
+        },
+    )
+    _write(
+        Path(args.remote_dcom_summary),
+        {
+            "passed": True,
+            "runtime_mode": "remote_dcom_runtime",
+            "remote_dcom_activation_claimed": True,
+            "client_mode": "azure-vm",
+            "checks": {
+                "distinct_remote_context": True,
+                "remote_sentinel_matches": True,
+            },
+            "gpt_tool_proof": {
+                "generated_schema_exists": True,
+                "downloaded_schema_exists": True,
+                "tool_call_seen": True,
+                "tool_result_seen": True,
+            },
+        },
+    )
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    summary = ci_verify._load_json(Path(args.out))
+    assert summary["passed"] is True
+    assert summary["checks"]["remote_dcom_runtime_proof_passed"] is True
+    assert summary["required_remote_dcom"] is True
 
 
 def test_windows_gpt_summary_is_optional_but_reported(tmp_path: Path) -> None:

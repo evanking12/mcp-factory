@@ -33,11 +33,13 @@ downloads served through `/api/download/{job_id}/{filename}`.
 - [Sponsor Demo Report Only](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-report-only.yml) re-renders report artifacts from an existing run.
 - [Sponsor Repo Ingestion E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-repo-ingestion-e2e.yml) proves repo/folder ingestion without starting the Windows VM.
 - [Sponsor Windows GPT Matrix](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-windows-gpt-matrix.yml) reuses Windows discovery artifacts and runs only the Windows GPT proof matrix.
+- [Sponsor Remote DCOM Runtime Proof](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-remote-dcom-runtime.yml) is the focused non-Ghidra stretch workflow for a controlled same-subnet Remote DCOM fixture.
 
 ## Interpretation
 
 Use `sponsor-report.html` for live review and `final-summary.json` for exact
 automation status. The caveat page should be shown when discussing CORBA, RPC,
-JNDI, DCOM, or arbitrary closed-source binary recovery. JSON-RPC, SOAP, and SQL
-are runtime-backed in the expanded proof; JNDI, RPC, and CORBA are now
-runtime-shaped proofs with explicit non-production infrastructure caveats.
+JNDI, DCOM, or arbitrary closed-source binary recovery. JSON-RPC, SOAP, SQL,
+JNDI/LDAP, CORBA ORB/IIOP, and controlled MSRPC are runtime-backed in the
+expanded proof. Remote DCOM remains a focused non-Ghidra stretch gate until the
+same-subnet DCOM workflow produces a passing artifact.

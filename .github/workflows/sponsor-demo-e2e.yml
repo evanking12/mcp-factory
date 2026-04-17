@@ -35,6 +35,10 @@ on:
         description: "Download an existing sponsor-demo-e2e artifact by run ID and re-render reports"
         type: string
         default: ""
+      remote_dcom_run_id:
+        description: "Focused sponsor-remote-dcom-runtime run ID to import into the canonical final summary"
+        type: string
+        default: ""
 
 permissions:
   id-token: write
@@ -417,6 +421,25 @@ jobs:
             --matrix-out ci_artifacts/demo/legacy-runtime-matrix/summary.json \
             --sentinel "MCP_FACTORY_MSRPC_${{ github.run_id }}"
 
+      - name: Import focused Remote DCOM runtime proof
+        if: ${{ inputs.remote_dcom_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ci_artifacts/demo
+          gh run download "${{ inputs.remote_dcom_run_id }}" \
+            --repo evanking12/mcp-factory \
+            --name sponsor-remote-dcom-runtime \
+            --dir ci_artifacts/demo
+          if [ ! -f ci_artifacts/demo/windows/dcom/dcom.summary.json ]; then
+            found="$(find ci_artifacts/demo -path '*/windows/dcom/dcom.summary.json' -print -quit)"
+            if [ -n "$found" ]; then
+              mkdir -p ci_artifacts/demo/windows/dcom
+              cp -R "$(dirname "$found")/." ci_artifacts/demo/windows/dcom/
+            fi
+          fi
+          test -f ci_artifacts/demo/windows/dcom/dcom.summary.json
+
       - name: Run GPT per-format proof matrix
         if: ${{ !inputs.skip_gpt_matrix }}
         continue-on-error: true
@@ -606,11 +629,15 @@ jobs:
             --windows-gpt-summary ci_artifacts/demo/windows-gpt/summary.json \
             --repo-ingestion-summary ci_artifacts/demo/repo-ingestion/summary.json \
             --com-runtime-summary ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json \
+            --stretch-runtime-summary ci_artifacts/demo/legacy-runtime-matrix/summary.json \
+            --remote-dcom-summary ci_artifacts/demo/windows/dcom/dcom.summary.json \
+            --windows-runtime-summary ci_artifacts/demo/windows/runtime_fixture/runtime_fixture.summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \
             --html ci_artifacts/demo/sponsor-report.html \
-            --canonical-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --canonical-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --require-remote-dcom
           status=$?
           if [ -f ci_artifacts/demo/final-summary.md ]; then
             cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -633,6 +660,7 @@ jobs:
           - only_windows_target: `${{ inputs.only_windows_target }}`
           - only_gpt_case: `${{ inputs.only_gpt_case }}`
           - only_windows_gpt_target: `${{ inputs.only_windows_gpt_target }}`
+          - remote_dcom_run_id: `${{ inputs.remote_dcom_run_id }}`
           EOF
           cat ci_artifacts/demo/partial-iteration-summary.md >> "$GITHUB_STEP_SUMMARY"
 

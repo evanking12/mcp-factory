@@ -3882,6 +3882,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     deallocation_path = Path(args.vm_deallocation)
     out_path = Path(args.out)
     canonical_run_url = str(getattr(args, "canonical_run_url", "") or os.getenv("CANONICAL_SPONSOR_RUN_URL", ""))
+    require_remote_dcom = bool(getattr(args, "require_remote_dcom", False))
 
     non_vm = _load_json(non_vm_path) if non_vm_path.exists() else {"cases": [], "failures": 1, "missing": str(non_vm_path)}
     windows = _load_json(windows_path) if windows_path.exists() else {"targets": [], "failures": 1, "missing": str(windows_path)}
@@ -3941,6 +3942,13 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "windows_gpt_tool_matrix_passed": int(windows_gpt.get("failures", 1)) == 0 and int(windows_gpt.get("total", 0)) > 0,
         "repo_ingestion_proof_passed": bool(repo_ingestion.get("passed")),
         "windows_com_runtime_proof_passed": bool(com_runtime.get("passed")),
+        "remote_dcom_runtime_proof_passed": bool(
+            remote_dcom.get("passed")
+            and remote_dcom.get("runtime_mode") == "remote_dcom_runtime"
+            and remote_dcom.get("remote_dcom_activation_claimed")
+            and (remote_dcom.get("gpt_tool_proof") or {}).get("tool_call_seen")
+            and (remote_dcom.get("gpt_tool_proof") or {}).get("tool_result_seen")
+        ),
         "vm_deallocation_attempted": bool(deallocation.get("attempted")),
         "vm_deallocation_completed": bool(deallocation.get("completed")),
     }
@@ -3948,6 +3956,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         key: value for key, value in checks.items()
         if key not in {"windows_gpt_tool_matrix_passed", "repo_ingestion_proof_passed"}
     }
+    if not require_remote_dcom:
+        gate_checks.pop("remote_dcom_runtime_proof_passed", None)
     passed = all(gate_checks.values())
     requirement_matrix = _build_requirement_matrix(
         checks=checks,
@@ -4018,6 +4028,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         },
         "ghidra_binary_recovery": ghidra_recovery,
         "remote_dcom": remote_dcom,
+        "required_remote_dcom": require_remote_dcom,
         "corba_orb": stretch_runtime.get("corba_orb_runtime", {"missing": stretch_runtime.get("missing", "")}),
         "ldap_runtime": stretch_runtime.get("ldap_runtime", {"missing": stretch_runtime.get("missing", "")}),
         "msrpc_runtime": stretch_runtime.get("msrpc_runtime", {"missing": stretch_runtime.get("missing", "")}),
@@ -4098,6 +4109,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             f"- Windows GPT tool-result-observed proofs: {windows_gpt.get('passed', 0)}/{windows_gpt.get('total', 0)}",
             f"- Repo ingestion GPT proof passed: {bool(repo_ingestion.get('passed'))}",
             f"- Windows COM runtime proof passed: {bool(com_runtime.get('passed'))}",
+            f"- Controlled Remote DCOM runtime proof passed: {checks['remote_dcom_runtime_proof_passed']}",
             f"- Stretch proof matrix: {stretch_proof_matrix.get('passed_count', 0)}/{stretch_proof_matrix.get('total', 0)} passed",
             f"- Stretch proofs not yet run: {', '.join(stretch_proof_matrix.get('not_yet_run_ids', [])) or 'none'}",
             f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
@@ -4389,6 +4401,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--markdown", default="")
     p.add_argument("--html", default="")
     p.add_argument("--canonical-run-url", default="")
+    p.add_argument("--require-remote-dcom", action="store_true")
     p.set_defaults(func=cmd_summarize_sponsor_demo)
 
     p = sub.add_parser("render-sponsor-report")

@@ -141,6 +141,7 @@ Static sponsor references:
 
 - [Sponsor proof index](docs/sponsor/proof-index.md) maps the canonical run to the exact artifact paths and fast proof workflows.
 - [Sponsor demo caveats](docs/sponsor/caveats.md) states the proof boundary for JSON-RPC, SOAP, CORBA, RPC, JNDI, COM/DCOM, and arbitrary binary recovery.
+- [Non-Ghidra stretch closeout](dynamic_campaigns/non_ghidra_stretch_closeout/README.md) tracks the same-subnet Remote DCOM proof path without adding Ghidra or undocumented binary recovery scope.
 - [Non-code sponsor artifacts](docs/sponsor/non-code-artifacts.md) covers Azure cost posture, FERPA/access control, architecture references, and rerun guidance.
 
 Interpret the artifact as the canonical sponsor proof bundle:

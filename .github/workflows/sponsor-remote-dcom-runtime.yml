@@ -2,6 +2,20 @@ name: Sponsor Remote DCOM Runtime Proof
 
 on:
   workflow_dispatch:
+    inputs:
+      client_vm_name:
+        description: "Optional pre-existing same-subnet Windows client VM. Leave blank to create a temporary client."
+        required: false
+        default: ""
+      client_vm_size:
+        description: "Temporary client VM size when client_vm_name is blank."
+        required: false
+        default: "Standard_B2s"
+      keep_client_vm:
+        description: "Keep the temporary client VM for debugging. Defaults to false."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -12,13 +26,13 @@ env:
   SERVER_VM_NAME: mcpfactory-runner-vm
   KEY_VAULT: mcp-factory-kv
   PIPELINE_URL: https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
-  SERVER_PUBLIC_TARGET: 20.124.33.45
+  CLIENT_ADMIN_USERNAME: mcpdcomclient
 
 jobs:
   remote-dcom-runtime:
-    name: Controlled remote DCOM activation proof
-    runs-on: windows-latest
-    timeout-minutes: 35
+    name: Controlled same-subnet remote DCOM activation proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
 
     steps:
       - uses: actions/checkout@v4
@@ -36,37 +50,178 @@ jobs:
 
       - name: Fetch pipeline key
         id: runtime-secrets
-        shell: pwsh
+        shell: bash
         run: |
-          $pipelineKey = az keyvault secret show --vault-name "$env:KEY_VAULT" --name pipeline-api-key --query value -o tsv
-          Write-Output "::add-mask::$pipelineKey"
-          "pipeline_key=$pipelineKey" >> $env:GITHUB_OUTPUT
+          set -euo pipefail
+          pipeline_key="$(az keyvault secret show --vault-name "$KEY_VAULT" --name pipeline-api-key --query value -o tsv)"
+          echo "::add-mask::$pipeline_key"
+          echo "pipeline_key=$pipeline_key" >> "$GITHUB_OUTPUT"
 
-      - name: Generate proof credential
-        shell: pwsh
+      - name: Generate proof credentials
+        shell: bash
         run: |
-          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".ToCharArray()
-          $random = -join (1..28 | ForEach-Object { $chars | Get-Random })
-          $dcomPassword = "Dcom!" + $random
-          Write-Output "::add-mask::$dcomPassword"
-          "DCOM_PASSWORD=$dcomPassword" >> $env:GITHUB_ENV
+          set -euo pipefail
+          dcom_password="$(python - <<'PY'
+          import random, string
+          print("Dcom!" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(28)))
+          PY
+          )"
+          client_password="$(python - <<'PY'
+          import random, string
+          print("Client!" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(28)))
+          PY
+          )"
+          echo "::add-mask::$dcom_password"
+          echo "::add-mask::$client_password"
+          echo "DCOM_PASSWORD=$dcom_password" >> "$GITHUB_ENV"
+          echo "CLIENT_ADMIN_PASSWORD=$client_password" >> "$GITHUB_ENV"
 
-      - name: Run remote DCOM runtime proof
-        shell: pwsh
+      - name: Resolve bridge subnet and preflight Azure permissions
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci_artifacts/demo/windows/dcom
+          location="$(az group show --name "$RESOURCE_GROUP" --query location -o tsv)"
+          server_nic_id="$(az vm show --resource-group "$RESOURCE_GROUP" --name "$SERVER_VM_NAME" --query 'networkProfile.networkInterfaces[0].id' -o tsv)"
+          subnet_id="$(az network nic show --ids "$server_nic_id" --query 'ipConfigurations[0].subnet.id' -o tsv)"
+          server_private_ip="$(az network nic show --ids "$server_nic_id" --query 'ipConfigurations[0].privateIPAddress' -o tsv)"
+          requested_client="${{ github.event.inputs.client_vm_name }}"
+          if [ -n "$requested_client" ]; then
+            client_vm_name="$requested_client"
+            created_client="false"
+            az vm show --resource-group "$RESOURCE_GROUP" --name "$client_vm_name" --query id -o tsv >/dev/null
+          else
+            client_vm_name="mcp-dcom-${GITHUB_RUN_ID}"
+            created_client="true"
+          fi
+          client_nic_name="${client_vm_name}-nic"
+          client_os_disk_name="${client_vm_name}-osdisk"
+          {
+            echo "LOCATION=$location"
+            echo "SERVER_NIC_ID=$server_nic_id"
+            echo "SUBNET_ID=$subnet_id"
+            echo "SERVER_PRIVATE_IP=$server_private_ip"
+            echo "CLIENT_VM_NAME=$client_vm_name"
+            echo "CLIENT_NIC_NAME=$client_nic_name"
+            echo "CLIENT_OS_DISK_NAME=$client_os_disk_name"
+            echo "CLIENT_VM_CREATED=$created_client"
+          } >> "$GITHUB_ENV"
+          export LOCATION="$location"
+          export SERVER_NIC_ID="$server_nic_id"
+          export SUBNET_ID="$subnet_id"
+          export SERVER_PRIVATE_IP="$server_private_ip"
+          export CLIENT_VM_NAME="$client_vm_name"
+          export CLIENT_NIC_NAME="$client_nic_name"
+          export CLIENT_OS_DISK_NAME="$client_os_disk_name"
+          export CLIENT_VM_CREATED="$created_client"
+          python - <<'PY'
+          import json, os, pathlib
+          pathlib.Path("ci_artifacts/demo/windows/dcom").mkdir(parents=True, exist_ok=True)
+          pathlib.Path("ci_artifacts/demo/windows/dcom/azure-preflight.json").write_text(json.dumps({
+              "resource_group": os.environ["RESOURCE_GROUP"],
+              "server_vm_name": os.environ["SERVER_VM_NAME"],
+              "server_nic_id": os.environ["SERVER_NIC_ID"],
+              "subnet_id": os.environ["SUBNET_ID"],
+              "server_private_ip": os.environ["SERVER_PRIVATE_IP"],
+              "client_vm_name": os.environ["CLIENT_VM_NAME"],
+              "client_nic_name": os.environ["CLIENT_NIC_NAME"],
+              "client_os_disk_name": os.environ["CLIENT_OS_DISK_NAME"],
+              "client_vm_created_by_workflow": os.environ["CLIENT_VM_CREATED"] == "true",
+              "preflight_passed": True,
+          }, indent=2), encoding="utf-8")
+          PY
+
+      - name: Create same-subnet temporary Windows client VM
+        if: env.CLIENT_VM_CREATED == 'true'
+        shell: bash
         timeout-minutes: 20
         run: |
-          python scripts/ci_verify.py windows-remote-dcom-runtime-proof `
-            --resource-group "$env:RESOURCE_GROUP" `
-            --server-vm-name "$env:SERVER_VM_NAME" `
-            --client-mode local `
-            --server-target "$env:SERVER_PUBLIC_TARGET" `
-            --dcom-username "mcpdcom" `
-            --dcom-password "$env:DCOM_PASSWORD" `
-            --base-url "$env:PIPELINE_URL" `
-            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" `
-            --out ci_artifacts/demo/windows/dcom/dcom.summary.json `
-            --artifact-dir ci_artifacts/demo/windows/dcom `
-            --sentinel "MCP_FACTORY_REMOTE_DCOM_${{ github.run_id }}"
+          set -euo pipefail
+          computer_name="dcom${GITHUB_RUN_ID: -10}"
+          az network nic create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CLIENT_NIC_NAME" \
+            --location "$LOCATION" \
+            --subnet "$SUBNET_ID" \
+            --tags purpose=mcp-factory-remote-dcom github-run-id="${GITHUB_RUN_ID}" \
+            --only-show-errors
+          az vm create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CLIENT_VM_NAME" \
+            --computer-name "$computer_name" \
+            --location "$LOCATION" \
+            --image Win2022Datacenter \
+            --size "${{ github.event.inputs.client_vm_size }}" \
+            --admin-username "$CLIENT_ADMIN_USERNAME" \
+            --admin-password "$CLIENT_ADMIN_PASSWORD" \
+            --nics "$CLIENT_NIC_NAME" \
+            --os-disk-name "$CLIENT_OS_DISK_NAME" \
+            --storage-sku Standard_LRS \
+            --tags purpose=mcp-factory-remote-dcom github-run-id="${GITHUB_RUN_ID}" \
+            --only-show-errors
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CLIENT_VM_NAME" \
+            --command-id RunPowerShellScript \
+            --scripts '$env:COMPUTERNAME' \
+            --query value[0].message -o tsv
+
+      - name: Run same-subnet remote DCOM runtime proof
+        shell: bash
+        timeout-minutes: 24
+        run: |
+          set -euo pipefail
+          python scripts/ci_verify.py windows-remote-dcom-runtime-proof \
+            --resource-group "$RESOURCE_GROUP" \
+            --server-vm-name "$SERVER_VM_NAME" \
+            --client-mode azure-vm \
+            --client-vm-name "$CLIENT_VM_NAME" \
+            --dcom-username "mcpdcom" \
+            --dcom-password "$DCOM_PASSWORD" \
+            --base-url "$PIPELINE_URL" \
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
+            --out ci_artifacts/demo/windows/dcom/dcom.summary.json \
+            --artifact-dir ci_artifacts/demo/windows/dcom \
+            --sentinel "MCP_FACTORY_REMOTE_DCOM_${GITHUB_RUN_ID}"
+
+      - name: Cleanup temporary Windows client VM
+        if: always() && env.CLIENT_VM_CREATED == 'true' && github.event.inputs.keep_client_vm != 'true'
+        shell: bash
+        timeout-minutes: 12
+        run: |
+          set +e
+          mkdir -p ci_artifacts/demo/windows/dcom
+          if az vm show --resource-group "$RESOURCE_GROUP" --name "$CLIENT_VM_NAME" -o none 2>/dev/null; then
+            az vm delete --resource-group "$RESOURCE_GROUP" --name "$CLIENT_VM_NAME" --yes --force-deletion true
+          fi
+          az network nic delete --resource-group "$RESOURCE_GROUP" --name "$CLIENT_NIC_NAME"
+          az disk delete --resource-group "$RESOURCE_GROUP" --name "$CLIENT_OS_DISK_NAME" --yes
+          python - <<'PY'
+          import json, os, pathlib
+          pathlib.Path("ci_artifacts/demo/windows/dcom/azure-client-cleanup.json").write_text(json.dumps({
+              "client_vm_name": os.environ.get("CLIENT_VM_NAME"),
+              "client_nic_name": os.environ.get("CLIENT_NIC_NAME"),
+              "client_os_disk_name": os.environ.get("CLIENT_OS_DISK_NAME"),
+              "attempted": True,
+              "kept_for_debugging": False,
+          }, indent=2), encoding="utf-8")
+          PY
+
+      - name: Record skipped cleanup for retained or external client
+        if: always() && (env.CLIENT_VM_CREATED != 'true' || github.event.inputs.keep_client_vm == 'true')
+        shell: bash
+        run: |
+          mkdir -p ci_artifacts/demo/windows/dcom
+          python - <<'PY'
+          import json, os, pathlib
+          pathlib.Path("ci_artifacts/demo/windows/dcom/azure-client-cleanup.json").write_text(json.dumps({
+              "client_vm_name": os.environ.get("CLIENT_VM_NAME"),
+              "attempted": False,
+              "client_vm_created_by_workflow": os.environ.get("CLIENT_VM_CREATED") == "true",
+              "kept_for_debugging": "${{ github.event.inputs.keep_client_vm }}" == "true",
+          }, indent=2), encoding="utf-8")
+          PY
 
       - name: Upload remote DCOM runtime artifacts
         if: always()
