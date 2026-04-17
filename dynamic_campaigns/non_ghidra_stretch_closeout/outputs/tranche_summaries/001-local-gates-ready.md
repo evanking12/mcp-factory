@@ -19,6 +19,10 @@ Implemented:
 - Fourth focused run `24574950877` showed the runner did not tolerate querying
   `az network nic create` output directly. The workflow now creates the NIC with
   no output and resolves the NIC ID with `az network nic show`.
+- Fifth focused run `24575014827` still failed during `az vm create` with Azure
+  CLI JSON parsing error `Extra data: line 1 column 4`, matching the known image
+  alias resolution failure pattern. The workflow now uses the fully qualified
+  Windows Server image URN instead of the `Win2022Datacenter` alias.
 - Full Sponsor Demo E2E accepts `remote_dcom_run_id` and imports the focused
   `sponsor-remote-dcom-runtime` artifact.
 - Final Sponsor Demo summary can require Remote DCOM with
