@@ -5,6 +5,8 @@ Implement the full stretch runtime and binary recovery campaign sequentially.
 Current baseline is canonical green Sponsor Demo E2E run `24568108685`. Preserve
 it as the fallback until a newer full stretch run passes.
 
+Current frontier: `003-corba-orb-runtime`.
+
 Do not advance until the current tranche has tests, artifacts, campaign
 writeback, and focused workflow evidence. If a hard runtime cannot be made
 truthful, stop at that tranche and write a blocker instead of downgrading the
@@ -43,4 +45,3 @@ Final claim allowed only if the final green artifact proves it:
 > ORB/IIOP, RPC, controlled remote DCOM, and evidence-ranked undocumented binary
 > recovery. Every required proof produces a generated schema, GPT tool call,
 > backend tool result, transcript, and downloadable artifact.
-

@@ -1,7 +1,6 @@
 # Tranche 002 Summary
 
-Status: local implementation complete; focused workflow evidence pending after
-deploy.
+Status: complete.
 
 Scope:
 - Added a controlled LDAPv3-compatible TCP runtime in `api/ldap_runtime.py`.
@@ -21,13 +20,28 @@ Local validation:
 - Local API proof passed:
   `python scripts/ci_verify.py ldap-runtime-proof --base-url http://127.0.0.1:8765 ...`
 
-Focused workflow gate:
-- Pending until this branch is committed, pushed, deployed, and
-  `sponsor-ldap-runtime.yml` passes against the pipeline ACA.
-- The campaign must not advance to `003-corba-orb-runtime` until that focused
-  workflow evidence is recorded here.
+Focused workflow evidence:
+- Contract CI passed: https://github.com/evanking12/mcp-factory/actions/runs/24570386986
+- Deploy Pipeline passed: https://github.com/evanking12/mcp-factory/actions/runs/24570386969
+- Deploy UI passed: https://github.com/evanking12/mcp-factory/actions/runs/24570386940
+- Focused LDAP runtime proof passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24570500327
+- Focused JNDI GPT proof passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24570531288
+
+Downloaded artifact checks from run `24570531288`:
+- `legacy-runtime-matrix/summary.json` has `ldap_runtime.passed=true`.
+- `legacy-runtime-matrix/summary.json` has
+  `ldap_runtime.runtime_mode=ldap_runtime`.
+- `legacy-runtime-matrix/summary.json` has
+  `ldap_runtime.wire_protocol=ldapv3`.
+- `gpt-format-matrix/jndi/summary.json` has `passed=true`,
+  `tool_call_seen=true`, `tool_result_seen=true`, `sentinel_seen=true`, and
+  `downloaded_schema_exists=true`.
 
 Truthful claim after focused workflow passes:
 - JNDI/LDAP has a controlled LDAPv3-compatible runtime proof for deterministic
   Contoso bind/search/lookup.
 - This is not an enterprise directory migration claim.
+
+Next tranche: `003-corba-orb-runtime`.
