@@ -447,6 +447,20 @@ def _execute_legacy_contract(kind: str, endpoint: str, name: str, args: dict, ex
         return _provider_required(labels.get(kind, "legacy provider"), name, f"Legacy provider unreachable: {exc}.")
 
 
+def _execute_observed_result(execution: dict, name: str, args: dict) -> str:
+    result = {
+        "proof_level": "tool_result_observed",
+        "tool": name,
+        "target_label": execution.get("target_label") or execution.get("label") or "",
+        "artifact_path": execution.get("artifact_path") or "",
+        "summary_path": execution.get("summary_path") or "",
+        "source": execution.get("source") or "windows_bridge_summary",
+        "observed_result": execution.get("observed_result") or execution.get("result") or "Windows discovery proof was observed.",
+        "args": args or {},
+    }
+    return json.dumps(result, indent=2)
+
+
 def _is_windows_path(value: str) -> bool:
     return bool(value and (":\\" in value or value.startswith("\\\\")))
 
@@ -581,4 +595,6 @@ def _execute_tool(inv: dict, args: dict) -> str:
         return _execute_legacy_contract("corba", f"corba/{name}", name, args, execution)
     if method == "jndi_lookup":
         return _execute_legacy_contract("jndi", "jndi/lookup", name, args, execution)
+    if method == "observed_result":
+        return _execute_observed_result(execution, name, args)
     return _execute_cli(execution, name, args)

@@ -1,0 +1,76 @@
+name: Sponsor Windows GPT Matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Sponsor Demo E2E run ID containing Windows discovery artifacts"
+        type: string
+        default: "24542583216"
+      only_target:
+        description: "Optional Windows GPT target label, for example notepad_exe"
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+env:
+  RESOURCE_GROUP: mcp-factory-rg
+  KEY_VAULT: mcp-factory-kv
+  PIPELINE_URL: https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
+
+jobs:
+  windows-gpt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download sponsor Windows artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ci_artifacts/demo
+          gh run download "${{ inputs.source_run_id }}" \
+            --repo evanking12/mcp-factory \
+            --name sponsor-demo-e2e \
+            --dir ci_artifacts/demo
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch pipeline key
+        id: runtime-secrets
+        run: |
+          pipeline_key="$(az keyvault secret show --vault-name "$KEY_VAULT" --name pipeline-api-key --query value -o tsv)"
+          echo "::add-mask::$pipeline_key"
+          echo "pipeline_key=$pipeline_key" >> "$GITHUB_OUTPUT"
+
+      - name: Run Windows GPT matrix
+        run: |
+          python scripts/ci_verify.py windows-gpt-tool-matrix \
+            --base-url "$PIPELINE_URL" \
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
+            --windows-dir ci_artifacts/demo/windows \
+            --artifact-dir ci_artifacts/demo/windows-gpt \
+            --only-target "${{ inputs.only_target }}"
+
+      - name: Upload Windows GPT matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponsor-windows-gpt-matrix
+          path: ci_artifacts/demo/windows-gpt
+          if-no-files-found: error

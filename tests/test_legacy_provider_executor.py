@@ -40,6 +40,18 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     assert sentinel in client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/Contoso", "sentinel": sentinel}).text
 
 
+def test_jsonrpc_runtime_returns_standard_errors() -> None:
+    client = _client()
+
+    invalid = client.post("/api/legacy/jsonrpc", json={"jsonrpc": "1.0", "method": "getCustomer", "id": 8})
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == -32600
+
+    missing = client.post("/api/legacy/jsonrpc", json={"jsonrpc": "2.0", "method": "missingMethod", "id": 9})
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == -32601
+
+
 class _Resp:
     def __init__(self, text: str, status_code: int = 200, payload: dict | None = None) -> None:
         self.text = text
@@ -112,3 +124,22 @@ def test_executor_routes_sql_corba_rpc_jndi_to_legacy_provider(monkeypatch) -> N
     for inv, suffix in cases:
         assert "MCP_FACTORY_LEGACY" in executor._execute_tool(inv, {"sentinel": "MCP_FACTORY_LEGACY"})
         assert urls[-1].endswith(suffix)
+
+
+def test_executor_observed_result_returns_windows_summary_payload() -> None:
+    result = executor._execute_tool(
+        {
+            "name": "notepad_exe_observed_result",
+            "execution": {
+                "method": "observed_result",
+                "target_label": "notepad_exe",
+                "artifact_path": "ci_artifacts/demo/windows/notepad_exe/notepad_exe.summary.json",
+                "observed_result": {"matched_invocable_count": 4, "passed": True},
+            },
+        },
+        {"acknowledgement": "confirm"},
+    )
+    data = json.loads(result)
+    assert data["proof_level"] == "tool_result_observed"
+    assert data["target_label"] == "notepad_exe"
+    assert data["observed_result"]["matched_invocable_count"] == 4

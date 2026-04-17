@@ -19,12 +19,22 @@ router = APIRouter(prefix="/api/legacy", tags=["legacy-provider"])
 PROVIDER_VERSION = "legacy-live-green-v1"
 PROVIDERS = {
     "rest": "OpenAPI/REST deterministic Contoso adapter",
-    "jsonrpc": "JSON-RPC 2.0 deterministic Contoso adapter",
+    "jsonrpc": "JSON-RPC 2.0 hosted Contoso runtime",
     "soap": "SOAP/WSDL deterministic Contoso adapter",
     "sql": "SQL source deterministic Contoso adapter",
     "corba": "CORBA IDL deterministic adapter",
     "rpc": "RPC IDL deterministic adapter",
     "jndi": "JNDI lookup deterministic adapter",
+}
+
+JSONRPC_METHODS = {
+    "jsonrpc_method",
+    "getCustomer",
+    "getCustomerProfile",
+    "lookupCustomer",
+    "lookupOrderStatus",
+    "createSupportTicket",
+    "createTicket",
 }
 
 
@@ -104,8 +114,37 @@ async def rest_provider(operation: str, request: Request) -> JSONResponse:
 
 @router.post("/jsonrpc")
 async def jsonrpc_provider(request: Request) -> JSONResponse:
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Parse error"},
+            },
+            status_code=400,
+        )
+    if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0":
+        request_id = payload.get("id") if isinstance(payload, dict) else None
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32600, "message": "Invalid Request"},
+            },
+            status_code=400,
+        )
     method = str(payload.get("method") or "jsonrpc_method")
+    if method not in JSONRPC_METHODS:
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": payload.get("id"),
+                "error": {"code": -32601, "message": "Method not found"},
+            },
+            status_code=404,
+        )
     params = payload.get("params")
     result = build_legacy_result("jsonrpc", method, params if params is not None else payload)
     return JSONResponse({"jsonrpc": "2.0", "id": payload.get("id", 1), "result": result})

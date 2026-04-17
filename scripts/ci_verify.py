@@ -26,7 +26,16 @@ ROOT = Path(__file__).resolve().parents[1]
 DISCOVERY_MAIN = ROOT / "src" / "discovery" / "main.py"
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "scripts"
 SPONSOR_MANIFEST = ROOT / "tests" / "fixtures" / "sponsor" / "sponsor-binary-manifest.json"
+SPONSOR_REPO_FIXTURE = ROOT / "tests" / "fixtures" / "sponsor_repo_fixture"
 BRIDGE_ACTIVITY_BLOB = "_vm/last_bridge_activity.json"
+
+WINDOWS_GPT_PROOF_TARGETS = [
+    "kernel32_dll",
+    "notepad_exe",
+    "stdole2_tlb",
+    "registry_contoso",
+    "system32_directory",
+]
 
 DEFAULT_FIXTURES = [
     "sample_openapi.yaml",
@@ -106,6 +115,8 @@ def cmd_validate_mcp_schema(args: argparse.Namespace) -> int:
 def _run_discovery_fixture(target: Path, out_dir: Path) -> tuple[Path, list[dict]]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src" / "discovery")
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     cmd = [
         sys.executable,
         str(DISCOVERY_MAIN),
@@ -285,6 +296,70 @@ def _provider_required_seen(text: str) -> bool:
         or "requires a configured backing" in lowered
         or "requires a live" in lowered
     )
+
+
+def _call_generated_tool_with_gpt(
+    *,
+    base_url: str,
+    pipeline_key: str,
+    job_id: str,
+    component_name: str,
+    selected: dict,
+    artifact_dir: Path,
+    prompt: str,
+    chat_timeout: int,
+) -> dict:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(artifact_dir / "selected-invocable.json", selected)
+    gen = _http_json(
+        "POST",
+        f"{base_url.rstrip('/')}/api/generate",
+        key=pipeline_key or "",
+        body={"job_id": job_id, "component_name": component_name, "selected": [selected]},
+        timeout=120,
+    )
+    schema = gen.get("mcp_schema") or {}
+    tools = _validate_mcp_schema(schema, min_tools=1, label=f"{component_name} generated schema")
+    _write_json(artifact_dir / "generated-mcp-schema.json", schema)
+
+    downloaded_schema_ok = False
+    try:
+        (artifact_dir / "downloaded-mcp-schema.json").write_bytes(
+            _http_bytes(
+                "GET",
+                f"{base_url.rstrip('/')}/api/download/{job_id}/mcp_schema.json",
+                key=pipeline_key or "",
+                timeout=60,
+            )
+        )
+        downloaded_schema_ok = True
+    except Exception as exc:
+        (artifact_dir / "downloaded-mcp-schema.error.txt").write_text(str(exc), encoding="utf-8")
+
+    raw_chat = _http_bytes(
+        "POST",
+        f"{base_url.rstrip('/')}/api/chat",
+        key=pipeline_key or "",
+        body=json.dumps({
+            "job_id": job_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": tools,
+            "invocables": [selected],
+        }).encode("utf-8"),
+        content_type="application/json",
+        timeout=chat_timeout,
+    ).decode("utf-8", errors="replace")
+    events = _parse_sse(raw_chat)
+    tool_results = [evt for evt in events if evt.get("type") == "tool_result"]
+    return {
+        "schema": schema,
+        "tools": tools,
+        "events": events,
+        "tool_results": tool_results,
+        "tool_call_seen": any(evt.get("type") == "tool_call" for evt in events),
+        "tool_result_seen": bool(tool_results),
+        "downloaded_schema_exists": downloaded_schema_ok,
+    }
 
 
 def _safe_target_name(target: str) -> str:
@@ -1442,6 +1517,267 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     return 0
 
 
+def _windows_observed_invocable(label: str, summary: dict) -> dict:
+    description = (
+        f"Return the recorded Windows bridge discovery proof for {label}. "
+        "This is a generated proof tool for sponsor CI; it observes the discovery artifact and does not claim "
+        "semantic execution of arbitrary Windows system binaries."
+    )
+    observed = {
+        "label": label,
+        "target": summary.get("target"),
+        "category": summary.get("category"),
+        "passed": summary.get("passed"),
+        "matched_invocable_count": summary.get("matched_invocable_count"),
+        "invocable_count": summary.get("invocable_count"),
+        "first_20_invocable_names": summary.get("first_20_invocable_names") or [],
+        "timeout_or_failure_classification": summary.get("timeout_or_failure_classification") or "",
+    }
+    return {
+        "name": f"{label}_observed_result",
+        "source_type": "windows_bridge_observed_result",
+        "description": description,
+        "parameters": [
+            {
+                "name": "acknowledgement",
+                "type": "string",
+                "description": "Short note confirming the Windows target proof being requested.",
+            }
+        ],
+        "execution": {
+            "method": "observed_result",
+            "target_label": label,
+            "artifact_path": f"ci_artifacts/demo/windows/{label}/{label}.summary.json",
+            "summary_path": summary.get("summary_path") or f"ci_artifacts/demo/windows/{label}/{label}.summary.json",
+            "source": "windows_bridge_summary",
+            "observed_result": observed,
+        },
+    }
+
+
+def cmd_windows_gpt_tool_matrix(args: argparse.Namespace) -> int:
+    base_url = args.base_url.rstrip("/")
+    windows_dir = Path(args.windows_dir)
+    out_root = Path(args.artifact_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+    targets = [args.only_target] if args.only_target else list(WINDOWS_GPT_PROOF_TARGETS)
+    summaries: list[dict] = []
+
+    for label in targets:
+        case_dir = out_root / label
+        case_dir.mkdir(parents=True, exist_ok=True)
+        started = time.perf_counter()
+        item = {
+            "id": label,
+            "proof_level": "tool_result_observed",
+            "passed": False,
+            "discovery_summary_exists": False,
+            "selected_invocable_exists": False,
+            "generated_schema_exists": False,
+            "downloaded_schema_exists": False,
+            "tool_call_seen": False,
+            "tool_result_seen": False,
+            "transcript_exists": False,
+            "job_id": "",
+            "selected_tool": "",
+            "error": "",
+            "elapsed_seconds": 0.0,
+        }
+        summary_path = windows_dir / label / f"{label}.summary.json"
+        print(f"START Windows GPT proof {label}: summary={summary_path}")
+        try:
+            if not summary_path.exists():
+                raise AssertionError(f"Windows discovery summary missing: {summary_path}")
+            item["discovery_summary_exists"] = True
+            summary = _load_json(summary_path)
+            if not summary.get("passed"):
+                raise AssertionError(f"Windows discovery summary did not pass: {summary_path}")
+            if int(summary.get("matched_invocable_count") or 0) < 1:
+                raise AssertionError(f"Windows discovery summary has no matched invocables: {summary_path}")
+            selected = _windows_observed_invocable(label, summary)
+            item["selected_tool"] = selected["name"]
+            item["selected_invocable_exists"] = True
+            job_id = f"win-{label}-{uuid.uuid4().hex[:8]}"
+            item["job_id"] = job_id
+            tool_name = _safe_tool_name(selected["name"])
+            proof = _call_generated_tool_with_gpt(
+                base_url=base_url,
+                pipeline_key=args.pipeline_key or "",
+                job_id=job_id,
+                component_name=f"windows-{label}-{job_id}",
+                selected=selected,
+                artifact_dir=case_dir,
+                prompt=(
+                    f"Call the tool named {tool_name} now. "
+                    f"It must return the recorded Windows bridge discovery proof for {label}. "
+                    "Do not just say done."
+                ),
+                chat_timeout=args.chat_timeout,
+            )
+            item["generated_schema_exists"] = bool(proof["tools"])
+            item["downloaded_schema_exists"] = bool(proof["downloaded_schema_exists"])
+            item["tool_call_seen"] = bool(proof["tool_call_seen"])
+            item["tool_result_seen"] = bool(proof["tool_result_seen"])
+            transcript = {
+                "case_id": label,
+                "job_id": job_id,
+                "proof_level": "tool_result_observed",
+                "selected_tool": selected["name"],
+                "source_summary": str(summary_path),
+                "events": proof["events"],
+            }
+            _write_json(case_dir / "transcript.json", transcript)
+            item["transcript_exists"] = True
+            if not item["tool_call_seen"]:
+                raise AssertionError("GPT did not emit a tool_call")
+            if not item["tool_result_seen"]:
+                raise AssertionError("tool_result event missing")
+            if not item["downloaded_schema_exists"]:
+                raise AssertionError("downloaded MCP schema artifact missing")
+            item["passed"] = True
+        except Exception as exc:
+            item["error"] = str(exc)
+            (case_dir / "error.txt").write_text(str(exc), encoding="utf-8")
+        finally:
+            item["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+            _write_json(case_dir / "summary.json", item)
+            summaries.append(item)
+            print(
+                f"{'OK' if item['passed'] else 'FAIL'} Windows GPT {label}: "
+                f"tool_call={item['tool_call_seen']} tool_result={item['tool_result_seen']} "
+                f"elapsed={item['elapsed_seconds']}s"
+            )
+
+    failures = [item for item in summaries if not item.get("passed")]
+    aggregate = {
+        "cases": summaries,
+        "total": len(summaries),
+        "passed": len(summaries) - len(failures),
+        "failures": len(failures),
+        "failed_ids": [item["id"] for item in failures],
+        "proof_level": "tool_result_observed",
+        "targets": targets,
+    }
+    _write_json(out_root / "summary.json", aggregate)
+    if failures:
+        raise AssertionError(f"{len(failures)} Windows GPT tool proof case(s) failed: {aggregate['failed_ids']}")
+    print(f"OK Windows GPT tool matrix: {len(summaries)} case(s), artifacts={out_root}")
+    return 0
+
+
+def _select_repo_fixture_invocable(invocables: list[dict]) -> dict:
+    for inv in invocables:
+        if inv.get("name") == "repo_echo_sentinel":
+            return inv
+    for inv in invocables:
+        if str(inv.get("source_type", "")).lower() in {"python", "python_script", "script"}:
+            return inv
+    if invocables:
+        return invocables[0]
+    raise AssertionError("repo fixture discovery produced no invocables")
+
+
+def cmd_repo_ingestion_gpt_proof(args: argparse.Namespace) -> int:
+    base_url = args.base_url.rstrip("/")
+    target_dir = Path(args.target_dir)
+    out_root = Path(args.artifact_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+    sentinel = args.sentinel or f"MCP_FACTORY_REPO_{uuid.uuid4().hex[:8]}"
+    item = {
+        "id": "sponsor_repo_fixture",
+        "proof_level": "repo_live_execution",
+        "passed": False,
+        "target_dir": str(target_dir),
+        "discovery_artifact": "",
+        "invocable_count": 0,
+        "selected_tool": "",
+        "job_id": "",
+        "tool_call_seen": False,
+        "tool_result_seen": False,
+        "sentinel_seen": False,
+        "downloaded_schema_exists": False,
+        "generated_schema_exists": False,
+        "error": "",
+        "elapsed_seconds": 0.0,
+    }
+    started = time.perf_counter()
+    try:
+        if not target_dir.exists() or not target_dir.is_dir():
+            raise AssertionError(f"repo fixture directory missing: {target_dir}")
+        discovery_dir = out_root / "discovery"
+        if discovery_dir.exists():
+            shutil.rmtree(discovery_dir)
+        discovery_dir.mkdir(parents=True, exist_ok=True)
+        artifact, invocables = _run_discovery_fixture(target_dir, discovery_dir)
+        item["discovery_artifact"] = str(artifact)
+        item["invocable_count"] = len(invocables)
+        if len(invocables) < args.min_invocables:
+            raise AssertionError(f"repo fixture expected at least {args.min_invocables} invocables, found {len(invocables)}")
+        selected = _select_repo_fixture_invocable(invocables)
+        if not selected.get("parameters"):
+            selected = {
+                **selected,
+                "parameters": [{"name": "sentinel", "type": "string", "description": "Deterministic repo proof sentinel"}],
+            }
+        item["selected_tool"] = str(selected.get("name") or "")
+        job_id = f"repo-{uuid.uuid4().hex[:8]}"
+        item["job_id"] = job_id
+        tool_name = _safe_tool_name(item["selected_tool"])
+        proof = _call_generated_tool_with_gpt(
+            base_url=base_url,
+            pipeline_key=args.pipeline_key or "",
+            job_id=job_id,
+            component_name=f"repo-fixture-{job_id}",
+            selected=selected,
+            artifact_dir=out_root,
+            prompt=(
+                f"Call the tool named {tool_name} now. "
+                f"Use this exact sentinel string for every required string argument: {sentinel}. "
+                f"The successful tool output must contain this sentinel: {sentinel}. "
+                "Do not just say done."
+            ),
+            chat_timeout=args.chat_timeout,
+        )
+        tool_results = proof["tool_results"]
+        result_text = "\n".join(str(evt.get("result", "")) for evt in tool_results)
+        item["tool_call_seen"] = bool(proof["tool_call_seen"])
+        item["tool_result_seen"] = bool(proof["tool_result_seen"])
+        item["sentinel_seen"] = sentinel in result_text
+        item["downloaded_schema_exists"] = bool(proof["downloaded_schema_exists"])
+        item["generated_schema_exists"] = bool(proof["tools"])
+        _write_json(out_root / "transcript.json", {
+            "case_id": item["id"],
+            "job_id": job_id,
+            "sentinel": sentinel,
+            "proof_level": item["proof_level"],
+            "selected_tool": item["selected_tool"],
+            "events": proof["events"],
+        })
+        if not item["tool_call_seen"]:
+            raise AssertionError("GPT did not emit a tool_call")
+        if not item["tool_result_seen"]:
+            raise AssertionError("tool_result event missing")
+        if not item["sentinel_seen"]:
+            raise AssertionError("sentinel not found in repo fixture tool_result")
+        if not item["downloaded_schema_exists"]:
+            raise AssertionError("downloaded MCP schema artifact missing")
+        item["passed"] = True
+    except Exception as exc:
+        item["error"] = str(exc)
+        (out_root / "error.txt").write_text(str(exc), encoding="utf-8")
+    finally:
+        item["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+        _write_json(out_root / "summary.json", item)
+    print(
+        f"{'OK' if item['passed'] else 'FAIL'} repo ingestion GPT proof: "
+        f"invocables={item['invocable_count']} tool_call={item['tool_call_seen']} "
+        f"tool_result={item['tool_result_seen']} sentinel={item['sentinel_seen']}"
+    )
+    if not item["passed"]:
+        raise AssertionError(f"repo ingestion GPT proof failed: {item['error']}")
+    return 0
+
+
 def _run_bridge_case(
     *,
     bridge_url: str,
@@ -1990,6 +2326,8 @@ def _build_requirement_matrix(
     non_vm_counts: dict,
     windows_counts: dict,
     gpt_matrix: dict,
+    windows_gpt: dict,
+    repo_ingestion: dict,
     schema_tool_count: int,
     job_id: str,
 ) -> list[dict]:
@@ -2002,6 +2340,8 @@ def _build_requirement_matrix(
     windows_ok = windows_counts.get("required_failed") == 0 and windows_counts.get("required_total", 0) > 0
     non_vm_ok = non_vm_counts.get("failed") == 0 and non_vm_counts.get("total", 0) > 0
     gpt_tool_ok = bool(checks.get("gpt_tool_call_seen") and checks.get("gpt_sentinel_seen") and schema_tool_count > 0)
+    windows_gpt_ok = int(windows_gpt.get("failures", 1)) == 0 and int(windows_gpt.get("total", 0)) > 0
+    repo_ok = bool(repo_ingestion.get("passed"))
     return [
         {
             "requirement": "1.a",
@@ -2013,8 +2353,9 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/windows/kernel32_dll/kernel32_dll.summary.json",
                 "ci_artifacts/demo/windows/notepad_exe/notepad_exe.summary.json",
                 "ci_artifacts/demo/windows/stdole2_tlb/stdole2_tlb.summary.json",
+                "ci_artifacts/demo/windows-gpt/summary.json",
             ],
-            "notes": "Broad cmd.exe scanning is optional diagnostic; deterministic CMD/BAT proof is covered by 1.e.",
+            "notes": "Bridge discovery is required; Windows GPT proof observes selected discovery artifacts without claiming arbitrary binary semantic recovery.",
         },
         {
             "requirement": "1.b",
@@ -2030,8 +2371,9 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/gpt-format-matrix/rpc_idl_contract/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/jndi/summary.json",
                 "ci_artifacts/demo/windows/stdole2_tlb/stdole2_tlb.summary.json",
+                "docs/sponsor/caveats.md",
             ],
-            "notes": "Legacy REST, JSON-RPC, SOAP, CORBA, RPC, JNDI, and SQL cases use deterministic hosted providers; COM/DCOM remains Windows discovery evidence.",
+            "notes": "JSON-RPC is hosted as a JSON-RPC 2.0 service. SOAP, CORBA, RPC, and JNDI remain deterministic adapter-backed; COM/TLB discovery is proven and remote DCOM activation is not claimed.",
         },
         {
             "requirement": "1.c",
@@ -2040,7 +2382,7 @@ def _build_requirement_matrix(
             "proof_type": "discovery",
             "status": _matrix_status(windows_ok),
             "artifact_paths": ["ci_artifacts/demo/windows/registry_contoso/registry_contoso.summary.json"],
-            "notes": "The CI target expects a Contoso registry invocable from HKLM inventory.",
+            "notes": "The CI target expects a Contoso registry invocable from HKLM inventory; Windows GPT proof adds a generated tool-call observation when present.",
         },
         {
             "requirement": "1.d",
@@ -2079,8 +2421,22 @@ def _build_requirement_matrix(
             "artifact_paths": [
                 "ci_artifacts/demo/non-vm/summary.json",
                 "ci_artifacts/demo/windows/system32_directory/system32_directory.summary.json",
+                "ci_artifacts/demo/repo-ingestion/summary.json",
             ],
-            "notes": "Installed paths must be accessible to the server or VM context that performs discovery.",
+            "notes": "Installed paths must be accessible to the server or VM context that performs discovery. Repo fixture proof covers the sponsor phrase 'existing dll, exe, cmd or a repo' when present.",
+        },
+        {
+            "requirement": "project.repo",
+            "summary": "An existing repo/folder can be profiled into invocables and a generated MCP tool.",
+            "implementation_surface": "Directory discovery scans a deterministic repository fixture, selects a repo-derived Python callable, generates schema, and GPT calls it.",
+            "proof_type": "live_execution",
+            "status": _matrix_status(repo_ok),
+            "artifact_paths": [
+                "tests/fixtures/sponsor_repo_fixture/",
+                "ci_artifacts/demo/repo-ingestion/summary.json",
+                "ci_artifacts/demo/repo-ingestion/transcript.json",
+            ],
+            "notes": "This proof is incremental hardening; the baseline file/path proofs remain required for the canonical sponsor gate.",
         },
         {
             "requirement": "2.b",
@@ -2174,6 +2530,9 @@ def _build_requirement_matrix(
             "status": _matrix_status(bool(checks.get("vm_deallocation_completed"))),
             "artifact_paths": [
                 "README.md",
+                "docs/sponsor/non-code-artifacts.md",
+                "docs/sponsor/proof-index.md",
+                "docs/sponsor/caveats.md",
                 "infra/",
                 "aspire/AppHost/Program.cs",
                 "ci_artifacts/demo/vm-deallocation.json",
@@ -2188,6 +2547,8 @@ def _build_requirement_matrix(
             "status": "pass",
             "artifact_paths": [
                 "dynamic_campaigns/sponsor_demo_closeout/",
+                "dynamic_campaigns/sponsor_pushback_hardening/",
+                "docs/sponsor/non-code-artifacts.md",
                 "README.md",
             ],
             "notes": "This is not CI-verifiable; final report records the process evidence location and remaining ownership boundary.",
@@ -2228,7 +2589,7 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
     return {
         "live_execution": {
             "cases": real_cases,
-            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution or a hosted legacy provider adapter.",
+            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution, the hosted JSON-RPC 2.0 runtime, or a hosted legacy provider adapter.",
         },
         "provider_required": {
             "cases": provider_cases,
@@ -2400,17 +2761,55 @@ def _append_mcp_llm_story(lines: list[str], story: dict) -> None:
         )
 
 
+def _append_windows_gpt_proofs(lines: list[str], windows_gpt: dict) -> None:
+    lines.extend(["", "## Windows GPT Tool-Call Proofs", ""])
+    if windows_gpt.get("missing"):
+        lines.append(f"Windows GPT proof matrix was not present in this artifact: `{windows_gpt.get('missing')}`.")
+        return
+    lines.append(
+        f"Summary: {windows_gpt.get('passed', 0)}/{windows_gpt.get('total', 0)} "
+        f"tool-result-observed proofs passed."
+    )
+    lines.append("")
+    lines.append("| Target | Status | Tool Call | Tool Result | Transcript | Proof Level |")
+    lines.append("|---|---|---:|---:|---:|---|")
+    for item in windows_gpt.get("cases") or []:
+        lines.append(
+            f"| {item.get('id')} | {'pass' if item.get('passed') else 'fail'} | "
+            f"{bool(item.get('tool_call_seen'))} | {bool(item.get('tool_result_seen'))} | "
+            f"{bool(item.get('transcript_exists'))} | {item.get('proof_level', 'tool_result_observed')} |"
+        )
+
+
+def _append_repo_ingestion_proof(lines: list[str], repo_ingestion: dict) -> None:
+    lines.extend(["", "## Repo Ingestion Proof", ""])
+    if repo_ingestion.get("missing"):
+        lines.append(f"Repo ingestion proof was not present in this artifact: `{repo_ingestion.get('missing')}`.")
+        return
+    lines.append(f"Status: {'PASS' if repo_ingestion.get('passed') else 'FAIL'}")
+    lines.append(f"- Fixture directory: `{repo_ingestion.get('target_dir', 'tests/fixtures/sponsor_repo_fixture')}`")
+    lines.append(f"- Invocables discovered: {repo_ingestion.get('invocable_count', 0)}")
+    lines.append(f"- Selected repo-derived tool: `{repo_ingestion.get('selected_tool') or '-'}`")
+    lines.append(f"- GPT tool call seen: {bool(repo_ingestion.get('tool_call_seen'))}")
+    lines.append(f"- Tool result seen: {bool(repo_ingestion.get('tool_result_seen'))}")
+    lines.append(f"- Sentinel seen: {bool(repo_ingestion.get('sentinel_seen'))}")
+
+
 def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     non_vm_path = Path(args.non_vm_summary)
     windows_path = Path(args.windows_summary)
     gpt_dir = Path(args.gpt_artifact_dir)
     gpt_matrix_path = Path(args.gpt_matrix_summary)
+    windows_gpt_path = Path(args.windows_gpt_summary)
+    repo_ingestion_path = Path(args.repo_ingestion_summary)
     deallocation_path = Path(args.vm_deallocation)
     out_path = Path(args.out)
 
     non_vm = _load_json(non_vm_path) if non_vm_path.exists() else {"cases": [], "failures": 1, "missing": str(non_vm_path)}
     windows = _load_json(windows_path) if windows_path.exists() else {"targets": [], "failures": 1, "missing": str(windows_path)}
     gpt_matrix = _load_json(gpt_matrix_path) if gpt_matrix_path.exists() else {"cases": [], "failures": 1, "missing": str(gpt_matrix_path)}
+    windows_gpt = _load_json(windows_gpt_path) if windows_gpt_path.exists() else {"cases": [], "failures": 0, "missing": str(windows_gpt_path)}
+    repo_ingestion = _load_json(repo_ingestion_path) if repo_ingestion_path.exists() else {"passed": False, "missing": str(repo_ingestion_path)}
     transcript_path = gpt_dir / "transcript.json"
     selected_path = gpt_dir / "selected-invocable.json"
     generated_schema_path = gpt_dir / "generated-mcp-schema.json"
@@ -2456,15 +2855,23 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "generated_schema_exists": generated_schema_path.exists() and schema_tool_count > 0,
         "downloaded_schema_exists": downloaded_schema_path.exists(),
         "job_history_exists": job_history_path.exists(),
+        "windows_gpt_tool_matrix_passed": int(windows_gpt.get("failures", 1)) == 0 and int(windows_gpt.get("total", 0)) > 0,
+        "repo_ingestion_proof_passed": bool(repo_ingestion.get("passed")),
         "vm_deallocation_attempted": bool(deallocation.get("attempted")),
         "vm_deallocation_completed": bool(deallocation.get("completed")),
     }
-    passed = all(checks.values())
+    gate_checks = {
+        key: value for key, value in checks.items()
+        if key not in {"windows_gpt_tool_matrix_passed", "repo_ingestion_proof_passed"}
+    }
+    passed = all(gate_checks.values())
     requirement_matrix = _build_requirement_matrix(
         checks=checks,
         non_vm_counts=non_vm_counts,
         windows_counts=windows_counts,
         gpt_matrix=gpt_matrix,
+        windows_gpt=windows_gpt,
+        repo_ingestion=repo_ingestion,
         schema_tool_count=schema_tool_count,
         job_id=job_id,
     )
@@ -2473,6 +2880,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "non_vm_summary": str(non_vm_path),
         "windows_summary": str(windows_path),
         "gpt_format_matrix_summary": str(gpt_matrix_path),
+        "windows_gpt_summary": str(windows_gpt_path),
+        "repo_ingestion_summary": str(repo_ingestion_path),
         "transcript": str(transcript_path),
         "selected_invocable": str(selected_path),
         "generated_schema": str(generated_schema_path),
@@ -2507,6 +2916,23 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "not_live_executed_because_provider_required": gpt_matrix.get("not_live_executed_because_provider_required", []),
             "all_required_cases_live_execution": bool(gpt_matrix.get("all_required_cases_live_execution")),
         },
+        "windows_gpt_tool_matrix": {
+            "total": windows_gpt.get("total", 0),
+            "passed": windows_gpt.get("passed", 0),
+            "failures": windows_gpt.get("failures", 0),
+            "failed_ids": windows_gpt.get("failed_ids", []),
+            "proof_level": windows_gpt.get("proof_level", "tool_result_observed"),
+            "missing": windows_gpt.get("missing", ""),
+        },
+        "repo_ingestion": {
+            "passed": bool(repo_ingestion.get("passed")),
+            "invocable_count": repo_ingestion.get("invocable_count", 0),
+            "selected_tool": repo_ingestion.get("selected_tool", ""),
+            "tool_call_seen": bool(repo_ingestion.get("tool_call_seen")),
+            "tool_result_seen": bool(repo_ingestion.get("tool_result_seen")),
+            "sentinel_seen": bool(repo_ingestion.get("sentinel_seen")),
+            "missing": repo_ingestion.get("missing", ""),
+        },
         "gpt": {
             "job_id": job_id,
             "selected_tool": selected_tool,
@@ -2536,6 +2962,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             f"- GPT format matrix: {gpt_matrix_passed}/{gpt_matrix_total} passed",
             f"- Real execution format proofs: {gpt_matrix.get('real_execution_passed', 0)}/{gpt_matrix.get('real_execution_total', 0)}",
             f"- Provider-required tool-call proofs: {gpt_matrix.get('provider_required_tool_call_passed', 0)}/{gpt_matrix.get('provider_required_total', 0)}",
+            f"- Windows GPT tool-result-observed proofs: {windows_gpt.get('passed', 0)}/{windows_gpt.get('total', 0)}",
+            f"- Repo ingestion GPT proof passed: {bool(repo_ingestion.get('passed'))}",
             f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
             f"- Sentinel seen in tool result: {checks['gpt_sentinel_seen']}",
             f"- Generated schema tools: {schema_tool_count}",
@@ -2560,6 +2988,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             )
         _append_proof_semantics(lines, proof_semantics)
         _append_mcp_llm_story(lines, mcp_llm_story)
+        _append_windows_gpt_proofs(lines, windows_gpt)
+        _append_repo_ingestion_proof(lines, repo_ingestion)
         _append_requirement_matrix(lines, requirement_matrix)
         _append_diagnostic_table(
             lines,
@@ -2684,6 +3114,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--only-case", default="")
     p.set_defaults(func=cmd_cloud_gpt_format_matrix)
 
+    p = sub.add_parser("windows-gpt-tool-matrix")
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--windows-dir", default="ci_artifacts/demo/windows")
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/windows-gpt")
+    p.add_argument("--only-target", default="")
+    p.add_argument("--chat-timeout", type=int, default=240)
+    p.set_defaults(func=cmd_windows_gpt_tool_matrix)
+
+    p = sub.add_parser("repo-ingestion-gpt-proof")
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--target-dir", default=str(SPONSOR_REPO_FIXTURE))
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/repo-ingestion")
+    p.add_argument("--sentinel", default="")
+    p.add_argument("--min-invocables", type=int, default=2)
+    p.add_argument("--chat-timeout", type=int, default=240)
+    p.set_defaults(func=cmd_repo_ingestion_gpt_proof)
+
     p = sub.add_parser("direct-bridge-e2e")
     p.add_argument("--bridge-url", required=True)
     p.add_argument("--bridge-secret", required=True)
@@ -2735,6 +3184,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--windows-summary", default="ci_artifacts/demo/windows/summary.json")
     p.add_argument("--gpt-artifact-dir", default="ci_artifacts/demo/gpt4o")
     p.add_argument("--gpt-matrix-summary", default="ci_artifacts/demo/gpt-format-matrix/summary.json")
+    p.add_argument("--windows-gpt-summary", default="ci_artifacts/demo/windows-gpt/summary.json")
+    p.add_argument("--repo-ingestion-summary", default="ci_artifacts/demo/repo-ingestion/summary.json")
     p.add_argument("--vm-deallocation", default="ci_artifacts/demo/vm-deallocation.json")
     p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
     p.add_argument("--markdown", default="")

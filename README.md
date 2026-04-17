@@ -137,13 +137,19 @@ The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](ht
 
 Canonical green run: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216).
 
+Static sponsor references:
+
+- [Sponsor proof index](docs/sponsor/proof-index.md) maps the canonical run to the exact artifact paths and fast proof workflows.
+- [Sponsor demo caveats](docs/sponsor/caveats.md) states the proof boundary for JSON-RPC, SOAP, CORBA, RPC, JNDI, COM/DCOM, and arbitrary binary recovery.
+- [Non-code sponsor artifacts](docs/sponsor/non-code-artifacts.md) covers Azure cost posture, FERPA/access control, architecture references, and rerun guidance.
+
 Interpret the artifact as the canonical sponsor proof bundle:
 
 - `final-summary.md` is the sponsor-readable report. It includes overall pass/fail, slow-target diagnostics, bridge/session proof, and a requirement-to-proof matrix.
 - `sponsor-report.html` is a browsable rendering of the same report for live review.
 - `final-summary.json` is the machine-readable form of the same gate.
 - Real execution sentinel proofs are required for all 13 non-VM cases: OpenAPI/REST, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, SQL, Python, JavaScript, Ruby, PHP, PowerShell, and CMD/BAT.
-- OpenAPI, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, and SQL use deterministic hosted legacy provider adapters in the pipeline API. A "provider required" result is now a fallback only when those adapters are disabled or unreachable, not a passing required sponsor result.
+- JSON-RPC is hosted as a JSON-RPC 2.0 service in the pipeline API. OpenAPI, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, and SQL use deterministic hosted legacy provider adapters. A "provider required" result is now a fallback only when those services are disabled or unreachable, not a passing required sponsor result.
 - The canonical run above reports `13/13` live execution format proofs and `0` required provider-required cases.
 - Target input supports both uploaded files and installed paths/directories. Installed paths must be accessible to the server or Windows bridge VM context performing discovery; `system32_directory` is the required installed-directory proof for requirement `2.a`.
 - `cmd_exe` is an optional Windows diagnostic. The required CMD/BAT evidence is the deterministic `.cmd` fixture in the GPT format matrix.
@@ -156,6 +162,8 @@ Key artifact paths:
 - `ci_artifacts/demo/windows/summary.json`
 - `ci_artifacts/demo/windows/cmd_exe/cmd_exe.summary.json`
 - `ci_artifacts/demo/windows/notepad_exe/notepad_exe.summary.json`
+- `ci_artifacts/demo/windows-gpt/summary.json` when the pushback-hardening Windows GPT matrix is run
+- `ci_artifacts/demo/repo-ingestion/summary.json` when the repo-ingestion proof is run
 
 These are CI proof artifacts from GitHub Actions. They are separate from the app UI blob downloads served by `/api/download/{job_id}/{filename}`.
 

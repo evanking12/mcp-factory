@@ -20,6 +20,8 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
     non_vm = tmp_path / "non-vm" / "summary.json"
     windows = tmp_path / "windows" / "summary.json"
     gpt_matrix = tmp_path / "gpt-format-matrix" / "summary.json"
+    windows_gpt = tmp_path / "windows-gpt" / "summary.json"
+    repo_ingestion = tmp_path / "repo-ingestion" / "summary.json"
     gpt_dir = tmp_path / "gpt4o"
     deallocation = tmp_path / "vm-deallocation.json"
 
@@ -60,6 +62,8 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
         windows_summary=str(windows),
         gpt_artifact_dir=str(gpt_dir),
         gpt_matrix_summary=str(gpt_matrix),
+        windows_gpt_summary=str(windows_gpt),
+        repo_ingestion_summary=str(repo_ingestion),
         vm_deallocation=str(deallocation),
         out=str(tmp_path / "final-summary.json"),
         markdown=str(tmp_path / "final-summary.md"),
@@ -356,13 +360,186 @@ def test_sponsor_workflows_expose_fast_iteration_controls() -> None:
         "skip_gpt_matrix",
         "only_windows_target",
         "only_gpt_case",
+        "skip_windows_gpt_matrix",
+        "only_windows_gpt_target",
+        "skip_repo_ingestion",
         "report_only_run_id",
         "--only-case",
+        "windows-gpt-tool-matrix",
+        "repo-ingestion-gpt-proof",
         "sponsor-report.html",
     ]:
         assert token in workflow
     assert "gh run download" in report_only
     assert "tests/test_legacy_provider_executor.py" in fixture
+
+
+def test_pushback_docs_and_index_reference_caveats() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    proof_index = (ROOT / "docs" / "sponsor" / "proof-index.md").read_text(encoding="utf-8")
+    caveats = (ROOT / "docs" / "sponsor" / "caveats.md").read_text(encoding="utf-8")
+    non_code = (ROOT / "docs" / "sponsor" / "non-code-artifacts.md").read_text(encoding="utf-8")
+
+    assert "24542583216" in proof_index
+    assert "sponsor-report.html" in proof_index
+    assert "deterministic hosted adapters" in caveats
+    assert "Remote DCOM activation" in caveats
+    assert "$150/month" in non_code
+    assert "FERPA" in non_code
+    assert "docs/sponsor/proof-index.md" in readme
+
+
+def test_windows_gpt_summary_is_optional_but_reported(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    _write(Path(args.windows_summary), {"targets": [{"label": "kernel32_dll", "required": True, "passed": True}], "failures": 0})
+    _write(
+        Path(args.windows_gpt_summary),
+        {
+            "cases": [
+                {
+                    "id": "kernel32_dll",
+                    "passed": True,
+                    "proof_level": "tool_result_observed",
+                    "tool_call_seen": True,
+                    "tool_result_seen": True,
+                    "transcript_exists": True,
+                }
+            ],
+            "total": 1,
+            "passed": 1,
+            "failures": 0,
+            "failed_ids": [],
+            "proof_level": "tool_result_observed",
+        },
+    )
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    summary = ci_verify._load_json(Path(args.out))
+    text = Path(args.markdown).read_text(encoding="utf-8")
+
+    assert summary["windows_gpt_tool_matrix"]["passed"] == 1
+    assert summary["checks"]["windows_gpt_tool_matrix_passed"] is True
+    assert "## Windows GPT Tool-Call Proofs" in text
+    assert "kernel32_dll" in text
+
+
+def test_repo_fixture_discovery_finds_python_and_js_invocables(tmp_path: Path) -> None:
+    artifact, invocables = ci_verify._run_discovery_fixture(ci_verify.SPONSOR_REPO_FIXTURE, tmp_path / "repo")
+    names = {str(inv.get("name")) for inv in invocables}
+
+    assert artifact.exists()
+    assert "repo_echo_sentinel" in names
+    assert len(invocables) >= 2
+
+
+def test_windows_gpt_tool_matrix_records_observed_result_summary(tmp_path: Path, monkeypatch) -> None:
+    windows_dir = tmp_path / "windows"
+    out_dir = tmp_path / "windows-gpt"
+    _write(
+        windows_dir / "kernel32_dll" / "kernel32_dll.summary.json",
+        {
+            "label": "kernel32_dll",
+            "target": "C:\\Windows\\System32\\kernel32.dll",
+            "category": "dll",
+            "passed": True,
+            "matched_invocable_count": 2,
+            "invocable_count": 2,
+            "first_20_invocable_names": ["GetLastError"],
+        },
+    )
+
+    def fake_tool_call(**kwargs):
+        artifact_dir = kwargs["artifact_dir"]
+        ci_verify._write_json(artifact_dir / "selected-invocable.json", kwargs["selected"])
+        ci_verify._write_json(artifact_dir / "generated-mcp-schema.json", {"tools": [{"type": "function", "function": {"name": "kernel32_dll_observed_result", "parameters": {"type": "object"}}}]})
+        ci_verify._write_json(artifact_dir / "downloaded-mcp-schema.json", {"tools": []})
+        return {
+            "tools": [{"type": "function"}],
+            "events": [
+                {"type": "tool_call", "name": "kernel32_dll_observed_result"},
+                {"type": "tool_result", "result": "tool_result_observed"},
+            ],
+            "tool_results": [{"type": "tool_result", "result": "tool_result_observed"}],
+            "tool_call_seen": True,
+            "tool_result_seen": True,
+            "downloaded_schema_exists": True,
+        }
+
+    monkeypatch.setattr(ci_verify, "_call_generated_tool_with_gpt", fake_tool_call)
+
+    rc = ci_verify.cmd_windows_gpt_tool_matrix(
+        SimpleNamespace(
+            base_url="https://pipeline.example",
+            pipeline_key="key",
+            windows_dir=str(windows_dir),
+            artifact_dir=str(out_dir),
+            only_target="kernel32_dll",
+            chat_timeout=1,
+        )
+    )
+
+    assert rc == 0
+    summary = ci_verify._load_json(out_dir / "summary.json")
+    assert summary["passed"] == 1
+    assert summary["cases"][0]["proof_level"] == "tool_result_observed"
+    assert (out_dir / "kernel32_dll" / "transcript.json").exists()
+
+
+def test_repo_ingestion_gpt_proof_records_sentinel_summary(tmp_path: Path, monkeypatch) -> None:
+    repo_dir = tmp_path / "fixture"
+    repo_dir.mkdir()
+    (repo_dir / "README.md").write_text("fixture", encoding="utf-8")
+    discovery_artifact = tmp_path / "artifact.json"
+    selected = {
+        "name": "repo_echo_sentinel",
+        "kind": "python_function",
+        "parameters": [{"name": "sentinel", "type": "string"}],
+        "execution": {"method": "python_subprocess", "script_content": "def repo_echo_sentinel(sentinel): return sentinel"},
+    }
+
+    def fake_discovery(target: Path, out_dir: Path):
+        ci_verify._write_json(discovery_artifact, {"invocables": [selected, {"name": "repoDescribeOrder", "kind": "js_function", "execution": {"method": "node"}}]})
+        return discovery_artifact, [selected, {"name": "repoDescribeOrder", "kind": "js_function", "execution": {"method": "node"}}]
+
+    def fake_tool_call(**kwargs):
+        sentinel = "MCP_FACTORY_REPO_TEST"
+        artifact_dir = kwargs["artifact_dir"]
+        ci_verify._write_json(artifact_dir / "selected-invocable.json", kwargs["selected"])
+        ci_verify._write_json(artifact_dir / "generated-mcp-schema.json", {"tools": []})
+        ci_verify._write_json(artifact_dir / "downloaded-mcp-schema.json", {"tools": []})
+        return {
+            "tools": [{"type": "function"}],
+            "events": [
+                {"type": "tool_call", "name": "repo_echo_sentinel"},
+                {"type": "tool_result", "result": sentinel},
+            ],
+            "tool_results": [{"type": "tool_result", "result": sentinel}],
+            "tool_call_seen": True,
+            "tool_result_seen": True,
+            "downloaded_schema_exists": True,
+        }
+
+    monkeypatch.setattr(ci_verify, "_run_discovery_fixture", fake_discovery)
+    monkeypatch.setattr(ci_verify, "_call_generated_tool_with_gpt", fake_tool_call)
+
+    rc = ci_verify.cmd_repo_ingestion_gpt_proof(
+        SimpleNamespace(
+            base_url="https://pipeline.example",
+            pipeline_key="key",
+            target_dir=str(repo_dir),
+            artifact_dir=str(tmp_path / "repo-proof"),
+            sentinel="MCP_FACTORY_REPO_TEST",
+            min_invocables=2,
+            chat_timeout=1,
+        )
+    )
+
+    assert rc == 0
+    summary = ci_verify._load_json(tmp_path / "repo-proof" / "summary.json")
+    assert summary["passed"] is True
+    assert summary["tool_call_seen"] is True
+    assert summary["tool_result_seen"] is True
+    assert summary["sentinel_seen"] is True
 
 
 def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:

@@ -19,6 +19,18 @@ on:
         description: "Run one GPT matrix case only, for example jsonrpc"
         type: string
         default: ""
+      skip_windows_gpt_matrix:
+        description: "Skip Windows GPT tool-result-observed proof matrix"
+        type: boolean
+        default: false
+      only_windows_gpt_target:
+        description: "Run one Windows GPT target label only, for example notepad_exe"
+        type: string
+        default: ""
+      skip_repo_ingestion:
+        description: "Skip repo-ingestion GPT proof"
+        type: boolean
+        default: false
       report_only_run_id:
         description: "Download an existing sponsor-demo-e2e artifact by run ID and re-render reports"
         type: string
@@ -339,6 +351,21 @@ jobs:
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-windows-summary-end" --job-id "${{ github.run_id }}" || true
           exit $status
 
+      - name: Run Windows GPT tool-call proof matrix
+        if: ${{ !inputs.skip_windows_targets && !inputs.skip_gpt_matrix && !inputs.skip_windows_gpt_matrix && inputs.only_windows_target == '' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          set +e
+          python scripts/ci_verify.py windows-gpt-tool-matrix \
+            --base-url "$PIPELINE_URL" \
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
+            --windows-dir ci_artifacts/demo/windows \
+            --artifact-dir ci_artifacts/demo/windows-gpt \
+            --only-target "${{ inputs.only_windows_gpt_target }}"
+          status=$?
+          exit $status
+
       - name: Run GPT per-format proof matrix
         if: ${{ !inputs.skip_gpt_matrix }}
         continue-on-error: true
@@ -381,6 +408,19 @@ jobs:
               status = "PASS" if item.get("passed") else "FAIL"
               print(f"{status} {item.get('id')}: proof={item.get('proof_level')} tool_call={item.get('tool_call_seen')} sentinel={item.get('sentinel_seen')} provider_required={item.get('provider_required_seen')}")
           PY
+
+      - name: Run repo-ingestion GPT proof
+        if: ${{ !inputs.skip_gpt_matrix && !inputs.skip_repo_ingestion && inputs.only_gpt_case == '' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          set +e
+          python scripts/ci_verify.py repo-ingestion-gpt-proof \
+            --base-url "$PIPELINE_URL" \
+            --pipeline-key "${{ steps.runtime-secrets.outputs.pipeline_key }}" \
+            --artifact-dir ci_artifacts/demo/repo-ingestion
+          status=$?
+          exit $status
 
       - name: Create deterministic CMD target
         if: ${{ !inputs.skip_gpt_matrix }}
@@ -505,7 +545,7 @@ jobs:
           exit $status
 
       - name: Write final sponsor demo summary
-        if: ${{ always() && !inputs.skip_windows_targets && !inputs.skip_gpt_matrix && inputs.only_windows_target == '' && inputs.only_gpt_case == '' }}
+        if: ${{ always() && !inputs.skip_windows_targets && !inputs.skip_gpt_matrix && !inputs.skip_windows_gpt_matrix && !inputs.skip_repo_ingestion && inputs.only_windows_target == '' && inputs.only_gpt_case == '' && inputs.only_windows_gpt_target == '' }}
         run: |
           set +e
           python scripts/ci_verify.py summarize-sponsor-demo \
@@ -513,6 +553,8 @@ jobs:
             --windows-summary ci_artifacts/demo/windows/summary.json \
             --gpt-artifact-dir ci_artifacts/demo/gpt4o \
             --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
+            --windows-gpt-summary ci_artifacts/demo/windows-gpt/summary.json \
+            --repo-ingestion-summary ci_artifacts/demo/repo-ingestion/summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \
@@ -524,7 +566,7 @@ jobs:
           exit $status
 
       - name: Write partial iteration summary
-        if: ${{ always() && (inputs.skip_windows_targets || inputs.skip_gpt_matrix || inputs.only_windows_target != '' || inputs.only_gpt_case != '') }}
+        if: ${{ always() && (inputs.skip_windows_targets || inputs.skip_gpt_matrix || inputs.skip_windows_gpt_matrix || inputs.skip_repo_ingestion || inputs.only_windows_target != '' || inputs.only_gpt_case != '' || inputs.only_windows_gpt_target != '') }}
         run: |
           mkdir -p ci_artifacts/demo
           cat > ci_artifacts/demo/partial-iteration-summary.md <<'EOF'
@@ -534,8 +576,11 @@ jobs:
 
           - skip_windows_targets: ${{ inputs.skip_windows_targets }}
           - skip_gpt_matrix: ${{ inputs.skip_gpt_matrix }}
+          - skip_windows_gpt_matrix: ${{ inputs.skip_windows_gpt_matrix }}
+          - skip_repo_ingestion: ${{ inputs.skip_repo_ingestion }}
           - only_windows_target: `${{ inputs.only_windows_target }}`
           - only_gpt_case: `${{ inputs.only_gpt_case }}`
+          - only_windows_gpt_target: `${{ inputs.only_windows_gpt_target }}`
           EOF
           cat ci_artifacts/demo/partial-iteration-summary.md >> "$GITHUB_STEP_SUMMARY"
 
