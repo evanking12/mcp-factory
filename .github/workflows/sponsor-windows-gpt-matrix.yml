@@ -6,7 +6,7 @@ on:
       source_run_id:
         description: "Sponsor Demo E2E run ID containing Windows discovery artifacts"
         type: string
-        default: "24547629781"
+        default: "24568108685"
       only_target:
         description: "Optional Windows GPT target label, for example notepad_exe"
         type: string

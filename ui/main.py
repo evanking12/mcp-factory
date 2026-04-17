@@ -433,7 +433,7 @@ _HTML = r"""<!DOCTYPE html>
   <span class="tagline">Binary → MCP tool schema, AI-powered</span>
   <span class="spacer"></span>
   <a class="proof-link"
-     href="https://github.com/evanking12/mcp-factory/actions/runs/24547629781"
+     href="https://github.com/evanking12/mcp-factory/actions/runs/24568108685"
      target="_blank" rel="noopener"
      title="GitHub Actions proof bundle is separate from app /api/download job artifacts.">
     CI Proof Bundle
@@ -520,7 +520,7 @@ _HTML = r"""<!DOCTYPE html>
             <div class="proof-matrix-title">Legacy Protocol Showcase</div>
             <div class="proof-matrix-sub">Video path: SOAP walkthrough, then GitHub Actions proof matrix.</div>
           </div>
-          <a class="proof-link" href="https://github.com/evanking12/mcp-factory/actions/runs/24547629781" target="_blank" rel="noopener">Canonical Run</a>
+          <a class="proof-link" href="https://github.com/evanking12/mcp-factory/actions/runs/24568108685" target="_blank" rel="noopener">Canonical Run</a>
         </div>
         <div class="proof-grid">
           <div class="proof-cell runtime"><strong>Runtime-backed</strong><span>JSON-RPC, SOAP, SQL</span></div>

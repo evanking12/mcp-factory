@@ -286,7 +286,7 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     assert "schemaBlob" in ui
     assert "Load SOAP/WSDL Showcase" in ui
     assert "Legacy Protocol Showcase" in ui
-    assert "24547629781" in ui
+    assert "24568108685" in ui
     assert "Run Canonical Proof" in ui
     assert "tool_call:" in ui
     assert "tool_result:" in ui
@@ -434,8 +434,8 @@ def test_pushback_docs_and_index_reference_caveats() -> None:
     caveats = (ROOT / "docs" / "sponsor" / "caveats.md").read_text(encoding="utf-8")
     non_code = (ROOT / "docs" / "sponsor" / "non-code-artifacts.md").read_text(encoding="utf-8")
 
+    assert "24568108685" in proof_index
     assert "24547629781" in proof_index
-    assert "24547284139" in proof_index
     assert "24542583216" in proof_index
     assert "sponsor-report.html" in proof_index
     assert "SOAP is now runtime-backed" in caveats
