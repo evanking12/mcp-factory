@@ -914,7 +914,7 @@ function proofBadge(inv) {
   if (inv.proof_level === 'provider_required' || inv.provider_required || PROVIDER_REQUIRED_SOURCES.has(source) || method.includes('provider_required')) {
     return { label: 'provider required fallback', cls: 'proof-provider' };
   }
-  if (['ldap_jndi_runtime', 'xmlrpc_runtime', 'corba_idl_runtime'].includes(runtimeMode)) {
+  if (['xmlrpc_runtime', 'corba_idl_runtime'].includes(runtimeMode)) {
     return { label: runtimeMode.replace(/_/g, ' '), cls: 'proof-provider' };
   }
   if (runtimeMode.includes('runtime') || runtimeMode === 'validated_runtime') {

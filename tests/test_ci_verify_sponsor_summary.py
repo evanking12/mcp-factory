@@ -333,7 +333,7 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
                         "jsonrpc": "real_runtime",
                         "soap_wsdl": "real_runtime",
                         "sql": "real_runtime",
-                        "jndi": "ldap_jndi_runtime",
+                        "jndi": "ldap_runtime",
                         "rpc_idl_contract": "xmlrpc_runtime",
                         "corba_idl": "corba_idl_runtime",
                     }.get(case_id, "local_runtime"),
@@ -354,7 +354,7 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
             "runtime_mode_counts": {
                 "corba_idl_runtime": 1,
                 "local_runtime": 6,
-                "ldap_jndi_runtime": 1,
+                "ldap_runtime": 1,
                 "real_runtime": 3,
                 "validated_runtime": 1,
                 "xmlrpc_runtime": 1,

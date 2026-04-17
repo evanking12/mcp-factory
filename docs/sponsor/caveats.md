@@ -17,9 +17,10 @@ does not claim.
   SQL Server infrastructure.
 - REST/OpenAPI is route-validated against declared paths and methods before the
   provider returns a tool result.
-- JNDI is runtime-shaped through deterministic LDAP/JNDI bind, search, and
-  lookup semantics. It proves directory-style lookup behavior, not production
-  enterprise LDAP operations or identity infrastructure.
+- JNDI is runtime-backed through a controlled LDAPv3-compatible bind, search,
+  and lookup runtime. It proves directory-style lookup behavior over an LDAP
+  wire roundtrip, not production enterprise LDAP operations, identity
+  infrastructure, or directory migration.
 - RPC IDL is runtime-shaped through real XML-RPC `methodCall`, `methodResponse`,
   and `fault` envelopes. It is not DCE/RPC or MSRPC infrastructure.
 - CORBA IDL is runtime-shaped through an IDL-derived object registry, repository

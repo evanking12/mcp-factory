@@ -303,7 +303,7 @@ RUNTIME_MODE_BY_FORMAT_CASE = {
     "jsonrpc": "real_runtime",
     "soap_wsdl": "real_runtime",
     "sql": "real_runtime",
-    "jndi": "ldap_jndi_runtime",
+    "jndi": "ldap_runtime",
     "rpc_idl_contract": "xmlrpc_runtime",
     "corba_idl": "corba_idl_runtime",
     "python": "local_runtime",
@@ -348,7 +348,7 @@ STRETCH_PROOF_REQUIREMENTS = [
         "id": "ldap_runtime",
         "label": "Real LDAP/JNDI runtime",
         "target_mode": "ldap_runtime",
-        "current_mode": "ldap_jndi_runtime",
+        "current_mode": "ldap_runtime",
         "required_artifacts": [
             "ci_artifacts/demo/legacy/jndi_ldap/ldap-server-config.ldif",
             "ci_artifacts/demo/legacy/jndi_ldap/bind-result.json",
@@ -1757,7 +1757,7 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     runtime_backed_cases = [
         item["id"]
         for item in summaries
-        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_jndi_runtime", "xmlrpc_runtime", "corba_idl_runtime", "local_runtime"}
+        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime", "local_runtime"}
     ]
     aggregate = {
         "cases": summaries,
@@ -1783,6 +1783,90 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     if failures:
         raise AssertionError(f"{len(failures)} GPT format matrix case(s) failed: {aggregate['failed_ids']}")
     print(f"OK GPT format matrix: {len(summaries)} case(s), artifacts={out_root}")
+    return 0
+
+
+def cmd_ldap_runtime_proof(args: argparse.Namespace) -> int:
+    base_url = args.base_url.rstrip("/")
+    artifact_dir = Path(args.artifact_dir)
+    matrix_out = Path(args.matrix_out)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = args.sentinel or f"MCP_FACTORY_LDAP_RUNTIME_{uuid.uuid4().hex[:8]}"
+    key = args.pipeline_key or ""
+
+    print(f"START LDAP runtime proof: base_url={base_url}")
+    health = _http_json("GET", f"{base_url}/api/legacy/health", key=key, timeout=args.timeout)
+    provider_modes = health.get("provider_modes") or {}
+    if provider_modes.get("jndi") != "ldap_runtime":
+        raise AssertionError(f"legacy provider jndi mode is not ldap_runtime: {provider_modes.get('jndi')!r}")
+
+    ldif = _http_bytes("GET", f"{base_url}/api/legacy/jndi/ldif", key=key, timeout=args.timeout).decode("utf-8")
+    bind = _http_json(
+        "POST",
+        f"{base_url}/api/legacy/jndi/bind",
+        key=key,
+        body={"principal": "cn=serviceaccount,dc=contoso,dc=com", "sentinel": sentinel},
+        timeout=args.timeout,
+    )
+    search = _http_json(
+        "POST",
+        f"{base_url}/api/legacy/jndi/search",
+        key=key,
+        body={"filter": "ContosoCustomerDB", "sentinel": sentinel},
+        timeout=args.timeout,
+    )
+    lookup = _http_json(
+        "POST",
+        f"{base_url}/api/legacy/jndi/lookup",
+        key=key,
+        body={"name": "jdbc/ContosoCustomerDB", "sentinel": sentinel},
+        timeout=args.timeout,
+    )
+
+    checks = {
+        "provider_mode_is_ldap_runtime": provider_modes.get("jndi") == "ldap_runtime",
+        "ldif_has_contoso_entry": "ContosoCustomerDB" in ldif and "objectClass: javaNamingReference" in ldif,
+        "bind_uses_ldapv3_wire": bind.get("wire_protocol") == "ldapv3" and bool(bind.get("bound")),
+        "search_uses_ldapv3_wire": search.get("wire_protocol") == "ldapv3" and bool(search.get("entries")),
+        "lookup_uses_ldapv3_wire": lookup.get("wire_protocol") == "ldapv3" and bool(lookup.get("lookup_found")),
+        "sentinel_echoed": sentinel in json.dumps(lookup, sort_keys=True),
+    }
+    passed = all(checks.values())
+    (artifact_dir / "ldap-server-config.ldif").write_text(ldif, encoding="utf-8")
+    _write_json(artifact_dir / "health.json", health)
+    _write_json(artifact_dir / "bind-result.json", bind)
+    _write_json(artifact_dir / "search-result.json", search)
+    _write_json(artifact_dir / "lookup-result.json", lookup)
+
+    summary = {
+        "id": "ldap_runtime",
+        "passed": passed,
+        "proof_level": "real_runtime",
+        "runtime_mode": "ldap_runtime",
+        "provider": "jndi",
+        "wire_protocol": "ldapv3",
+        "sentinel": sentinel,
+        "checks": checks,
+        "artifacts": {
+            "ldif": str(artifact_dir / "ldap-server-config.ldif"),
+            "bind": str(artifact_dir / "bind-result.json"),
+            "search": str(artifact_dir / "search-result.json"),
+            "lookup": str(artifact_dir / "lookup-result.json"),
+            "health": str(artifact_dir / "health.json"),
+        },
+        "notes": "Controlled LDAPv3-compatible runtime proof for deterministic JNDI bind/search/lookup, not enterprise directory migration.",
+    }
+    _write_json(artifact_dir / "summary.json", summary)
+
+    matrix = _load_optional_summary(matrix_out)
+    if not isinstance(matrix, dict) or matrix.get("missing"):
+        matrix = {}
+    matrix["ldap_runtime"] = summary
+    matrix["passed"] = all(bool(value.get("passed")) for value in matrix.values() if isinstance(value, dict) and "passed" in value)
+    _write_json(matrix_out, matrix)
+    if not passed:
+        raise AssertionError(f"LDAP runtime proof failed checks: {[name for name, ok in checks.items() if not ok]}")
+    print(f"OK LDAP runtime proof: artifacts={artifact_dir}")
     return 0
 
 
@@ -2456,7 +2540,7 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
             "real_runtime",
             "validated_runtime",
             "lookup_runtime",
-            "ldap_jndi_runtime",
+            "ldap_runtime",
             "xmlrpc_runtime",
             "corba_idl_runtime",
             "adapter_backed",
@@ -2711,7 +2795,7 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json",
                 "docs/sponsor/caveats.md",
             ],
-            "notes": "JSON-RPC, SOAP, and SQL are runtime-backed; REST is route-validated; JNDI uses LDAP/JNDI-shaped lookup semantics; RPC uses XML-RPC wire responses; CORBA uses an IDL object-registry runtime-shaped provider. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
+            "notes": "JSON-RPC, SOAP, SQL, and controlled LDAP/JNDI bind/search/lookup are runtime-backed; REST is route-validated; RPC uses XML-RPC wire responses; CORBA uses an IDL object-registry runtime-shaped provider. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
         },
         {
             "requirement": "1.c",
@@ -2944,7 +3028,7 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
         },
         "runtime_modes": {
             "cases_by_mode": dict(sorted(runtime_modes.items())),
-            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, LDAP/JNDI-shaped lookup, XML-RPC wire responses, CORBA IDL runtime-shaped validation, and any remaining adapter-backed legacy protocol modeling.",
+            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, controlled LDAP-compatible bind/search/lookup, XML-RPC wire responses, CORBA IDL runtime-shaped validation, and any remaining adapter-backed legacy protocol modeling.",
         },
     }
 
@@ -3587,6 +3671,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lease-job-id", default="")
     p.add_argument("--only-case", default="")
     p.set_defaults(func=cmd_cloud_gpt_format_matrix)
+
+    p = sub.add_parser("ldap-runtime-proof")
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/legacy/jndi_ldap")
+    p.add_argument("--matrix-out", default="ci_artifacts/demo/legacy-runtime-matrix/summary.json")
+    p.add_argument("--sentinel", default="")
+    p.add_argument("--timeout", type=int, default=60)
+    p.set_defaults(func=cmd_ldap_runtime_proof)
 
     p = sub.add_parser("windows-gpt-tool-matrix")
     p.add_argument("--base-url", required=True)

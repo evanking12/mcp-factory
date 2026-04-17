@@ -1,9 +1,9 @@
 """Deterministic legacy-provider runtimes for sponsor demo tool execution.
 
 These endpoints are intentionally small and predictable. They provide live,
-runtime-shaped backing services for generated MCP tools while avoiding claims
-that the capstone deploys production CORBA ORB/IIOP, DCE/MSRPC, enterprise
-LDAP/JNDI, or remote DCOM infrastructure.
+runtime-backed or runtime-shaped backing services for generated MCP tools while
+avoiding claims that the capstone deploys production CORBA ORB/IIOP, DCE/MSRPC,
+enterprise directory migration, or remote DCOM infrastructure.
 """
 
 from __future__ import annotations
@@ -18,6 +18,17 @@ from xml.etree import ElementTree as ET
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from api.ldap_runtime import (
+    BASE_DN,
+    LDAP_BINDINGS as JNDI_BINDINGS,
+    DEFAULT_BIND_DN,
+    ldap_bind,
+    ldap_config_ldif,
+    ldap_entry as _ldap_entry,
+    ldap_lookup,
+    ldap_search,
+)
+
 router = APIRouter(prefix="/api/legacy", tags=["legacy-provider"])
 
 PROVIDER_VERSION = "runtime-proof-expansion-v1"
@@ -28,7 +39,7 @@ PROVIDERS = {
     "sql": "SQLite-backed Contoso runtime",
     "corba": "CORBA IDL object-registry runtime-shaped provider",
     "rpc": "XML-RPC hosted Contoso runtime",
-    "jndi": "LDAP/JNDI binding lookup runtime",
+    "jndi": "LDAPv3-compatible JNDI binding runtime",
 }
 PROVIDER_MODES = {
     "rest": "validated_runtime",
@@ -37,7 +48,7 @@ PROVIDER_MODES = {
     "sql": "real_runtime",
     "corba": "corba_idl_runtime",
     "rpc": "xmlrpc_runtime",
-    "jndi": "ldap_jndi_runtime",
+    "jndi": "ldap_runtime",
 }
 
 JSONRPC_METHODS = {
@@ -70,25 +81,6 @@ RPC_METHODS = {
     "RpcCreateTicket",
     "RpcGetTicketStatus",
     "RpcCloseTicket",
-}
-JNDI_BINDINGS = {
-    "jdbc/ContosoCustomerDB": {
-        "type": "javax.sql.DataSource",
-        "dn": "cn=ContosoCustomerDB,ou=jdbc,dc=contoso,dc=com",
-        "url": "jdbc:sqlserver://db.contoso.internal:1433;databaseName=CustomerDB",
-    },
-    "jdbc/ContosoReportingDB": {
-        "type": "javax.sql.DataSource",
-        "dn": "cn=ContosoReportingDB,ou=jdbc,dc=contoso,dc=com",
-        "url": "jdbc:sqlserver://rdb.contoso.internal:1433;databaseName=CustomerDB",
-    },
-    "jms/OrderProcessingQueue": {"type": "javax.jms.Queue", "dn": "cn=OrderProcessingQueue,ou=jms,dc=contoso,dc=com"},
-    "jms/SupportTicketTopic": {"type": "javax.jms.Topic", "dn": "cn=SupportTicketTopic,ou=jms,dc=contoso,dc=com"},
-    "jms/RefundApprovalQueue": {"type": "javax.jms.Queue", "dn": "cn=RefundApprovalQueue,ou=jms,dc=contoso,dc=com"},
-    "jms/ContosoConnectionFactory": {"type": "javax.jms.ConnectionFactory", "dn": "cn=ContosoConnectionFactory,ou=jms,dc=contoso,dc=com"},
-    "ejb/CustomerServiceBean": {"type": "EJB remote interface", "dn": "cn=CustomerServiceBean,ou=ejb,dc=contoso,dc=com"},
-    "ejb/OrderServiceBean": {"type": "EJB remote interface", "dn": "cn=OrderServiceBean,ou=ejb,dc=contoso,dc=com"},
-    "java:comp/env/defaultPriority": {"type": "java.lang.String", "value": "Normal", "dn": "cn=defaultPriority,ou=env,dc=contoso,dc=com"},
 }
 CORBA_OBJECTS = {
     "ICustomerService": {
@@ -262,19 +254,6 @@ def _float_arg(payload: dict[str, Any], name: str, default: float) -> float:
         return default
 
 
-def _ldap_entry(name: str, binding: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "name": name,
-        "dn": binding.get("dn") or f"cn={name.replace('/', '_')},dc=contoso,dc=com",
-        "objectClass": ["top", "javaNamingReference"],
-        "attributes": {
-            "javaClassName": binding.get("type", "java.lang.Object"),
-            "javaFactory": "com.contoso.naming.DeterministicObjectFactory",
-            **{k: v for k, v in binding.items() if k not in {"dn", "type"}},
-        },
-    }
-
-
 def _jndi_lookup_name(payload: dict[str, Any]) -> str:
     raw_lookup = payload.get("lookup_name") or payload.get("name") or payload.get("binding") or "lookup"
     if isinstance(raw_lookup, list):
@@ -317,7 +296,7 @@ def legacy_health() -> dict[str, Any]:
         "enabled_providers": sorted(PROVIDERS),
         "providers": PROVIDERS,
         "provider_modes": PROVIDER_MODES,
-        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_jndi_runtime", "xmlrpc_runtime", "corba_idl_runtime"}),
+        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_runtime", "xmlrpc_runtime", "corba_idl_runtime"}),
         "adapter_backed": sorted(k for k, v in PROVIDER_MODES.items() if v == "adapter_backed"),
     }
 
@@ -546,15 +525,18 @@ async def rpc_provider(procedure: str, request: Request) -> Response:
 @router.post("/jndi/bind")
 async def jndi_bind_provider(request: Request) -> JSONResponse:
     payload = await _json_or_query(request)
-    principal = str(payload.get("principal") or "cn=serviceaccount,dc=contoso,dc=com")
-    ok = principal.endswith("dc=contoso,dc=com")
+    principal = str(payload.get("principal") or DEFAULT_BIND_DN)
+    bind = ldap_bind(principal, str(payload.get("credential") or "contoso-demo"))
+    ok = bool(bind.get("bound"))
     return JSONResponse({
         "provider": "jndi",
         "runtime_mode": PROVIDER_MODES["jndi"],
         "operation": "bind",
         "protocol": "ldap",
+        "wire_protocol": "ldapv3",
         "principal": principal,
         "bound": ok,
+        "ldap_result": bind,
         "sentinel": extract_sentinel(payload),
     }, status_code=200 if ok else 401)
 
@@ -563,19 +545,17 @@ async def jndi_bind_provider(request: Request) -> JSONResponse:
 async def jndi_search_provider(request: Request) -> JSONResponse:
     payload = await _json_or_query(request)
     query = str(payload.get("filter") or payload.get("query") or "")
-    entries = [
-        _ldap_entry(name, binding)
-        for name, binding in JNDI_BINDINGS.items()
-        if not query or query.lower() in name.lower() or query.lower() in str(binding).lower()
-    ]
+    search = ldap_search(query, base_dn=str(payload.get("base_dn") or BASE_DN))
     return JSONResponse({
         "provider": "jndi",
         "runtime_mode": PROVIDER_MODES["jndi"],
         "operation": "search",
         "protocol": "ldap",
-        "base_dn": payload.get("base_dn") or "dc=contoso,dc=com",
-        "filter": query or "(objectClass=javaNamingReference)",
-        "entries": entries,
+        "wire_protocol": "ldapv3",
+        "base_dn": search["base_dn"],
+        "filter": search["filter"],
+        "entries": search["entries"],
+        "ldap_result": search,
         "sentinel": extract_sentinel(payload),
     })
 
@@ -584,17 +564,23 @@ async def jndi_search_provider(request: Request) -> JSONResponse:
 async def jndi_provider(request: Request) -> JSONResponse:
     payload = await _json_or_query(request)
     lookup = _jndi_lookup_name(payload)
-    binding = JNDI_BINDINGS.get(lookup)
-    if binding is None:
-        binding = {"type": "dynamic.lookup", "value": extract_sentinel(payload), "dn": f"cn={lookup.replace('/', '_')},dc=contoso,dc=com"}
+    lookup_result = ldap_lookup(lookup)
+    binding = lookup_result["binding"]
     result = build_legacy_result("jndi", lookup, payload)
     result.update({
         "runtime_mode": PROVIDER_MODES["jndi"],
         "protocol": "ldap",
+        "wire_protocol": "ldapv3",
         "operation": "lookup",
         "lookup_name": lookup,
         "binding": binding,
-        "ldap_entry": _ldap_entry(lookup, binding),
+        "ldap_entry": lookup_result["ldap_entry"],
+        "ldap_result": lookup_result,
         "lookup_found": lookup in JNDI_BINDINGS,
     })
     return JSONResponse(result)
+
+
+@router.get("/jndi/ldif")
+def jndi_ldif_provider() -> Response:
+    return Response(content=ldap_config_ldif(), media_type="text/plain")

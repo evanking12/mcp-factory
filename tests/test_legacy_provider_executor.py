@@ -32,7 +32,7 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     assert health["provider_modes"]["soap"] == "real_runtime"
     assert health["provider_modes"]["sql"] == "real_runtime"
     assert health["provider_modes"]["rest"] == "validated_runtime"
-    assert health["provider_modes"]["jndi"] == "ldap_jndi_runtime"
+    assert health["provider_modes"]["jndi"] == "ldap_runtime"
     assert health["provider_modes"]["rpc"] == "xmlrpc_runtime"
     assert health["provider_modes"]["corba"] == "corba_idl_runtime"
 
@@ -152,18 +152,25 @@ def test_jndi_and_rpc_runtime_modes_are_explicit() -> None:
 
     jndi = client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/ContosoCustomerDB", "sentinel": "MCP_FACTORY_JNDI"})
     assert jndi.status_code == 200
-    assert jndi.json()["runtime_mode"] == "ldap_jndi_runtime"
+    assert jndi.json()["runtime_mode"] == "ldap_runtime"
+    assert jndi.json()["wire_protocol"] == "ldapv3"
     assert jndi.json()["lookup_found"] is True
     assert jndi.json()["binding"]["type"] == "javax.sql.DataSource"
     assert jndi.json()["ldap_entry"]["dn"].endswith("dc=contoso,dc=com")
+    assert jndi.json()["ldap_result"]["server"].startswith("ldap://")
 
     bind = client.post("/api/legacy/jndi/bind", json={"principal": "cn=serviceaccount,dc=contoso,dc=com"})
     assert bind.status_code == 200
     assert bind.json()["bound"] is True
+    assert bind.json()["ldap_result"]["wire_protocol"] == "ldapv3"
 
     search = client.post("/api/legacy/jndi/search", json={"filter": "Customer"})
     assert search.status_code == 200
     assert search.json()["entries"]
+    assert search.json()["wire_protocol"] == "ldapv3"
+    ldif = client.get("/api/legacy/jndi/ldif")
+    assert ldif.status_code == 200
+    assert "objectClass: javaNamingReference" in ldif.text
 
     rpc_payload = xmlrpc.client.dumps(({"sentinel": "MCP_FACTORY_RPC"},), methodname="RpcCreateTicket")
     rpc = client.post("/api/legacy/rpc/RpcCreateTicket", content=rpc_payload, headers={"Content-Type": "text/xml"})

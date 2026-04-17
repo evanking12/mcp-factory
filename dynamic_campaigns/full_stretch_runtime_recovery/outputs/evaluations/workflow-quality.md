@@ -41,3 +41,47 @@ enterprise estate migration.
 
 Next correction: keep caveat language in proof index and final report.
 
+## 002 LDAP Runtime
+
+`gm_control_quality`: 2
+
+Evidence: the implementation changes only the JNDI proof path and adds a
+focused proof command/workflow before any CORBA/MSRPC/DCOM work.
+
+Strongest risk: the local LDAP-compatible server is controlled and minimal, so
+copy must not imply enterprise LDAP infrastructure.
+
+Next correction: focused workflow artifact must record the LDIF, bind result,
+search result, lookup result, and runtime matrix before tranche completion.
+
+`context_pressure_result`: 2
+
+Evidence: baseline run `24568108685` remains the fallback and the new LDAP
+proof writes under `ci_artifacts/demo/legacy/jndi_ldap`.
+
+Strongest risk: deployed ACA may still be on the previous image until deploy
+finishes.
+
+Next correction: wait for deploy, then run `sponsor-ldap-runtime.yml` and a
+focused JNDI GPT matrix run.
+
+`delegation_effectiveness`: 2
+
+Evidence: no subagents were dispatched because the user did not explicitly
+authorize delegation for this implementation turn.
+
+Strongest risk: later CORBA/MSRPC/DCOM tranches may benefit from parallel
+toolchain exploration.
+
+Next correction: keep the critical path local unless the user explicitly
+authorizes subagents.
+
+`operator_reviewability`: 3
+
+Evidence: tests cover provider health, LDAP endpoint wire metadata, LDIF
+exposure, sponsor manifest mode validation, and report summaries.
+
+Strongest risk: runtime naming drift between manifest, provider health, GPT
+matrix, and final summary.
+
+Next correction: focused artifact parsing must confirm `runtime_mode=ldap_runtime`.
