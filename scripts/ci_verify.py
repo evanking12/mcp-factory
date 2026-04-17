@@ -902,6 +902,119 @@ def _case_bool(value: object, default: bool = True) -> bool:
     return str(value).lower() not in {"0", "false", "no", "off"}
 
 
+def _seconds(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _bridge_health_records(item: dict) -> list[dict]:
+    records: list[dict] = []
+    for key in ("health_before", "post_grace_health"):
+        value = item.get(key)
+        if isinstance(value, dict):
+            records.append(value)
+    for attempt in item.get("attempts") or []:
+        if isinstance(attempt, dict) and isinstance(attempt.get("health_before_retry"), dict):
+            records.append(attempt["health_before_retry"])
+    return records
+
+
+def _bridge_target_classification(item: dict) -> str:
+    if item.get("passed"):
+        if any(bool(record.get("vm_restart_result", {}).get("attempted")) for record in _bridge_health_records(item)):
+            return "passed_after_vm_restart"
+        if any(bool(record.get("restart_attempted")) for record in _bridge_health_records(item)):
+            return "passed_after_bridge_recovery"
+        if item.get("session_cache_used"):
+            return "passed_cached_session"
+        return "passed"
+
+    text = " ".join(
+        str(part or "")
+        for part in [
+            item.get("exception"),
+            item.get("bridge_errors"),
+            " ".join(str(attempt.get("error") or "") for attempt in item.get("attempts") or [] if isinstance(attempt, dict)),
+            item.get("health_before", {}).get("error") if isinstance(item.get("health_before"), dict) else "",
+            item.get("post_grace_health", {}).get("error") if isinstance(item.get("post_grace_health"), dict) else "",
+        ]
+    ).lower()
+    if "sessionid" in text or "session id" in text:
+        return "bridge_session_recovery_failed"
+    if "timed out" in text or "timeout" in text:
+        return "analyzer_timeout"
+    if "connection reset" in text or "connection aborted" in text:
+        return "bridge_connection_reset"
+    if item.get("bridge_http_status") not in (None, 200):
+        return "bridge_http_failure"
+    if int(item.get("matched_invocable_count") or 0) < int(item.get("min_invocables") or 1):
+        return "no_matching_invocables"
+    return "failed"
+
+
+def _add_bridge_timing_diagnostics(item: dict) -> dict:
+    records = _bridge_health_records(item)
+    analyzer_seconds = round(sum(_seconds(attempt.get("elapsed_seconds")) for attempt in item.get("attempts") or [] if isinstance(attempt, dict)), 3)
+    retry_seconds = round(sum(_seconds(attempt.get("elapsed_seconds")) for attempt in (item.get("attempts") or [])[1:] if isinstance(attempt, dict)), 3)
+    health_wait_seconds = round(sum(_seconds(record.get("waited_seconds") or record.get("elapsed_seconds")) for record in records), 3)
+    session_check_seconds = round(
+        sum(
+            _seconds((record.get("bridge_process") or {}).get("elapsed_seconds"))
+            for record in records
+            if isinstance(record.get("bridge_process"), dict)
+            and (record.get("bridge_process") or {}).get("attempted")
+            and not (record.get("bridge_process") or {}).get("cached")
+        ),
+        3,
+    )
+    restart_seconds = round(
+        sum(_seconds((record.get("restart_result") or {}).get("elapsed_seconds")) for record in records if isinstance(record.get("restart_result"), dict)),
+        3,
+    )
+    vm_restart_seconds = round(
+        sum(_seconds((record.get("vm_restart_result") or {}).get("elapsed_seconds")) for record in records if isinstance(record.get("vm_restart_result"), dict)),
+        3,
+    )
+    cache_used = any(
+        isinstance(record.get("bridge_process"), dict)
+        and bool((record.get("bridge_process") or {}).get("cached"))
+        for record in records
+    )
+    post_health = item.get("post_grace_health") if isinstance(item.get("post_grace_health"), dict) else {}
+    post_grace_total = round(_seconds(item.get("configured_post_grace_seconds", item.get("post_grace_seconds"))) + _seconds(post_health.get("waited_seconds") or post_health.get("elapsed_seconds")), 3)
+    dominant = {
+        "analyzer": analyzer_seconds,
+        "retry": retry_seconds,
+        "health_wait": health_wait_seconds,
+        "session_check": session_check_seconds,
+        "bridge_restart": restart_seconds,
+        "vm_restart": vm_restart_seconds,
+        "post_grace": post_grace_total,
+    }
+    dominant_time_source = max(dominant, key=dominant.get) if any(value > 0 for value in dominant.values()) else "unknown"
+    item["session_cache_used"] = cache_used
+    item.update(
+        {
+            "health_wait_seconds": health_wait_seconds,
+            "session_check_seconds": session_check_seconds,
+            "bridge_analyzer_seconds": analyzer_seconds,
+            "retry_seconds": retry_seconds,
+            "restart_seconds": restart_seconds,
+            "vm_restart_seconds": vm_restart_seconds,
+            "post_grace_seconds": post_grace_total,
+            "dominant_time_source": dominant_time_source,
+            "timeout_or_failure_classification": _bridge_target_classification(item),
+        }
+    )
+    return item
+
+
 def _filter_invocables(
     invocables: list[dict],
     *,
@@ -1356,6 +1469,7 @@ def _run_bridge_case(
     requested_types = types or ["gui", "com", "cli", "registry", "dotnet", "rpc", "directory", "ghidra"]
     bridge_session_cache = bridge_session_cache or (out_dir / ".bridge-session-cache.json")
 
+    case_started = time.perf_counter()
     print(f"START bridge target label={safe_name} kind={kind} target={target}")
     health_before = _ensure_bridge_health(
         bridge_url,
@@ -1502,9 +1616,11 @@ def _run_bridge_case(
         "bridge_http_status": result.get("http_status"),
         "exception": error_text,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "total_elapsed_seconds": round(time.perf_counter() - case_started, 3),
         "bridge_elapsed_seconds": result.get("elapsed_seconds"),
         "retry_count": max(0, len(attempts) - 1),
         "health_wait_timeout_seconds": health_timeout,
+        "configured_post_grace_seconds": post_grace,
         "post_grace_seconds": post_grace,
         "bridge_restart_resource_group": bridge_resource_group,
         "bridge_restart_vm_name": bridge_vm_name,
@@ -1529,6 +1645,7 @@ def _run_bridge_case(
             for attempt in attempts
         ],
     }
+    _add_bridge_timing_diagnostics(item)
     _write_json(summary_path, item)
     status = "OK" if passed else ("OPTIONAL-FAIL" if not required else "FAIL")
     print(
@@ -1748,6 +1865,115 @@ def _count_required_optional(items: list[dict]) -> dict:
     }
 
 
+def _diagnostic_label(item: dict) -> str:
+    return str(item.get("label") or item.get("id") or item.get("target") or "-")
+
+
+def _windows_diagnostics(targets: list[dict]) -> dict:
+    slow_threshold = 30.0
+    slow_targets = []
+    bridge_recovery_events = []
+    session_cache_proof = []
+    required_failures = []
+    optional_failures = []
+    for item in targets:
+        label = _diagnostic_label(item)
+        elapsed = _seconds(item.get("total_elapsed_seconds") or item.get("elapsed_seconds"))
+        diagnostic = {
+            "label": label,
+            "required": item.get("required", True),
+            "passed": item.get("passed"),
+            "elapsed_seconds": round(elapsed, 3),
+            "bridge_analyzer_seconds": _seconds(item.get("bridge_analyzer_seconds") or item.get("bridge_elapsed_seconds")),
+            "health_wait_seconds": _seconds(item.get("health_wait_seconds")),
+            "session_check_seconds": _seconds(item.get("session_check_seconds")),
+            "retry_seconds": _seconds(item.get("retry_seconds")),
+            "restart_seconds": _seconds(item.get("restart_seconds")),
+            "vm_restart_seconds": _seconds(item.get("vm_restart_seconds")),
+            "post_grace_seconds": _seconds(item.get("post_grace_seconds")),
+            "dominant_time_source": item.get("dominant_time_source") or "unknown",
+            "classification": item.get("timeout_or_failure_classification") or ("passed" if item.get("passed") else "failed"),
+        }
+        if elapsed >= slow_threshold:
+            slow_targets.append(diagnostic)
+        if not item.get("passed") and item.get("required", True):
+            required_failures.append(diagnostic)
+        if not item.get("passed") and not item.get("required", True):
+            optional_failures.append(diagnostic)
+
+        records = _bridge_health_records(item)
+        recovery_records = [
+            record for record in records
+            if record.get("restart_attempted")
+            or isinstance(record.get("restart_result"), dict)
+            or isinstance(record.get("vm_restart_result"), dict)
+        ]
+        if recovery_records:
+            bridge_recovery_events.append(
+                {
+                    "label": label,
+                    "classification": diagnostic["classification"],
+                    "restart_seconds": diagnostic["restart_seconds"],
+                    "vm_restart_seconds": diagnostic["vm_restart_seconds"],
+                    "health_wait_seconds": diagnostic["health_wait_seconds"],
+                }
+            )
+
+        session_cache_proof.append(
+            {
+                "label": label,
+                "session_cache_used": bool(item.get("session_cache_used")),
+                "session_check_seconds": diagnostic["session_check_seconds"],
+                "health_before_session_id": (
+                    (item.get("health_before") or {}).get("bridge_process") or {}
+                ).get("session_id") if isinstance(item.get("health_before"), dict) else None,
+                "post_grace_session_id": (
+                    (item.get("post_grace_health") or {}).get("bridge_process") or {}
+                ).get("session_id") if isinstance(item.get("post_grace_health"), dict) else None,
+            }
+        )
+
+    return {
+        "slow_threshold_seconds": slow_threshold,
+        "slow_targets": slow_targets,
+        "required_failures": required_failures,
+        "optional_failures": optional_failures,
+        "bridge_recovery_events": bridge_recovery_events,
+        "session_cache_proof": session_cache_proof,
+    }
+
+
+def _append_diagnostic_table(lines: list[str], title: str, rows: list[dict], empty: str) -> None:
+    lines.extend(["", f"## {title}", ""])
+    if not rows:
+        lines.append(empty)
+        return
+    lines.append("| Target | Required | Status | Elapsed | Dominant | Classification | Analyzer | Health | Session | Retry | Restart | VM Restart |")
+    lines.append("|---|---:|---|---:|---|---|---:|---:|---:|---:|---:|---:|")
+    for item in rows:
+        status = "PASS" if item.get("passed") else "FAIL"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(item.get("label")),
+                    str(bool(item.get("required"))),
+                    status,
+                    f"{_seconds(item.get('elapsed_seconds')):.3f}s",
+                    str(item.get("dominant_time_source") or "unknown"),
+                    str(item.get("classification") or ""),
+                    f"{_seconds(item.get('bridge_analyzer_seconds')):.3f}s",
+                    f"{_seconds(item.get('health_wait_seconds')):.3f}s",
+                    f"{_seconds(item.get('session_check_seconds')):.3f}s",
+                    f"{_seconds(item.get('retry_seconds')):.3f}s",
+                    f"{_seconds(item.get('restart_seconds')):.3f}s",
+                    f"{_seconds(item.get('vm_restart_seconds')):.3f}s",
+                ]
+            )
+            + " |"
+        )
+
+
 def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     non_vm_path = Path(args.non_vm_summary)
     windows_path = Path(args.windows_summary)
@@ -1788,7 +2014,9 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
 
     deallocation = _load_json(deallocation_path) if deallocation_path.exists() else {"attempted": False}
     non_vm_counts = _count_pass_fail(non_vm.get("cases") or [])
-    windows_counts = _count_required_optional(windows.get("targets") or [])
+    windows_targets = windows.get("targets") or []
+    windows_counts = _count_required_optional(windows_targets)
+    diagnostics = _windows_diagnostics(windows_targets)
     checks = {
         "non_vm_formats_passed": non_vm_counts["failed"] == 0 and non_vm_counts["total"] > 0 and int(non_vm.get("failures", 0)) == 0,
         "windows_targets_passed": (
@@ -1840,6 +2068,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "job_status_history": str(job_history_path),
             "vm_deallocation": str(deallocation_path),
         },
+        "diagnostics": diagnostics,
     }
     _write_json(out_path, summary)
 
@@ -1880,6 +2109,46 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             lines.append(
                 "- Not live-executed because a provider is required: "
                 + ", ".join(gpt_matrix.get("not_live_executed_because_provider_required", []))
+            )
+        _append_diagnostic_table(
+            lines,
+            "Slow Windows Targets",
+            diagnostics["slow_targets"],
+            f"No Windows target met the slow threshold ({diagnostics['slow_threshold_seconds']:.0f}s).",
+        )
+        _append_diagnostic_table(
+            lines,
+            "Required Windows Failures",
+            diagnostics["required_failures"],
+            "No required Windows target failed.",
+        )
+        _append_diagnostic_table(
+            lines,
+            "Optional Diagnostic Failures",
+            diagnostics["optional_failures"],
+            "No optional diagnostic target failed.",
+        )
+        lines.extend(["", "## Bridge Recovery Events", ""])
+        if diagnostics["bridge_recovery_events"]:
+            lines.append("| Target | Classification | Health | Restart | VM Restart |")
+            lines.append("|---|---|---:|---:|---:|")
+            for item in diagnostics["bridge_recovery_events"]:
+                lines.append(
+                    f"| {item['label']} | {item['classification']} | "
+                    f"{_seconds(item.get('health_wait_seconds')):.3f}s | "
+                    f"{_seconds(item.get('restart_seconds')):.3f}s | "
+                    f"{_seconds(item.get('vm_restart_seconds')):.3f}s |"
+                )
+        else:
+            lines.append("No bridge restart or VM restart recovery was recorded.")
+        lines.extend(["", "## Session And Cache Proof", ""])
+        lines.append("| Target | Cache used | Session check | Health-before SessionId | Post-grace SessionId |")
+        lines.append("|---|---:|---:|---:|---:|")
+        for item in diagnostics["session_cache_proof"]:
+            lines.append(
+                f"| {item['label']} | {item['session_cache_used']} | "
+                f"{_seconds(item.get('session_check_seconds')):.3f}s | "
+                f"{item.get('health_before_session_id')} | {item.get('post_grace_session_id')} |"
             )
         markdown.parent.mkdir(parents=True, exist_ok=True)
         markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")

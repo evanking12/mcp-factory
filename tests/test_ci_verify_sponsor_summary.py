@@ -122,3 +122,88 @@ def test_bridge_summary_treats_optional_failures_as_non_blocking(tmp_path: Path)
     assert summary["failures"] == 0
     assert summary["optional_failures"] == 1
     assert summary["required_failures"] == 0
+
+
+def test_bridge_timing_diagnostics_include_retry_restart_and_failure_class() -> None:
+    item = {
+        "label": "cmd_exe",
+        "required": False,
+        "passed": False,
+        "matched_invocable_count": 0,
+        "min_invocables": 1,
+        "configured_post_grace_seconds": 3,
+        "health_before": {
+            "ok": True,
+            "waited_seconds": 0.5,
+            "bridge_process": {"attempted": True, "cached": False, "elapsed_seconds": 4.0, "session_id": 1},
+        },
+        "post_grace_health": {
+            "ok": True,
+            "waited_seconds": 0.25,
+            "bridge_process": {"attempted": False, "cached": True, "session_id": 1},
+        },
+        "attempts": [
+            {"ok": False, "elapsed_seconds": 10.0, "error": "connection reset"},
+            {
+                "ok": False,
+                "elapsed_seconds": 20.0,
+                "error": "matched_invocables=0",
+                "health_before_retry": {
+                    "ok": True,
+                    "waited_seconds": 1.0,
+                    "restart_attempted": True,
+                    "restart_result": {"attempted": True, "elapsed_seconds": 7.0},
+                    "vm_restart_result": {"attempted": True, "elapsed_seconds": 30.0},
+                    "bridge_process": {"attempted": True, "cached": False, "elapsed_seconds": 5.0, "session_id": 1},
+                },
+            },
+        ],
+    }
+
+    ci_verify._add_bridge_timing_diagnostics(item)
+
+    assert item["bridge_analyzer_seconds"] == 30.0
+    assert item["retry_seconds"] == 20.0
+    assert item["restart_seconds"] == 7.0
+    assert item["vm_restart_seconds"] == 30.0
+    assert item["session_check_seconds"] == 9.0
+    assert item["session_cache_used"] is True
+    assert item["timeout_or_failure_classification"] == "bridge_connection_reset"
+
+
+def test_final_summary_markdown_contains_diagnostic_sections(tmp_path: Path) -> None:
+    args = _summary_args(tmp_path)
+    _write(
+        Path(args.windows_summary),
+        {
+            "targets": [
+                {
+                    "label": "notepad_exe",
+                    "required": True,
+                    "passed": True,
+                    "total_elapsed_seconds": 64.0,
+                    "bridge_analyzer_seconds": 30.0,
+                    "health_wait_seconds": 1.0,
+                    "session_check_seconds": 0.0,
+                    "retry_seconds": 0.0,
+                    "restart_seconds": 0.0,
+                    "vm_restart_seconds": 0.0,
+                    "post_grace_seconds": 3.0,
+                    "dominant_time_source": "analyzer",
+                    "timeout_or_failure_classification": "passed_cached_session",
+                    "session_cache_used": True,
+                    "health_before": {"bridge_process": {"session_id": 1}},
+                    "post_grace_health": {"bridge_process": {"session_id": 1}},
+                }
+            ],
+            "failures": 0,
+        },
+    )
+
+    assert ci_verify.cmd_summarize_sponsor_demo(args) == 0
+    text = Path(args.markdown).read_text(encoding="utf-8")
+
+    assert "## Slow Windows Targets" in text
+    assert "notepad_exe" in text
+    assert "## Bridge Recovery Events" in text
+    assert "## Session And Cache Proof" in text

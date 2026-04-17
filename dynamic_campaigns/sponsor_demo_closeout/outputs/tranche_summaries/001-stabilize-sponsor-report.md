@@ -1,6 +1,6 @@
 # Tranche 001: Stabilize Sponsor Report
 
-Status: local gate passed; CI rerun pending
+Status: passed
 
 ## Blocker
 
@@ -21,6 +21,12 @@ Reclassify broad `cmd.exe` scanning as an optional diagnostic target. Keep deter
   - Optional Windows diagnostic failure no longer fails `summarize-sponsor-demo`.
   - Required Windows failure still fails `summarize-sponsor-demo`.
   - `summarize-bridge-e2e` records optional failures separately without blocking required-target success.
-- Rerun URL: pending after push.
-- Artifact path: pending after rerun download.
-- Final status: pending CI.
+- Rerun URL: `https://github.com/evanking12/mcp-factory/actions/runs/24539841674`
+- Artifact path: GitHub Actions artifact `sponsor-demo-e2e`, downloaded locally to `C:\Users\evanw\AppData\Local\Temp\sponsor-demo-e2e-24539841674`
+- Final status:
+  - `final-summary.json` has `passed=true`.
+  - Required Windows targets: 6/6 passed.
+  - Optional diagnostics: 1/1 passed.
+  - GPT matrix: 13/13 passed.
+  - Real execution proofs: 6/6.
+  - Provider-required tool-call proofs: 7/7.

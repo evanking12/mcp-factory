@@ -1,18 +1,26 @@
-# Active Prompt: 001-stabilize-sponsor-report
+# Active Prompt: 002-diagnostics
 
-Fix the sponsor final summary gate before moving to diagnostics.
+Add diagnosable timing and recovery evidence to Windows target summaries and final sponsor markdown.
 
 ## Required Work
 
-- Import dynamic campaign doctrine locally.
-- Mark broad `cmd.exe` scanning as optional diagnostic in Sponsor Demo E2E.
-- Preserve deterministic `.cmd` fixture and GPT CMD proof as required CMD/BAT evidence.
-- Make Windows summary and final sponsor summary distinguish required failures from optional diagnostic failures.
-- Add focused tests proving optional `cmd_exe` failure does not fail the final sponsor report and required failures still do.
+- Add top-level timing breakdown fields to each Windows target summary:
+  - `health_wait_seconds`
+  - `session_check_seconds`
+  - `session_cache_used`
+  - `bridge_analyzer_seconds`
+  - `retry_seconds`
+  - `restart_seconds`
+  - `vm_restart_seconds`
+  - `post_grace_seconds`
+  - `timeout_or_failure_classification`
+- Add final markdown sections for slow targets, optional failures, required failures, bridge recovery events, and session/cache proof.
+- Classify optional diagnostics clearly.
 
 ## Passing Criteria
 
 - `python -m py_compile scripts/ci_verify.py scripts/gui_bridge.py`
-- focused tests pass.
-- Sponsor Demo E2E rerun reaches green final summary.
-- Tranche summary records the run URL, artifact path, and reason this fixes the blocker.
+- focused diagnostics tests pass.
+- Target summaries explain `cmd_exe` and `notepad_exe` wall time without reading raw logs.
+- Final summary says whether slowness came from analyzer time, bridge recovery, VM restart, or timeout.
+- Campaign tranche `002-diagnostics` is written.
