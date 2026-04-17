@@ -42,10 +42,18 @@ jobs:
             --windows-summary ci_artifacts/demo/windows/summary.json \
             --gpt-artifact-dir ci_artifacts/demo/gpt4o \
             --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
+            --windows-gpt-summary ci_artifacts/demo/windows-gpt/summary.json \
+            --repo-ingestion-summary ci_artifacts/demo/repo-ingestion/summary.json \
+            --com-runtime-summary ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json \
+            --stretch-runtime-summary ci_artifacts/demo/legacy-runtime-matrix/summary.json \
+            --remote-dcom-summary ci_artifacts/demo/windows/dcom/dcom.summary.json \
+            --windows-runtime-summary ci_artifacts/demo/windows/runtime_fixture/runtime_fixture.summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \
-            --html ci_artifacts/demo/sponsor-report.html
+            --html ci_artifacts/demo/sponsor-report.html \
+            --canonical-run-url "https://github.com/evanking12/mcp-factory/actions/runs/${{ inputs.run_id }}" \
+            --require-remote-dcom
           cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report artifact

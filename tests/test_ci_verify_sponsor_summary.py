@@ -329,7 +329,7 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     assert "schemaBlob" in ui
     assert "Load SOAP/WSDL Showcase" in ui
     assert "Legacy Protocol Showcase" in ui
-    assert "24568108685" in ui
+    assert "24578415657" in ui
     assert "Run Canonical Proof" in ui
     assert "tool_call:" in ui
     assert "tool_result:" in ui

@@ -135,8 +135,8 @@ az containerapp update --name mcp-factory-ui --resource-group mcp-factory-rg --i
 
 The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml). The workflow uploads a GitHub Actions artifact named `sponsor-demo-e2e`.
 
-Canonical green run: [24568108685](https://github.com/evanking12/mcp-factory/actions/runs/24568108685).
-Focused Remote DCOM runtime pass: [24577926238](https://github.com/evanking12/mcp-factory/actions/runs/24577926238).
+Canonical green run: [24578415657](https://github.com/evanking12/mcp-factory/actions/runs/24578415657).
+Focused Remote DCOM runtime source proof: [24577926238](https://github.com/evanking12/mcp-factory/actions/runs/24577926238).
 
 Static sponsor references:
 
@@ -151,7 +151,7 @@ Interpret the artifact as the canonical sponsor proof bundle:
 - `sponsor-report.html` is a browsable rendering of the same report for live review.
 - `final-summary.json` is the machine-readable form of the same gate.
 - GPT `tool_call` + backend `tool_result` sentinel proofs are required for all 13 non-VM cases: OpenAPI/REST, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, SQL, Python, JavaScript, Ruby, PHP, PowerShell, and CMD/BAT.
-- JSON-RPC is hosted as a JSON-RPC 2.0 service in the pipeline API. SOAP validates SOAP envelopes and dispatches WSDL-named operations. SQL executes against deterministic SQLite-backed Contoso data. OpenAPI/REST validates declared routes and methods. JNDI uses a controlled LDAPv3-compatible bind/search/lookup runtime, CORBA uses a controlled OmniORB/IIOP runtime for deterministic Contoso IDL, and RPC uses a controlled DCE/RPC-compatible runtime for deterministic RPC IDL. COM/TLB discovery and local COM automation are proven through the Windows bridge. Focused run `24577926238` proves a controlled same-subnet Remote DCOM fixture through WMI over DCOM; it is promoted to the canonical claim only after the full Sponsor Demo E2E imports it and passes. Generalized CORBA estate migration, enterprise directory migration, arbitrary MSRPC estate support, and arbitrary enterprise DCOM estate migration are not claimed. A "provider required" result is now a fallback only when those services are disabled or unreachable, not a passing required sponsor result.
+- JSON-RPC is hosted as a JSON-RPC 2.0 service in the pipeline API. SOAP validates SOAP envelopes and dispatches WSDL-named operations. SQL executes against deterministic SQLite-backed Contoso data. OpenAPI/REST validates declared routes and methods. JNDI uses a controlled LDAPv3-compatible bind/search/lookup runtime, CORBA uses a controlled OmniORB/IIOP runtime for deterministic Contoso IDL, and RPC uses a controlled DCE/RPC-compatible runtime for deterministic RPC IDL. COM/TLB discovery and local COM automation are proven through the Windows bridge. Canonical run `24578415657` imports focused run `24577926238` and proves a controlled same-subnet Remote DCOM fixture through WMI over DCOM. Generalized CORBA estate migration, enterprise directory migration, arbitrary MSRPC estate support, and arbitrary enterprise DCOM estate migration are not claimed. A "provider required" result is now a fallback only when those services are disabled or unreachable, not a passing required sponsor result.
 - `ci_artifacts/demo/gpt-format-matrix/summary.json` records `runtime_mode_counts`, `runtime_backed_cases`, `adapter_backed_cases`, per-case `tool_call`/`tool_result` flags, and transcript paths.
 - The canonical run above reports `13/13` live execution format proofs and `0` required provider-required cases.
 - Target input supports both uploaded files and installed paths/directories. Installed paths must be accessible to the server or Windows bridge VM context performing discovery; `system32_directory` is the required installed-directory proof for requirement `2.a`.

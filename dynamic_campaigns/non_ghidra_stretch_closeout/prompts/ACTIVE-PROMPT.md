@@ -7,12 +7,12 @@ Baseline canonical green Sponsor Demo E2E run is
 
 Current frontier:
 
-- Focused run `24577926238` passed Remote DCOM through a controlled
-  same-subnet Azure client VM using WMI over DCOM.
-- The focused artifact proves `remote_dcom_runtime`, distinct client/server
-  context, sentinel match, GPT `tool_call`, backend `tool_result`, and cleanup.
-- Next gate: run full Sponsor Demo E2E with `remote_dcom_run_id=24577926238`
-  and promote docs/UI canonical links only after that full run is green.
+- Full Sponsor Demo E2E run `24578415657` passed with focused Remote DCOM run
+  `24577926238` imported and required.
+- The final artifact proves `remote_dcom_runtime`, GPT matrix `13/13`, Windows
+  GPT `5/5`, repo ingestion, LDAP, CORBA ORB/IIOP, MSRPC, local COM, and VM
+  deallocation.
+- Remaining gate: report-only reproducibility, then final commit/push closeout.
 
 Campaign goals:
 

@@ -29,11 +29,10 @@ does not claim.
   references, and client invocation for the fixture, but it is not generalized
   CORBA estate migration.
 - COM/TLB discovery and local COM automation are proven through the Windows
-  bridge. Focused run `24577926238` proves controlled Remote DCOM activation
-  and invocation for a same-subnet fixture through WMI over DCOM; arbitrary
-  enterprise DCOM estate migration is not claimed, and the focused artifact is
-  promoted to the canonical claim only after a full Sponsor Demo E2E imports it
-  and passes.
+  bridge. Canonical run `24578415657` imports focused run `24577926238` and
+  proves controlled Remote DCOM activation and invocation for a same-subnet
+  fixture through WMI over DCOM. Arbitrary enterprise DCOM estate migration is
+  not claimed.
 
 ## Binary Recovery Scope
 
@@ -55,8 +54,10 @@ semantically executed by GPT.
 ## Current Required Green Contract
 
 The current canonical green contract is run
-[24568108685](https://github.com/evanking12/mcp-factory/actions/runs/24568108685).
-Run [24547629781](https://github.com/evanking12/mcp-factory/actions/runs/24547629781)
+[24578415657](https://github.com/evanking12/mcp-factory/actions/runs/24578415657).
+Run [24568108685](https://github.com/evanking12/mcp-factory/actions/runs/24568108685)
+is the previous green non-Ghidra baseline, run
+[24547629781](https://github.com/evanking12/mcp-factory/actions/runs/24547629781)
 is the previous runtime-expansion green run, and run
 [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
 remains a historical fallback before the runtime expansion campaign.

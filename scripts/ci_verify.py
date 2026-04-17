@@ -361,7 +361,7 @@ STRETCH_PROOF_REQUIREMENTS = [
         "id": "corba_orb_runtime",
         "label": "CORBA ORB/IIOP runtime",
         "target_mode": "corba_orb_runtime",
-        "current_mode": "corba_idl_runtime",
+        "current_mode": "corba_orb_runtime",
         "required_artifacts": [
             "ci_artifacts/demo/legacy/corba_orb/contoso_support.idl",
             "ci_artifacts/demo/legacy/corba_orb/orb-server.log",
@@ -373,7 +373,7 @@ STRETCH_PROOF_REQUIREMENTS = [
         "id": "msrpc_runtime",
         "label": "Controlled MSRPC / Windows RPC runtime",
         "target_mode": "msrpc_runtime",
-        "current_mode": "xmlrpc_runtime",
+        "current_mode": "msrpc_runtime",
         "required_artifacts": [
             "ci_artifacts/demo/legacy/msrpc/contoso_rpc.idl",
             "ci_artifacts/demo/legacy/msrpc/endpoint-registration.json",
@@ -385,7 +385,7 @@ STRETCH_PROOF_REQUIREMENTS = [
         "id": "remote_dcom_runtime",
         "label": "Controlled remote DCOM runtime",
         "target_mode": "remote_dcom_runtime",
-        "current_mode": "com_runtime",
+        "current_mode": "remote_dcom_runtime",
         "required_artifacts": [
             "ci_artifacts/demo/windows/dcom/dcom.summary.json",
             "ci_artifacts/demo/windows/dcom/remote-activation-transcript.json",
@@ -3393,6 +3393,7 @@ def _build_requirement_matrix(
     gpt_tool_ok = bool(checks.get("gpt_tool_call_seen") and checks.get("gpt_sentinel_seen") and schema_tool_count > 0)
     windows_gpt_ok = int(windows_gpt.get("failures", 1)) == 0 and int(windows_gpt.get("total", 0)) > 0
     com_runtime_ok = bool(checks.get("windows_com_runtime_proof_passed"))
+    remote_dcom_ok = bool(checks.get("remote_dcom_runtime_proof_passed"))
     repo_ok = bool(repo_ingestion.get("passed"))
     return [
         {
@@ -3414,7 +3415,7 @@ def _build_requirement_matrix(
             "summary": "RPC, JNDI, COM/DCOM, SOAP, CORBA, JSON/JSON-RPC technologies are considered.",
             "implementation_surface": "Format providers discover schemas and generate GPT-callable tools backed by hosted runtime providers; COM/TLB is scanned on Windows.",
             "proof_type": "live_execution",
-            "status": _matrix_status(all_live_ok and windows_ok and com_runtime_ok),
+            "status": _matrix_status(all_live_ok and windows_ok and com_runtime_ok and remote_dcom_ok),
             "artifact_paths": [
                 "ci_artifacts/demo/gpt-format-matrix/openapi/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/jsonrpc/summary.json",
@@ -3424,9 +3425,10 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/gpt-format-matrix/jndi/summary.json",
                 "ci_artifacts/demo/windows/stdole2_tlb/stdole2_tlb.summary.json",
                 "ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json",
+                "ci_artifacts/demo/windows/dcom/dcom.summary.json",
                 "docs/sponsor/caveats.md",
             ],
-            "notes": "JSON-RPC, SOAP, SQL, controlled LDAP/JNDI bind/search/lookup, controlled CORBA ORB/IIOP, and controlled DCE/RPC-compatible RPC IDL are runtime-backed when their focused artifacts are present. REST is route-validated. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
+            "notes": "JSON-RPC, SOAP, SQL, controlled LDAP/JNDI bind/search/lookup, controlled CORBA ORB/IIOP, controlled DCE/RPC-compatible RPC IDL, and controlled same-subnet Remote DCOM through WMI over DCOM are runtime-backed when their artifacts are present. REST is route-validated. COM/TLB discovery and local COM automation are also proven.",
         },
         {
             "requirement": "1.c",
