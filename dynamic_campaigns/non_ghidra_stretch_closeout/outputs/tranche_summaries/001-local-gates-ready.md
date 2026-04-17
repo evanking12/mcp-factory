@@ -16,6 +16,9 @@ Implemented:
 - Third focused run `24574883953` passed preflight and created/cleaned the NIC,
   but `az vm create` rejected a NIC name. The workflow now passes the NIC
   resource ID.
+- Fourth focused run `24574950877` showed the runner did not tolerate querying
+  `az network nic create` output directly. The workflow now creates the NIC with
+  no output and resolves the NIC ID with `az network nic show`.
 - Full Sponsor Demo E2E accepts `remote_dcom_run_id` and imports the focused
   `sponsor-remote-dcom-runtime` artifact.
 - Final Sponsor Demo summary can require Remote DCOM with

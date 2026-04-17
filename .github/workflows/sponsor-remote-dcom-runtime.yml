@@ -137,14 +137,15 @@ jobs:
         run: |
           set -euo pipefail
           computer_name="dcom${GITHUB_RUN_ID: -10}"
-          client_nic_id="$(az network nic create \
+          az network nic create \
             --resource-group "$RESOURCE_GROUP" \
             --name "$CLIENT_NIC_NAME" \
             --location "$LOCATION" \
             --subnet "$SUBNET_ID" \
             --tags purpose=mcp-factory-remote-dcom github-run-id="${GITHUB_RUN_ID}" \
-            --query NewNIC.id -o tsv \
-            --only-show-errors)"
+            --only-show-errors \
+            -o none
+          client_nic_id="$(az network nic show --resource-group "$RESOURCE_GROUP" --name "$CLIENT_NIC_NAME" --query id -o tsv)"
           echo "CLIENT_NIC_ID=$client_nic_id" >> "$GITHUB_ENV"
           az vm create \
             --resource-group "$RESOURCE_GROUP" \
