@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,40 @@ from scripts import ci_verify
 
 def _write(path: Path, data: dict) -> None:
     ci_verify._write_json(path, data)
+
+
+def test_vm_powershell_json_parses_later_run_command_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "passed": True,
+        "runtime_mode": "remote_dcom_runtime",
+        "remote_sentinel": "MCP_FACTORY_REMOTE_DCOM_TEST",
+    }
+
+    class Completed:
+        returncode = 0
+        stdout = json.dumps(["", "Enable succeeded", json.dumps(payload)])
+        stderr = ""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> Completed:
+        assert "--query" in cmd
+        assert cmd[cmd.index("--query") + 1] == "value[].message"
+        assert "-o" in cmd
+        assert cmd[cmd.index("-o") + 1] == "json"
+        return Completed()
+
+    monkeypatch.setattr(ci_verify.subprocess, "run", fake_run)
+
+    result = ci_verify._run_vm_powershell_json(
+        resource_group="rg",
+        vm_name="vm",
+        script="Write-Output '{}'",
+        timeout=10,
+    )
+
+    assert result["ok"] is True
+    assert result["passed"] is True
+    assert result["runtime_mode"] == "remote_dcom_runtime"
+    assert result["remote_sentinel"] == "MCP_FACTORY_REMOTE_DCOM_TEST"
 
 
 def _summary_args(tmp_path: Path) -> SimpleNamespace:

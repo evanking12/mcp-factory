@@ -1019,8 +1019,8 @@ def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, t
         "-n", vm_name,
         "--command-id", "RunPowerShellScript",
         "--scripts", script,
-        "--query", "value[0].message",
-        "-o", "tsv",
+        "--query", "value[].message",
+        "-o", "json",
     ]
     started = time.perf_counter()
     try:
@@ -1043,9 +1043,18 @@ def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, t
                         for item in outer["value"]
                         if isinstance(item, dict) and str(item.get("message", "")).strip()
                     ] or candidate_lines
+                elif isinstance(outer, list):
+                    candidate_lines = [
+                        str(item)
+                        for item in outer
+                        if str(item).strip()
+                    ] or candidate_lines
             except json.JSONDecodeError:
                 pass
-            for line in reversed(candidate_lines):
+            flattened_lines: list[str] = []
+            for candidate in candidate_lines:
+                flattened_lines.extend(str(candidate).splitlines())
+            for line in reversed(flattened_lines):
                 try:
                     payload = json.loads(line)
                     if isinstance(payload, dict):

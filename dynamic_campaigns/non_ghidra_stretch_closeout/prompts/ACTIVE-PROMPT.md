@@ -5,6 +5,15 @@ Implement the non-Ghidra stretch closeout campaign sequentially.
 Baseline canonical green Sponsor Demo E2E run is
 `24568108685`. Preserve it as fallback until a newer full run passes.
 
+Current frontier:
+
+- Focused run `24575880821` proved Azure same-subnet client VM creation and
+  cleanup are working.
+- It exposed a Run Command payload parsing issue rather than a permissions
+  blocker.
+- Commit the parser fix, rerun focused Remote DCOM, then promote only if the
+  parsed artifact proves `remote_dcom_runtime`.
+
 Campaign goals:
 
 1. Verify GitHub OIDC can read the bridge VM NIC/subnet and create/delete a
