@@ -115,6 +115,7 @@ jobs:
               "AZURE_RESOURCE_GROUP=${{ env.RG }}" \
               "BRIDGE_VM_NAME=${{ env.BRIDGE_VM_NAME }}" \
               "ENABLE_BRIDGE_VM_LIFECYCLE=true" \
+              "ENABLE_CORBA_ORB_RUNTIME=true" \
               "BRIDGE_START_TIMEOUT_SECONDS=420" \
               "BRIDGE_IDLE_MINUTES=30"
 

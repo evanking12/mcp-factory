@@ -21,8 +21,8 @@ from fastapi.responses import JSONResponse, Response
 from api.corba_runtime import (
     CONTOSO_CORBA_IDL,
     CorbaRuntimeUnavailable,
+    corba_orb_enabled,
     corba_orb_invoke,
-    corba_runtime_available,
 )
 from api.ldap_runtime import (
     BASE_DN,
@@ -43,7 +43,7 @@ PROVIDERS = {
     "jsonrpc": "JSON-RPC 2.0 hosted Contoso runtime",
     "soap": "SOAP/WSDL envelope-validating Contoso runtime",
     "sql": "SQLite-backed Contoso runtime",
-    "corba": "CORBA ORB/IIOP Contoso runtime" if corba_runtime_available() else "CORBA IDL object-registry runtime-shaped provider",
+    "corba": "CORBA ORB/IIOP Contoso runtime" if corba_orb_enabled() else "CORBA IDL object-registry runtime-shaped provider",
     "rpc": "XML-RPC hosted Contoso runtime",
     "jndi": "LDAPv3-compatible JNDI binding runtime",
 }
@@ -52,7 +52,7 @@ PROVIDER_MODES = {
     "jsonrpc": "real_runtime",
     "soap": "real_runtime",
     "sql": "real_runtime",
-    "corba": "corba_orb_runtime" if corba_runtime_available() else "corba_idl_runtime",
+    "corba": "corba_orb_runtime" if corba_orb_enabled() else "corba_idl_runtime",
     "rpc": "xmlrpc_runtime",
     "jndi": "ldap_runtime",
 }

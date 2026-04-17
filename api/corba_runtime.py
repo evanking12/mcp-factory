@@ -9,6 +9,7 @@ fixture proof, not a generalized CORBA estate migration platform.
 from __future__ import annotations
 
 import importlib
+import os
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,10 @@ def corba_runtime_available() -> bool:
     except Exception:
         return False
     return shutil.which("omniidl") is not None
+
+
+def corba_orb_enabled() -> bool:
+    return os.getenv("ENABLE_CORBA_ORB_RUNTIME", "").strip().lower() in {"1", "true", "yes"} and corba_runtime_available()
 
 
 class CorbaRuntimeUnavailable(RuntimeError):
