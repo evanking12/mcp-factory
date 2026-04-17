@@ -178,3 +178,49 @@ could confuse review if final artifacts are not checked.
 
 Next correction: require downloaded workflow artifacts to prove deployed
 `msrpc_runtime` before tranche closeout.
+
+## 005 Remote DCOM Runtime
+
+`gm_control_quality`: 2
+
+Evidence: the proof command requires a distinct client VM and fails if the
+remote sentinel is not read through the COM object.
+
+Strongest risk: DCOM authentication, firewall, or Azure networking may block
+remote activation even when local COM automation works.
+
+Next correction: focused workflow must produce a transcript identifying the
+failing layer; no local COM fallback is allowed for this tranche.
+
+`context_pressure_result`: 2
+
+Evidence: the proof writes under `ci_artifacts/demo/windows/dcom` and the
+temporary Azure resources are named and cleaned in the focused workflow.
+
+Strongest risk: a failed workflow could leave a VM disk or NIC if Azure cleanup
+also fails.
+
+Next correction: inspect cleanup logs after the focused workflow, and add a
+manual cleanup command to the tranche summary if needed.
+
+`delegation_effectiveness`: 2
+
+Evidence: no subagents were dispatched because this turn did not authorize
+delegation.
+
+Strongest risk: DCOM-specific Windows troubleshooting could benefit from a
+parallel verifier if the focused run fails.
+
+Next correction: keep diagnosis local unless explicit delegation
+authorization appears.
+
+`operator_reviewability`: 2
+
+Evidence: the command writes server setup, client invocation, cleanup payload,
+checks, generated schema, GPT transcript, and summary artifacts.
+
+Strongest risk: reviewers could confuse controlled WScript.Shell fixture proof
+with arbitrary DCOM estate support.
+
+Next correction: preserve caveat language in final report and proof index after
+the focused proof passes.

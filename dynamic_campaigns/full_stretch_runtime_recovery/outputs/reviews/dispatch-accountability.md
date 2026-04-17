@@ -14,6 +14,22 @@ Why not dispatched:
 - `authorization_absent`
 - `critical_path_better_kept_local`
 
+## 005 Remote DCOM Runtime
+
+Roles considered:
+- implementation worker
+- Windows DCOM verifier
+- Azure cleanup verifier
+- CI verifier
+- campaign scribe
+
+Roles dispatched:
+- none
+
+Why not dispatched:
+- `authorization_absent`
+- `critical_path_better_kept_local`
+
 ## 004 MSRPC Runtime
 
 Roles considered:

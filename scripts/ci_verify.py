@@ -8,6 +8,7 @@ schema shape, tool-call events, sentinel output, and downloadable artifacts.
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import json
 import os
@@ -1047,6 +1048,46 @@ def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, t
             "error": str(exc),
             "elapsed_seconds": round(time.perf_counter() - started, 3),
         }
+
+
+def _az_tsv(args: list[str], *, timeout: int = 120) -> str:
+    proc = subprocess.run(["az", *args, "-o", "tsv"], check=False, capture_output=True, text=True, timeout=timeout)
+    if proc.returncode != 0:
+        raise RuntimeError(f"az {' '.join(args)} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+    return proc.stdout.strip()
+
+
+def _get_vm_private_ip(*, resource_group: str, vm_name: str, timeout: int = 120) -> str:
+    nic_id = _az_tsv(
+        [
+            "vm",
+            "show",
+            "-g",
+            resource_group,
+            "-n",
+            vm_name,
+            "--query",
+            "networkProfile.networkInterfaces[0].id",
+        ],
+        timeout=timeout,
+    )
+    if not nic_id:
+        raise RuntimeError(f"VM {vm_name} has no network interface")
+    private_ip = _az_tsv(
+        [
+            "network",
+            "nic",
+            "show",
+            "--ids",
+            nic_id,
+            "--query",
+            "ipConfigurations[0].privateIPAddress",
+        ],
+        timeout=timeout,
+    )
+    if not private_ip:
+        raise RuntimeError(f"VM {vm_name} has no private IP")
+    return private_ip
 
 
 def _ensure_bridge_health(
@@ -2211,6 +2252,314 @@ $result | ConvertTo-Json -Compress
     if not summary["passed"]:
         raise AssertionError(f"Windows COM runtime proof failed; see {out_path}")
     print(f"OK Windows COM runtime proof: {out_path}")
+    return 0
+
+
+def _remote_dcom_server_setup_script(*, username: str, password: str, sentinel: str) -> str:
+    return f"""
+$ErrorActionPreference = "Stop"
+$username = {_ps_quote(username)}
+$password = {_ps_quote(password)}
+$sentinel = {_ps_quote(sentinel)}
+$secure = ConvertTo-SecureString $password -AsPlainText -Force
+$user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+if ($null -eq $user) {{
+    New-LocalUser -Name $username -Password $secure -PasswordNeverExpires -AccountNeverExpires | Out-Null
+}} else {{
+    $user | Set-LocalUser -Password $secure
+    Enable-LocalUser -Name $username
+}}
+$memberName = "$env:COMPUTERNAME\\$username"
+$isAdmin = $false
+try {{
+    $isAdmin = [bool](Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -eq $memberName -or $_.Name -like "*\\$username" }})
+}} catch {{ $isAdmin = $false }}
+if (-not $isAdmin) {{
+    Add-LocalGroupMember -Group "Administrators" -Member $username
+}}
+New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Force | Out-Null
+New-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Name "EnableDCOM" -PropertyType String -Value "Y" -Force | Out-Null
+New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Force | Out-Null
+New-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Name "LocalAccountTokenFilterPolicy" -PropertyType DWord -Value 1 -Force | Out-Null
+New-Item -Path "HKLM:\\SOFTWARE\\MCPFactory\\DCOM" -Force | Out-Null
+New-ItemProperty -Path "HKLM:\\SOFTWARE\\MCPFactory\\DCOM" -Name "Sentinel" -PropertyType String -Value $sentinel -Force | Out-Null
+$firewallRules = @()
+try {{
+    Enable-NetFirewallRule -DisplayGroup "COM+ Network Access" -ErrorAction SilentlyContinue | Out-Null
+}} catch {{ }}
+foreach ($rule in @(
+    @{{ Name = "MCPFactory-Remote-DCOM-EndpointMapper"; Port = "135" }},
+    @{{ Name = "MCPFactory-Remote-DCOM-DynamicRPC"; Port = "49152-65535" }}
+)) {{
+    if (-not (Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue)) {{
+        New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Action Allow -Protocol TCP -LocalPort $rule.Port | Out-Null
+    }}
+    $firewallRules += $rule.Name
+}}
+$clsid = ""
+$appid = ""
+try {{ $clsid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\WScript.Shell\\CLSID").GetValue("") }} catch {{ }}
+try {{
+    if ($clsid) {{ $appid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\CLSID\\$clsid").GetValue("AppID") }}
+}} catch {{ }}
+[ordered]@{{
+    passed = ($clsid -ne "")
+    proof_level = "remote_dcom_runtime"
+    runtime_mode = "remote_dcom_runtime"
+    dcom_surface = "server_configured_for_remote_activation"
+    remote_dcom_activation_claimed = $false
+    server_computer_name = $env:COMPUTERNAME
+    prog_id = "WScript.Shell"
+    clsid = $clsid
+    appid = $appid
+    dcom_enabled = "Y"
+    local_account_token_filter_policy = 1
+    proof_user = $username
+    firewall_rules = $firewallRules
+    registry_sentinel_path = "HKLM\\SOFTWARE\\MCPFactory\\DCOM\\Sentinel"
+    sentinel_configured = $true
+}} | ConvertTo-Json -Depth 12 -Compress
+"""
+
+
+def _remote_dcom_client_script(*, username: str, password: str, server_target: str, sentinel: str) -> str:
+    proof_path = f"C:\\Windows\\Temp\\mcp-factory-remote-dcom-{uuid.uuid4().hex[:8]}.json"
+    inner = f"""
+$ErrorActionPreference = "Stop"
+$serverTarget = {_ps_quote(server_target)}
+$sentinel = {_ps_quote(sentinel)}
+$proofPath = {_ps_quote(proof_path)}
+$result = [ordered]@{{
+    passed = $false
+    proof_level = "remote_dcom_runtime"
+    runtime_mode = "remote_dcom_runtime"
+    dcom_surface = "remote_activation_invocation"
+    remote_dcom_activation_claimed = $true
+    client_computer_name = $env:COMPUTERNAME
+    server_target = $serverTarget
+    prog_id = "WScript.Shell"
+    remote_computer_name = ""
+    remote_sentinel = ""
+    distinct_remote_context = $false
+    error = ""
+}}
+try {{
+    $type = [type]::GetTypeFromProgID("WScript.Shell", $serverTarget, $true)
+    $object = [Activator]::CreateInstance($type)
+    $remoteComputer = $object.ExpandEnvironmentStrings("%COMPUTERNAME%")
+    $remoteSentinel = $object.RegRead("HKLM\\SOFTWARE\\MCPFactory\\DCOM\\Sentinel")
+    $result.remote_computer_name = [string]$remoteComputer
+    $result.remote_sentinel = [string]$remoteSentinel
+    $result.distinct_remote_context = ([string]$remoteComputer -ne "" -and [string]$remoteComputer -ne $env:COMPUTERNAME)
+    $result.passed = ($result.distinct_remote_context -and [string]$remoteSentinel -eq $sentinel)
+}} catch {{
+    $result.error = $_.Exception.Message
+}}
+$result | ConvertTo-Json -Depth 12 -Compress | Set-Content -Path $proofPath -Encoding UTF8
+"""
+    encoded = base64.b64encode(inner.encode("utf-16le")).decode("ascii")
+    return f"""
+$ErrorActionPreference = "Stop"
+$username = {_ps_quote(username)}
+$password = {_ps_quote(password)}
+$proofPath = {_ps_quote(proof_path)}
+$secure = ConvertTo-SecureString $password -AsPlainText -Force
+$user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+if ($null -eq $user) {{
+    New-LocalUser -Name $username -Password $secure -PasswordNeverExpires -AccountNeverExpires | Out-Null
+}} else {{
+    $user | Set-LocalUser -Password $secure
+    Enable-LocalUser -Name $username
+}}
+try {{ Start-Service seclogon -ErrorAction SilentlyContinue }} catch {{ }}
+$cred = New-Object System.Management.Automation.PSCredential(".\\$username", $secure)
+$proc = Start-Process -FilePath "powershell.exe" -Credential $cred -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", {_ps_quote(encoded)}) -Wait -PassThru
+for ($i = 0; $i -lt 60; $i++) {{
+    if (Test-Path $proofPath) {{ break }}
+    Start-Sleep -Seconds 2
+}}
+if (-not (Test-Path $proofPath)) {{
+    [ordered]@{{
+        passed = $false
+        runtime_mode = "remote_dcom_runtime"
+        proof_level = "remote_dcom_runtime"
+        dcom_surface = "remote_activation_invocation"
+        remote_dcom_activation_claimed = $true
+        client_computer_name = $env:COMPUTERNAME
+        proof_exit_code = $proc.ExitCode
+        error = "remote DCOM proof file was not created"
+    }} | ConvertTo-Json -Depth 12 -Compress
+    exit 0
+}}
+$proof = Get-Content -Path $proofPath -Raw | ConvertFrom-Json
+[ordered]@{{
+    passed = ([bool]$proof.passed -and $proc.ExitCode -eq 0)
+    runtime_mode = "remote_dcom_runtime"
+    proof_level = "remote_dcom_runtime"
+    dcom_surface = "remote_activation_invocation"
+    remote_dcom_activation_claimed = $true
+    client_computer_name = $env:COMPUTERNAME
+    proof_exit_code = $proc.ExitCode
+    proof_path = $proofPath
+    proof = $proof
+}} | ConvertTo-Json -Depth 20 -Compress
+"""
+
+
+def _remote_dcom_server_cleanup_script(*, username: str) -> str:
+    return f"""
+$ErrorActionPreference = "Continue"
+$username = {_ps_quote(username)}
+Remove-Item -Path "HKLM:\\SOFTWARE\\MCPFactory\\DCOM" -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($name in @("MCPFactory-Remote-DCOM-EndpointMapper", "MCPFactory-Remote-DCOM-DynamicRPC")) {{
+    Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+}}
+try {{ Remove-LocalUser -Name $username -ErrorAction SilentlyContinue }} catch {{ }}
+[ordered]@{{
+    attempted = $true
+    removed_user = $username
+    removed_firewall_rules = @("MCPFactory-Remote-DCOM-EndpointMapper", "MCPFactory-Remote-DCOM-DynamicRPC")
+    removed_registry_path = "HKLM\\SOFTWARE\\MCPFactory\\DCOM"
+}} | ConvertTo-Json -Depth 8 -Compress
+"""
+
+
+def _remote_dcom_invocable(summary: dict) -> dict:
+    return {
+        "name": "remote_dcom_activation_result",
+        "source_type": "remote_dcom_runtime",
+        "description": "Return the recorded controlled remote DCOM activation and invocation proof from CI.",
+        "parameters": [
+            {
+                "name": "acknowledgement",
+                "type": "string",
+                "description": "Short note confirming the remote DCOM proof being requested.",
+            }
+        ],
+        "execution": {
+            "method": "observed_result",
+            "artifact_path": "ci_artifacts/demo/windows/dcom/dcom.summary.json",
+            "summary_path": "ci_artifacts/demo/windows/dcom/dcom.summary.json",
+            "source": "remote_dcom_runtime_summary",
+            "observed_result": summary,
+        },
+    }
+
+
+def cmd_windows_remote_dcom_runtime_proof(args: argparse.Namespace) -> int:
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_dir = Path(args.artifact_dir)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = artifact_dir / "remote-activation-transcript.json"
+    sentinel = args.sentinel or f"MCP_FACTORY_REMOTE_DCOM_{uuid.uuid4().hex[:8]}"
+    server_target = args.server_target or _get_vm_private_ip(resource_group=args.resource_group, vm_name=args.server_vm_name)
+    cleanup_payload: dict = {"attempted": False}
+
+    server_setup = _run_vm_powershell_json(
+        resource_group=args.resource_group,
+        vm_name=args.server_vm_name,
+        script=_remote_dcom_server_setup_script(username=args.dcom_username, password=args.dcom_password, sentinel=sentinel),
+        timeout=args.timeout,
+    )
+    client_invocation = _run_vm_powershell_json(
+        resource_group=args.resource_group,
+        vm_name=args.client_vm_name,
+        script=_remote_dcom_client_script(
+            username=args.dcom_username,
+            password=args.dcom_password,
+            server_target=server_target,
+            sentinel=sentinel,
+        ),
+        timeout=args.timeout,
+    )
+    if args.cleanup:
+        cleanup_payload = _run_vm_powershell_json(
+            resource_group=args.resource_group,
+            vm_name=args.server_vm_name,
+            script=_remote_dcom_server_cleanup_script(username=args.dcom_username),
+            timeout=args.timeout,
+        )
+
+    proof = client_invocation.get("proof") or {}
+    checks = {
+        "server_setup_ok": bool(server_setup.get("ok", True) and server_setup.get("passed")),
+        "client_invocation_ok": bool(client_invocation.get("ok", True)),
+        "remote_activation_claimed": bool(client_invocation.get("remote_dcom_activation_claimed", True)),
+        "client_proof_passed": bool(proof.get("passed") or client_invocation.get("passed")),
+        "distinct_remote_context": bool(proof.get("distinct_remote_context")),
+        "remote_sentinel_matches": proof.get("remote_sentinel") == sentinel,
+    }
+    runtime_passed = all(checks.values())
+    summary = {
+        "label": "remote_dcom_runtime",
+        "target": "Controlled remote DCOM WScript.Shell activation",
+        "passed": runtime_passed,
+        "proof_level": "remote_dcom_runtime",
+        "runtime_mode": "remote_dcom_runtime",
+        "dcom_surface": "remote_dcom_activation_invocation",
+        "remote_dcom_activation_claimed": True,
+        "sentinel": sentinel,
+        "server_vm_name": args.server_vm_name,
+        "client_vm_name": args.client_vm_name,
+        "server_target": server_target,
+        "prog_id": "WScript.Shell",
+        "clsid": server_setup.get("clsid", ""),
+        "appid": server_setup.get("appid", ""),
+        "checks": checks,
+        "artifacts": {
+            "summary": str(out_path),
+            "remote_activation_transcript": str(transcript_path),
+        },
+        "server_setup": {k: v for k, v in server_setup.items() if k not in {"stdout", "stderr"}},
+        "client_invocation": {k: v for k, v in client_invocation.items() if k not in {"stdout", "stderr"}},
+        "server_cleanup": {k: v for k, v in cleanup_payload.items() if k not in {"stdout", "stderr"}},
+        "notes": "Controlled remote DCOM activation/invocation from a distinct Azure Windows client context; not arbitrary enterprise DCOM estate support.",
+    }
+
+    if runtime_passed and args.base_url:
+        selected = _remote_dcom_invocable(summary)
+        proof_result = _call_generated_tool_with_gpt(
+            base_url=args.base_url.rstrip("/"),
+            pipeline_key=args.pipeline_key or "",
+            job_id=f"dcom-{uuid.uuid4().hex[:8]}",
+            component_name=f"remote-dcom-{uuid.uuid4().hex[:8]}",
+            selected=selected,
+            artifact_dir=artifact_dir,
+            prompt=(
+                "Call the tool named remote_dcom_activation_result now. "
+                "It must return the controlled remote DCOM activation proof from CI."
+            ),
+            chat_timeout=args.chat_timeout,
+        )
+        summary["gpt_tool_proof"] = {
+            "generated_schema_exists": bool(proof_result["tools"]),
+            "downloaded_schema_exists": bool(proof_result["downloaded_schema_exists"]),
+            "tool_call_seen": bool(proof_result["tool_call_seen"]),
+            "tool_result_seen": bool(proof_result["tool_result_seen"]),
+            "transcript_path": str(artifact_dir / "transcript.json"),
+        }
+        transcript = {
+            "case_id": "remote_dcom_runtime",
+            "proof_level": "remote_dcom_runtime",
+            "selected_tool": selected["name"],
+            "source_summary": str(out_path),
+            "events": proof_result["events"],
+        }
+        _write_json(artifact_dir / "transcript.json", transcript)
+        runtime_passed = runtime_passed and all(summary["gpt_tool_proof"][key] for key in ("generated_schema_exists", "downloaded_schema_exists", "tool_call_seen", "tool_result_seen"))
+        summary["passed"] = runtime_passed
+
+    _write_json(transcript_path, {
+        "server_setup": server_setup,
+        "client_invocation": client_invocation,
+        "server_cleanup": cleanup_payload,
+        "checks": checks,
+    })
+    _write_json(out_path, summary)
+    if not summary["passed"]:
+        raise AssertionError(f"Remote DCOM runtime proof failed checks: {[name for name, ok in checks.items() if not ok]}; see {out_path}")
+    print(f"OK remote DCOM runtime proof: {out_path}")
     return 0
 
 
@@ -3862,6 +4211,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sentinel", default="")
     p.add_argument("--timeout", type=int, default=120)
     p.set_defaults(func=cmd_windows_com_runtime_proof)
+
+    p = sub.add_parser("windows-remote-dcom-runtime-proof")
+    p.add_argument("--resource-group", default=os.getenv("RESOURCE_GROUP", ""))
+    p.add_argument("--server-vm-name", default=os.getenv("VM_NAME", ""))
+    p.add_argument("--client-vm-name", required=True)
+    p.add_argument("--server-target", default="")
+    p.add_argument("--dcom-username", default="mcpdcom")
+    p.add_argument("--dcom-password", required=True)
+    p.add_argument("--base-url", default="")
+    p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
+    p.add_argument("--out", default="ci_artifacts/demo/windows/dcom/dcom.summary.json")
+    p.add_argument("--artifact-dir", default="ci_artifacts/demo/windows/dcom")
+    p.add_argument("--sentinel", default="")
+    p.add_argument("--timeout", type=int, default=420)
+    p.add_argument("--chat-timeout", type=int, default=240)
+    p.add_argument("--cleanup", action=argparse.BooleanOptionalAction, default=True)
+    p.set_defaults(func=cmd_windows_remote_dcom_runtime_proof)
 
     p = sub.add_parser("repo-ingestion-gpt-proof")
     p.add_argument("--base-url", required=True)
