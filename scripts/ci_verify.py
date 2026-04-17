@@ -1034,7 +1034,18 @@ def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, t
             "elapsed_seconds": round(time.perf_counter() - started, 3),
         }
         if proc.returncode == 0 and proc.stdout.strip():
-            for line in reversed(proc.stdout.strip().splitlines()):
+            candidate_lines = proc.stdout.strip().splitlines()
+            try:
+                outer = json.loads(proc.stdout)
+                if isinstance(outer, dict) and isinstance(outer.get("value"), list):
+                    candidate_lines = [
+                        str(item.get("message", ""))
+                        for item in outer["value"]
+                        if isinstance(item, dict) and str(item.get("message", "")).strip()
+                    ] or candidate_lines
+            except json.JSONDecodeError:
+                pass
+            for line in reversed(candidate_lines):
                 try:
                     payload = json.loads(line)
                     if isinstance(payload, dict):
@@ -1074,7 +1085,18 @@ def _run_local_powershell_json(*, script: str, timeout: int) -> dict:
             "elapsed_seconds": round(time.perf_counter() - started, 3),
         }
         if proc.returncode == 0 and proc.stdout.strip():
-            for line in reversed(proc.stdout.strip().splitlines()):
+            candidate_lines = proc.stdout.strip().splitlines()
+            try:
+                outer = json.loads(proc.stdout)
+                if isinstance(outer, dict) and isinstance(outer.get("value"), list):
+                    candidate_lines = [
+                        str(item.get("message", ""))
+                        for item in outer["value"]
+                        if isinstance(item, dict) and str(item.get("message", "")).strip()
+                    ] or candidate_lines
+            except json.JSONDecodeError:
+                pass
+            for line in reversed(candidate_lines):
                 try:
                     payload = json.loads(line)
                     if isinstance(payload, dict):
@@ -2346,7 +2368,7 @@ try {{ $clsid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\WScript.Shell\\CLSID").G
 try {{
     if ($clsid) {{ $appid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\CLSID\\$clsid").GetValue("AppID") }}
 }} catch {{ }}
-[ordered]@{{
+$result = [ordered]@{{
     passed = ($clsid -ne "")
     proof_level = "remote_dcom_runtime"
     runtime_mode = "remote_dcom_runtime"
@@ -2362,7 +2384,8 @@ try {{
     firewall_rules = $firewallRules
     registry_sentinel_path = "HKLM\\SOFTWARE\\MCPFactory\\DCOM\\Sentinel"
     sentinel_configured = $true
-}} | ConvertTo-Json -Depth 12 -Compress
+}}
+Write-Output ($result | ConvertTo-Json -Depth 12 -Compress)
 """
 
 
@@ -2407,6 +2430,7 @@ $ErrorActionPreference = "Stop"
 $username = {_ps_quote(username)}
 $password = {_ps_quote(password)}
 $proofPath = {_ps_quote(proof_path)}
+$scriptPath = $proofPath -replace "\\.json$", ".ps1"
 $secure = ConvertTo-SecureString $password -AsPlainText -Force
 $user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
 if ($null -eq $user) {{
@@ -2415,9 +2439,19 @@ if ($null -eq $user) {{
     $user | Set-LocalUser -Password $secure
     Enable-LocalUser -Name $username
 }}
+try {{
+    $memberName = "$env:COMPUTERNAME\\$username"
+    $isAdmin = [bool](Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -eq $memberName -or $_.Name -like "*\\$username" }})
+    if (-not $isAdmin) {{ Add-LocalGroupMember -Group "Administrators" -Member $username }}
+}} catch {{ }}
 try {{ Start-Service seclogon -ErrorAction SilentlyContinue }} catch {{ }}
 $cred = New-Object System.Management.Automation.PSCredential(".\\$username", $secure)
-$proc = Start-Process -FilePath "powershell.exe" -Credential $cred -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", {_ps_quote(encoded)}) -Wait -PassThru
+$encoded = {_ps_quote(encoded)}
+$inner = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+Set-Content -Path $scriptPath -Value $inner -Encoding UTF8
+$powerShellPath = Join-Path $env:SystemRoot "System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+$argumentList = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+$proc = Start-Process -FilePath $powerShellPath -Credential $cred -ArgumentList $argumentList -LoadUserProfile -Wait -PassThru
 for ($i = 0; $i -lt 60; $i++) {{
     if (Test-Path $proofPath) {{ break }}
     Start-Sleep -Seconds 2
@@ -2459,12 +2493,13 @@ foreach ($name in @("MCPFactory-Remote-DCOM-EndpointMapper", "MCPFactory-Remote-
     Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 }}
 try {{ Remove-LocalUser -Name $username -ErrorAction SilentlyContinue }} catch {{ }}
-[ordered]@{{
+$result = [ordered]@{{
     attempted = $true
     removed_user = $username
     removed_firewall_rules = @("MCPFactory-Remote-DCOM-EndpointMapper", "MCPFactory-Remote-DCOM-DynamicRPC")
     removed_registry_path = "HKLM\\SOFTWARE\\MCPFactory\\DCOM"
-}} | ConvertTo-Json -Depth 8 -Compress
+}}
+Write-Output ($result | ConvertTo-Json -Depth 8 -Compress)
 """
 
 
