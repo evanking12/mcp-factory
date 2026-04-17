@@ -1,0 +1,57 @@
+name: Sponsor Windows COM Runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: bridge-vm-e2e
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: mcp-factory-rg
+  VM_NAME: mcpfactory-runner-vm
+
+jobs:
+  windows-com-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start Windows VM
+        run: az vm start -g "$RESOURCE_GROUP" -n "$VM_NAME"
+
+      - name: Run local COM automation proof
+        run: |
+          python scripts/ci_verify.py windows-com-runtime-proof \
+            --resource-group "$RESOURCE_GROUP" \
+            --vm-name "$VM_NAME" \
+            --out ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json
+
+      - name: Deallocate Windows VM
+        if: always()
+        run: az vm deallocate -g "$RESOURCE_GROUP" -n "$VM_NAME" || true
+
+      - name: Upload COM runtime proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponsor-windows-com-runtime
+          path: ci_artifacts/demo/windows/com_runtime
+          if-no-files-found: error

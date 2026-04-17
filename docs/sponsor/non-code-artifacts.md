@@ -39,10 +39,12 @@ change:
 - `only_gpt_case`: run one non-VM GPT matrix case.
 - `report_only_run_id`: re-render reports from an existing artifact.
 
-## Adapter-Backed Provider Proof
+## Runtime-Shaped Provider Proof
 
-Adapter-backed proof means GPT-4o called a generated tool and the backend
-returned a live hosted result from a deterministic provider endpoint. It is
-valid evidence for discovery/schema/tool-call behavior, but it is not a claim
-that a production CORBA, RPC, JNDI, SOAP, or database infrastructure has been
-deployed unless the report explicitly says so.
+Runtime-shaped proof means GPT-4o called a generated tool and the backend
+returned a live hosted result from a deterministic provider endpoint that
+validates the relevant request shape. JSON-RPC, SOAP, and SQL are runtime-backed;
+JNDI, RPC, and CORBA are runtime-shaped; COM/DCOM uses Windows local COM proof.
+This is not a claim that production CORBA ORB/IIOP, DCE/MSRPC, enterprise LDAP,
+or remote DCOM infrastructure has been deployed unless the report explicitly
+says so.

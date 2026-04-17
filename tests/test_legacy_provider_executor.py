@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import xmlrpc.client
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -31,9 +32,9 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     assert health["provider_modes"]["soap"] == "real_runtime"
     assert health["provider_modes"]["sql"] == "real_runtime"
     assert health["provider_modes"]["rest"] == "validated_runtime"
-    assert health["provider_modes"]["jndi"] == "lookup_runtime"
+    assert health["provider_modes"]["jndi"] == "ldap_jndi_runtime"
     assert health["provider_modes"]["rpc"] == "xmlrpc_runtime"
-    assert health["provider_modes"]["corba"] == "adapter_backed"
+    assert health["provider_modes"]["corba"] == "corba_idl_runtime"
 
     assert sentinel in client.post("/api/legacy/rest/tickets", json={"sentinel": sentinel}).text
     assert sentinel in client.post(
@@ -51,7 +52,8 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     ).text
     assert sentinel in client.post("/api/legacy/sql/GetCustomerInfo", json={"sentinel": sentinel}).text
     assert sentinel in client.post("/api/legacy/corba/getCustomer", json={"sentinel": sentinel}).text
-    assert sentinel in client.post("/api/legacy/rpc/RpcCreateTicket", json={"sentinel": sentinel}).text
+    rpc_body = xmlrpc.client.dumps(({"sentinel": sentinel},), methodname="RpcCreateTicket")
+    assert sentinel in client.post("/api/legacy/rpc/RpcCreateTicket", content=rpc_body, headers={"Content-Type": "text/xml"}).text
     assert sentinel in client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/ContosoCustomerDB", "sentinel": sentinel}).text
 
 
@@ -150,15 +152,46 @@ def test_jndi_and_rpc_runtime_modes_are_explicit() -> None:
 
     jndi = client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/ContosoCustomerDB", "sentinel": "MCP_FACTORY_JNDI"})
     assert jndi.status_code == 200
-    assert jndi.json()["runtime_mode"] == "lookup_runtime"
+    assert jndi.json()["runtime_mode"] == "ldap_jndi_runtime"
     assert jndi.json()["lookup_found"] is True
     assert jndi.json()["binding"]["type"] == "javax.sql.DataSource"
+    assert jndi.json()["ldap_entry"]["dn"].endswith("dc=contoso,dc=com")
 
-    rpc = client.post("/api/legacy/rpc/RpcCreateTicket", json={"sentinel": "MCP_FACTORY_RPC"})
+    bind = client.post("/api/legacy/jndi/bind", json={"principal": "cn=serviceaccount,dc=contoso,dc=com"})
+    assert bind.status_code == 200
+    assert bind.json()["bound"] is True
+
+    search = client.post("/api/legacy/jndi/search", json={"filter": "Customer"})
+    assert search.status_code == 200
+    assert search.json()["entries"]
+
+    rpc_payload = xmlrpc.client.dumps(({"sentinel": "MCP_FACTORY_RPC"},), methodname="RpcCreateTicket")
+    rpc = client.post("/api/legacy/rpc/RpcCreateTicket", content=rpc_payload, headers={"Content-Type": "text/xml"})
     assert rpc.status_code == 200
-    assert rpc.json()["runtime_mode"] == "xmlrpc_runtime"
-    assert rpc.json()["transport"] == "xmlrpc_style"
-    assert "xmlrpc_response" in rpc.json()
+    values, _method = xmlrpc.client.loads(rpc.text.encode("utf-8"))
+    assert values[0]["runtime_mode"] == "xmlrpc_runtime"
+    assert values[0]["transport"] == "xmlrpc"
+    assert "MCP_FACTORY_RPC" in values[0]["sentinel"]
+
+    missing_payload = xmlrpc.client.dumps(({"sentinel": "MCP_FACTORY_RPC"},), methodname="RpcMissing")
+    missing = client.post("/api/legacy/rpc/RpcMissing", content=missing_payload, headers={"Content-Type": "text/xml"})
+    assert "<fault>" in missing.text
+
+
+def test_corba_idl_runtime_validates_object_registry() -> None:
+    client = _client()
+
+    ok = client.post("/api/legacy/corba/ICustomerService_getCustomer", json={"sentinel": "MCP_FACTORY_CORBA"})
+    assert ok.status_code == 200
+    data = ok.json()
+    assert data["runtime_mode"] == "corba_idl_runtime"
+    assert data["repository_id"] == "IDL:contoso.com/CustomerService/ICustomerService:1.0"
+    assert data["corba_response"]["reply_status"] == "NO_EXCEPTION"
+    assert "MCP_FACTORY_CORBA" in data["sentinel"]
+
+    rejected = client.post("/api/legacy/corba/deleteEverything", json={"sentinel": "MCP_FACTORY_CORBA"})
+    assert rejected.status_code == 404
+    assert "not declared" in rejected.json()["error"]
 
 
 class _Resp:
@@ -220,6 +253,9 @@ def test_executor_routes_sql_corba_rpc_jndi_to_legacy_provider(monkeypatch) -> N
 
     def fake_post(url: str, **kwargs):
         urls.append(url)
+        if url.endswith("rpc/RpcCreateTicket"):
+            response = xmlrpc.client.dumps(({"sentinel": "MCP_FACTORY_LEGACY"},), methodresponse=True)
+            return _Resp(response)
         return _Resp("MCP_FACTORY_LEGACY")
 
     monkeypatch.setattr("httpx.post", fake_post)

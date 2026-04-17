@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xmlrpc.client
 from pathlib import Path
 
 from api.config import (
@@ -447,6 +448,31 @@ def _execute_legacy_contract(kind: str, endpoint: str, name: str, args: dict, ex
         return _provider_required(labels.get(kind, "legacy provider"), name, f"Legacy provider unreachable: {exc}.")
 
 
+def _execute_rpc_contract(name: str, args: dict, execution: dict) -> str:
+    provider_url = _legacy_provider_url(f"rpc/{name}")
+    if not provider_url:
+        return _provider_required("XML-RPC endpoint", name)
+    try:
+        import httpx
+        payload = xmlrpc.client.dumps(((args or {}),), methodname=name, allow_none=True)
+        resp = httpx.post(
+            provider_url,
+            content=payload.encode("utf-8"),
+            headers={**_legacy_provider_headers(), "Content-Type": "text/xml"},
+            timeout=15,
+        )
+        text = resp.text or f"HTTP {resp.status_code}"
+        try:
+            values, _method = xmlrpc.client.loads(text.encode("utf-8"))
+            if values:
+                return json.dumps(values[0], indent=2)
+        except Exception:
+            return text
+        return text
+    except Exception as exc:
+        return _provider_required("XML-RPC endpoint", name, f"Legacy provider unreachable: {exc}.")
+
+
 def _execute_observed_result(execution: dict, name: str, args: dict) -> str:
     result = {
         "proof_level": "tool_result_observed",
@@ -590,7 +616,7 @@ def _execute_tool(inv: dict, args: dict) -> str:
     if method == "sql_exec":
         return _execute_sql_contract(execution, name, args)
     if method == "rpc_call":
-        return _execute_legacy_contract("rpc", f"rpc/{name}", name, args, execution)
+        return _execute_rpc_contract(name, args, execution)
     if method == "corba_iiop":
         return _execute_legacy_contract("corba", f"corba/{name}", name, args, execution)
     if method == "jndi_lookup":

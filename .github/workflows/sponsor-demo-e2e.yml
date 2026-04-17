@@ -86,6 +86,9 @@ jobs:
             --windows-summary ci_artifacts/demo/windows/summary.json \
             --gpt-artifact-dir ci_artifacts/demo/gpt4o \
             --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
+            --windows-gpt-summary ci_artifacts/demo/windows-gpt/summary.json \
+            --repo-ingestion-summary ci_artifacts/demo/repo-ingestion/summary.json \
+            --com-runtime-summary ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \
@@ -318,6 +321,18 @@ jobs:
           python scripts/ci_verify.py bridge-target-e2e --bridge-url "$BRIDGE_URL" --bridge-secret "${{ steps.runtime-secrets.outputs.bridge_secret }}" --label stdole2_tlb --kind system_path --target 'C:\Windows\System32\stdole2.tlb' --types com --expect-source-type com --timeout 120 --out-dir ci_artifacts/demo/windows
           status=$?
           python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-stdole2-end" --job-id "${{ github.run_id }}" || true
+          exit $status
+
+      - name: Run local COM automation proof
+        if: ${{ !inputs.skip_windows_targets && (inputs.only_windows_target == '' || inputs.only_windows_target == 'com_runtime') }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-com-runtime-start" --job-id "${{ github.run_id }}"
+          set +e
+          python scripts/ci_verify.py windows-com-runtime-proof --resource-group "$RESOURCE_GROUP" --vm-name "$VM_NAME" --out ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json
+          status=$?
+          python scripts/ci_verify.py touch-bridge-lease --storage-account "$STORAGE_ACCOUNT" --container "$ARTIFACT_CONTAINER" --reason "sponsor-demo-com-runtime-end" --job-id "${{ github.run_id }}" || true
           exit $status
 
       - name: Scan registry inventory target
@@ -557,6 +572,7 @@ jobs:
             --gpt-matrix-summary ci_artifacts/demo/gpt-format-matrix/summary.json \
             --windows-gpt-summary ci_artifacts/demo/windows-gpt/summary.json \
             --repo-ingestion-summary ci_artifacts/demo/repo-ingestion/summary.json \
+            --com-runtime-summary ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json \
             --vm-deallocation ci_artifacts/demo/vm-deallocation.json \
             --out ci_artifacts/demo/final-summary.json \
             --markdown ci_artifacts/demo/final-summary.md \

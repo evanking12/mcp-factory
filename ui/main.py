@@ -397,6 +397,31 @@ _HTML = r"""<!DOCTYPE html>
     .chat-input-row textarea {
       flex: 1; min-height: 52px; max-height: 140px;
     }
+    .proof-matrix {
+      margin: 12px 0 18px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(255,255,255,.02);
+    }
+    .proof-matrix-head {
+      display: flex; justify-content: space-between; gap: 12px; align-items: center;
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+    }
+    .proof-matrix-title { font-weight: 700; font-size: .9rem; }
+    .proof-matrix-sub { color: var(--muted); font-size: .76rem; }
+    .proof-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    }
+    .proof-cell {
+      padding: 10px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      min-height: 60px;
+    }
+    .proof-cell strong { display:block; font-size: .82rem; margin-bottom: 4px; }
+    .proof-cell span { color: var(--muted); font-size: .73rem; line-height: 1.35; }
+    .proof-cell.runtime strong { color: var(--green); }
+    .proof-cell.shaped strong { color: #d8b36a; }
+    .proof-cell.observed strong { color: #c0a8f0; }
 
     section.hidden { display: none; }
   </style>
@@ -408,7 +433,7 @@ _HTML = r"""<!DOCTYPE html>
   <span class="tagline">Binary → MCP tool schema, AI-powered</span>
   <span class="spacer"></span>
   <a class="proof-link"
-     href="https://github.com/evanking12/mcp-factory/actions/runs/24542583216"
+     href="https://github.com/evanking12/mcp-factory/actions/runs/24547629781"
      target="_blank" rel="noopener"
      title="GitHub Actions proof bundle is separate from app /api/download job artifacts.">
     CI Proof Bundle
@@ -452,7 +477,7 @@ _HTML = r"""<!DOCTYPE html>
         <label>Binary file (EXE, DLL, SO, PY, …)</label>
         <div class="file-drop" id="file-drop">
           <input type="file" id="file-input"
-            accept=".dll,.exe,.py,.js,.rb,.php,.so,.jar,.sql,.ps1,.cmd,.bat,.bin" />
+            accept=".dll,.exe,.py,.js,.rb,.php,.so,.jar,.sql,.ps1,.cmd,.bat,.bin,.wsdl,.yaml,.yml,.json,.idl,.properties" />
           <div class="drop-icon">📦</div>
           <div class="drop-text">Drag & drop a file here, or click to browse</div>
           <div class="file-name" id="file-name"></div>
@@ -482,11 +507,29 @@ _HTML = r"""<!DOCTYPE html>
 
       <div class="btn-row">
         <button class="btn btn-secondary" id="load-demo-btn" type="button">
-          Load Demo Target
+          Load SOAP/WSDL Showcase
         </button>
         <button class="btn btn-primary" id="analyze-btn" disabled>
           Analyze Binary
         </button>
+      </div>
+
+      <div class="proof-matrix" aria-label="Legacy protocol proof matrix">
+        <div class="proof-matrix-head">
+          <div>
+            <div class="proof-matrix-title">Legacy Protocol Showcase</div>
+            <div class="proof-matrix-sub">Video path: SOAP walkthrough, then GitHub Actions proof matrix.</div>
+          </div>
+          <a class="proof-link" href="https://github.com/evanking12/mcp-factory/actions/runs/24547629781" target="_blank" rel="noopener">Canonical Run</a>
+        </div>
+        <div class="proof-grid">
+          <div class="proof-cell runtime"><strong>Runtime-backed</strong><span>JSON-RPC, SOAP, SQL</span></div>
+          <div class="proof-cell runtime"><strong>Validated runtime</strong><span>OpenAPI/REST route and method proof</span></div>
+          <div class="proof-cell shaped"><strong>Runtime-shaped</strong><span>LDAP/JNDI, XML-RPC, CORBA IDL registry</span></div>
+          <div class="proof-cell observed"><strong>Windows proof</strong><span>COM/TLB discovery, local COM automation, Windows GPT 5/5</span></div>
+          <div class="proof-cell runtime"><strong>GPT matrix</strong><span>13/13 tool_call + tool_result proofs</span></div>
+          <div class="proof-cell runtime"><strong>Repo proof</strong><span>Directory/repo fixture ingestion passes</span></div>
+        </div>
       </div>
     </div>
   </section>
@@ -663,19 +706,42 @@ function _syncAnalyzeBtn() {
 
 $('load-demo-btn').addEventListener('click', () => {
   const demoSource = [
-    'def echo_sentinel(sentinel: str) -> str:',
-    '    return f"MCP_FACTORY_UI_DEMO_SENTINEL::{sentinel}"',
-    '',
-    'def summarize_customer(customer_id: str, sentinel: str) -> str:',
-    '    return f"customer={customer_id}; sentinel={sentinel}"',
-    '',
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<definitions name="ContosoCustomerService"',
+    '  targetNamespace="http://contoso.com/CustomerService"',
+    '  xmlns="http://schemas.xmlsoap.org/wsdl/"',
+    '  xmlns:tns="http://contoso.com/CustomerService"',
+    '  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"',
+    '  xmlns:xsd="http://www.w3.org/2001/XMLSchema">',
+    '  <message name="GetCustomerRequest">',
+    '    <part name="customerId" type="xsd:string"/>',
+    '    <part name="sentinel" type="xsd:string"/>',
+    '  </message>',
+    '  <message name="GetCustomerResponse"><part name="result" type="xsd:string"/></message>',
+    '  <message name="SubmitTicketRequest">',
+    '    <part name="customerId" type="xsd:string"/>',
+    '    <part name="subject" type="xsd:string"/>',
+    '    <part name="sentinel" type="xsd:string"/>',
+    '  </message>',
+    '  <message name="SubmitTicketResponse"><part name="ticketId" type="xsd:string"/></message>',
+    '  <portType name="ContosoCustomerPortType">',
+    '    <operation name="GetCustomer"><documentation>Retrieve a Contoso customer record.</documentation><input message="tns:GetCustomerRequest"/><output message="tns:GetCustomerResponse"/></operation>',
+    '    <operation name="SubmitTicket"><documentation>Create a Contoso support ticket.</documentation><input message="tns:SubmitTicketRequest"/><output message="tns:SubmitTicketResponse"/></operation>',
+    '  </portType>',
+    '  <binding name="ContosoCustomerSoapBinding" type="tns:ContosoCustomerPortType">',
+    '    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>',
+    '    <operation name="GetCustomer"><soap:operation soapAction="GetCustomer"/></operation>',
+    '    <operation name="SubmitTicket"><soap:operation soapAction="SubmitTicket"/></operation>',
+    '  </binding>',
+    '  <service name="ContosoCustomerService"><port name="ContosoCustomerPort" binding="tns:ContosoCustomerSoapBinding"><soap:address location="https://api.contoso.example/CustomerService"/></port></service>',
+    '</definitions>',
   ].join('\n');
-  state.demoFile = new File([demoSource], 'sponsor_demo.py', { type: 'text/x-python' });
+  state.demoFile = new File([demoSource], 'contoso_customer_service.wsdl', { type: 'text/xml' });
   state.demoMode = true;
   fileInput.value = '';
   $('dir-path').value = '';
-  $('file-name').textContent = `${state.demoFile.name} (demo target)`;
-  $('hints').value = 'Sponsor demo target: Python callable with deterministic sentinel output.';
+  $('file-name').textContent = `${state.demoFile.name} (SOAP/WSDL showcase)`;
+  $('hints').value = 'Video demo target: SOAP/WSDL legacy customer service. Show discovery, generated MCP schema, GPT tool_call, and backend tool_result.';
   _syncAnalyzeBtn();
   clearError('upload-error');
 });
@@ -781,6 +847,7 @@ function flattenInvocables(raw) {
       source_type: inv.source_type ?? inv.kind ?? '',
       confidence: inv.confidence ?? inv.confidence_score ?? inv.score ?? null,
       proof_level: inv.proof_level ?? '',
+      runtime_mode: inv.runtime_mode ?? inv.execution?.runtime_mode ?? '',
       tier: inv.tier ?? inv.confidence_tier ?? 2,
     };
   }
@@ -802,6 +869,7 @@ function flattenInvocables(raw) {
       execution: t.execution ?? {},
       source_type: t.source_type ?? t.kind ?? '',
       proof_level: t.proof_level ?? '',
+      runtime_mode: t.runtime_mode ?? t.execution?.runtime_mode ?? '',
     }));
 
   // Legacy flat object {name: {signature, doc, …}}
@@ -820,6 +888,7 @@ function flattenInvocables(raw) {
         source_type: info.source_type ?? info.kind ?? '',
         confidence: info.confidence ?? info.confidence_score ?? info.score ?? null,
         proof_level: info.proof_level ?? '',
+        runtime_mode: info.runtime_mode ?? info.execution?.runtime_mode ?? '',
       }));
   }
   return [];
@@ -841,8 +910,15 @@ function executionMethod(inv) {
 function proofBadge(inv) {
   const source = String(inv.source_type ?? '').toLowerCase();
   const method = String(executionMethod(inv)).toLowerCase();
+  const runtimeMode = String(inv.runtime_mode ?? inv.execution?.runtime_mode ?? '').toLowerCase();
   if (inv.proof_level === 'provider_required' || inv.provider_required || PROVIDER_REQUIRED_SOURCES.has(source) || method.includes('provider_required')) {
     return { label: 'provider required fallback', cls: 'proof-provider' };
+  }
+  if (['ldap_jndi_runtime', 'xmlrpc_runtime', 'corba_idl_runtime'].includes(runtimeMode)) {
+    return { label: runtimeMode.replace(/_/g, ' '), cls: 'proof-provider' };
+  }
+  if (runtimeMode.includes('runtime') || runtimeMode === 'validated_runtime') {
+    return { label: runtimeMode.replace(/_/g, ' '), cls: 'proof-live' };
   }
   if (inv.proof_level === 'real_execution' || LIVE_EXECUTION_SOURCES.has(source) || method.includes('script') || method.includes('subprocess')) {
     return { label: 'live execution', cls: 'proof-live' };
@@ -885,6 +961,7 @@ function buildInvocablesList() {
         <div class="inv-meta">
           <span>${esc(source)}</span>
           <span>${esc(method)}</span>
+          ${inv.runtime_mode ? `<span>${esc(inv.runtime_mode)}</span>` : ''}
           <span>${esc(confidenceLabel(inv))}</span>
           <span class="${proof.cls}">${esc(proof.label)}</span>
         </div>

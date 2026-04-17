@@ -303,9 +303,9 @@ RUNTIME_MODE_BY_FORMAT_CASE = {
     "jsonrpc": "real_runtime",
     "soap_wsdl": "real_runtime",
     "sql": "real_runtime",
-    "jndi": "lookup_runtime",
+    "jndi": "ldap_jndi_runtime",
     "rpc_idl_contract": "xmlrpc_runtime",
-    "corba_idl": "adapter_backed",
+    "corba_idl": "corba_idl_runtime",
     "python": "local_runtime",
     "javascript": "local_runtime",
     "ruby": "local_runtime",
@@ -813,6 +813,48 @@ if (-not $proc) {
                 result.update(payload if isinstance(payload, dict) else {"raw_payload": payload})
             except json.JSONDecodeError:
                 result["parse_error"] = "failed to parse bridge process JSON"
+        return result
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+
+
+def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, timeout: int) -> dict:
+    cmd = [
+        "az", "vm", "run-command", "invoke",
+        "-g", resource_group,
+        "-n", vm_name,
+        "--command-id", "RunPowerShellScript",
+        "--scripts", script,
+        "--query", "value[0].message",
+        "-o", "tsv",
+    ]
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        result = {
+            "attempted": True,
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        }
+        if proc.returncode == 0 and proc.stdout.strip():
+            for line in reversed(proc.stdout.strip().splitlines()):
+                try:
+                    payload = json.loads(line)
+                    if isinstance(payload, dict):
+                        result.update(payload)
+                        break
+                except json.JSONDecodeError:
+                    continue
+            else:
+                result["parse_error"] = "failed to parse JSON payload from VM command output"
         return result
     except Exception as exc:
         return {
@@ -1531,7 +1573,7 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     runtime_backed_cases = [
         item["id"]
         for item in summaries
-        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "xmlrpc_runtime", "local_runtime"}
+        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_jndi_runtime", "xmlrpc_runtime", "corba_idl_runtime", "local_runtime"}
     ]
     aggregate = {
         "cases": summaries,
@@ -1705,6 +1747,57 @@ def cmd_windows_gpt_tool_matrix(args: argparse.Namespace) -> int:
     if failures:
         raise AssertionError(f"{len(failures)} Windows GPT tool proof case(s) failed: {aggregate['failed_ids']}")
     print(f"OK Windows GPT tool matrix: {len(summaries)} case(s), artifacts={out_root}")
+    return 0
+
+
+def cmd_windows_com_runtime_proof(args: argparse.Namespace) -> int:
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sentinel = args.sentinel or f"MCP_FACTORY_COM_RUNTIME_{uuid.uuid4().hex[:10]}"
+    script = f"""
+$ErrorActionPreference = "Stop"
+$sentinel = {_ps_quote(sentinel)}
+$dict = New-Object -ComObject Scripting.Dictionary
+$dict.Add("sentinel", $sentinel)
+$shell = New-Object -ComObject WScript.Shell
+$value = $dict.Item("sentinel")
+$result = [ordered]@{{
+    passed = ($value -eq $sentinel)
+    proof_level = "com_runtime"
+    runtime_mode = "com_runtime"
+    dcom_surface = "local_com_automation"
+    remote_dcom_activation_claimed = $false
+    com_objects = @("Scripting.Dictionary", "WScript.Shell")
+    sentinel = $sentinel
+    dictionary_count = $dict.Count
+    shell_type = $shell.GetType().FullName
+    notes = "Local COM automation proof on the Windows bridge VM; remote DCOM activation is not claimed."
+}}
+$result | ConvertTo-Json -Compress
+"""
+    payload = _run_vm_powershell_json(
+        resource_group=args.resource_group,
+        vm_name=args.vm_name,
+        script=script,
+        timeout=args.timeout,
+    )
+    summary = {
+        "label": "com_runtime",
+        "target": "Windows local COM automation",
+        "passed": bool(payload.get("passed")) and bool(payload.get("ok", True)),
+        "proof_level": payload.get("proof_level", "com_runtime"),
+        "runtime_mode": payload.get("runtime_mode", "com_runtime"),
+        "dcom_surface": payload.get("dcom_surface", "local_com_automation"),
+        "remote_dcom_activation_claimed": bool(payload.get("remote_dcom_activation_claimed", False)),
+        "sentinel": payload.get("sentinel", sentinel),
+        "com_objects": payload.get("com_objects", []),
+        "elapsed_seconds": payload.get("elapsed_seconds"),
+        "raw": payload,
+    }
+    _write_json(out_path, summary)
+    if not summary["passed"]:
+        raise AssertionError(f"Windows COM runtime proof failed; see {out_path}")
+    print(f"OK Windows COM runtime proof: {out_path}")
     return 0
 
 
@@ -2179,11 +2272,15 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
             "real_runtime",
             "validated_runtime",
             "lookup_runtime",
+            "ldap_jndi_runtime",
             "xmlrpc_runtime",
+            "corba_idl_runtime",
             "adapter_backed",
             "unknown",
         }:
             raise AssertionError(f"{case.get('id', '<unknown>')}: invalid runtime_mode={runtime_mode!r}")
+        if case.get("id") == "corba_idl" and runtime_mode == "adapter_backed":
+            raise AssertionError("corba_idl: stale runtime_mode='adapter_backed'; expected corba_idl_runtime")
         expected_result = case.get("expected_result")
         if expected_result and expected_result not in {"sentinel", "provider_required"}:
             raise AssertionError(f"{case.get('id', '<unknown>')}: invalid expected_result={expected_result!r}")
@@ -2396,6 +2493,7 @@ def _build_requirement_matrix(
     non_vm_ok = non_vm_counts.get("failed") == 0 and non_vm_counts.get("total", 0) > 0
     gpt_tool_ok = bool(checks.get("gpt_tool_call_seen") and checks.get("gpt_sentinel_seen") and schema_tool_count > 0)
     windows_gpt_ok = int(windows_gpt.get("failures", 1)) == 0 and int(windows_gpt.get("total", 0)) > 0
+    com_runtime_ok = bool(checks.get("windows_com_runtime_proof_passed"))
     repo_ok = bool(repo_ingestion.get("passed"))
     return [
         {
@@ -2415,9 +2513,9 @@ def _build_requirement_matrix(
         {
             "requirement": "1.b",
             "summary": "RPC, JNDI, COM/DCOM, SOAP, CORBA, JSON/JSON-RPC technologies are considered.",
-            "implementation_surface": "Format providers discover schemas and generate live adapter-backed tool calls; COM/TLB is scanned on Windows.",
+            "implementation_surface": "Format providers discover schemas and generate GPT-callable tools backed by hosted runtime providers; COM/TLB is scanned on Windows.",
             "proof_type": "live_execution",
-            "status": _matrix_status(all_live_ok and windows_ok),
+            "status": _matrix_status(all_live_ok and windows_ok and com_runtime_ok),
             "artifact_paths": [
                 "ci_artifacts/demo/gpt-format-matrix/openapi/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/jsonrpc/summary.json",
@@ -2426,9 +2524,10 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/gpt-format-matrix/rpc_idl_contract/summary.json",
                 "ci_artifacts/demo/gpt-format-matrix/jndi/summary.json",
                 "ci_artifacts/demo/windows/stdole2_tlb/stdole2_tlb.summary.json",
+                "ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json",
                 "docs/sponsor/caveats.md",
             ],
-            "notes": "JSON-RPC and SOAP are runtime-backed; REST is route-validated; JNDI and RPC use lightweight lookup/XML-RPC-style runtimes; CORBA remains adapter-backed. COM/TLB discovery is proven and remote DCOM activation is not claimed.",
+            "notes": "JSON-RPC, SOAP, and SQL are runtime-backed; REST is route-validated; JNDI uses LDAP/JNDI-shaped lookup semantics; RPC uses XML-RPC wire responses; CORBA uses an IDL object-registry runtime-shaped provider. COM/TLB discovery and local COM automation are proven; remote DCOM activation is not claimed.",
         },
         {
             "requirement": "1.c",
@@ -2653,7 +2752,7 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
     return {
         "live_execution": {
             "cases": real_cases,
-            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution, hosted runtime providers, or explicitly adapter-backed providers.",
+            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution, hosted runtime providers, or runtime-shaped legacy providers.",
         },
         "provider_required": {
             "cases": provider_cases,
@@ -2661,7 +2760,7 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
         },
         "runtime_modes": {
             "cases_by_mode": dict(sorted(runtime_modes.items())),
-            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, lookup/XML-RPC-style lightweight runtimes, and adapter-backed legacy protocol modeling.",
+            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, LDAP/JNDI-shaped lookup, XML-RPC wire responses, CORBA IDL runtime-shaped validation, and any remaining adapter-backed legacy protocol modeling.",
         },
     }
 
@@ -2866,6 +2965,19 @@ def _append_repo_ingestion_proof(lines: list[str], repo_ingestion: dict) -> None
     lines.append(f"- Sentinel seen: {bool(repo_ingestion.get('sentinel_seen'))}")
 
 
+def _append_com_runtime_proof(lines: list[str], com_runtime: dict) -> None:
+    lines.extend(["", "## COM/DCOM Surface Proof", ""])
+    if com_runtime.get("missing"):
+        lines.append(f"COM runtime proof was not present in this artifact: `{com_runtime.get('missing')}`.")
+        return
+    lines.append(f"Status: {'PASS' if com_runtime.get('passed') else 'FAIL'}")
+    lines.append(f"- Proof level: `{com_runtime.get('proof_level', 'com_runtime')}`")
+    lines.append(f"- Runtime mode: `{com_runtime.get('runtime_mode', 'com_runtime')}`")
+    lines.append(f"- Surface: `{com_runtime.get('dcom_surface', 'local_com_automation')}`")
+    lines.append(f"- Remote DCOM activation claimed: {bool(com_runtime.get('remote_dcom_activation_claimed'))}")
+    lines.append(f"- COM objects: {', '.join(com_runtime.get('com_objects') or []) or '-'}")
+
+
 def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     non_vm_path = Path(args.non_vm_summary)
     windows_path = Path(args.windows_summary)
@@ -2873,6 +2985,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     gpt_matrix_path = Path(args.gpt_matrix_summary)
     windows_gpt_path = Path(args.windows_gpt_summary)
     repo_ingestion_path = Path(args.repo_ingestion_summary)
+    com_runtime_path = Path(args.com_runtime_summary)
     deallocation_path = Path(args.vm_deallocation)
     out_path = Path(args.out)
     canonical_run_url = str(getattr(args, "canonical_run_url", "") or os.getenv("CANONICAL_SPONSOR_RUN_URL", ""))
@@ -2882,6 +2995,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     gpt_matrix = _load_json(gpt_matrix_path) if gpt_matrix_path.exists() else {"cases": [], "failures": 1, "missing": str(gpt_matrix_path)}
     windows_gpt = _load_json(windows_gpt_path) if windows_gpt_path.exists() else {"cases": [], "failures": 0, "missing": str(windows_gpt_path)}
     repo_ingestion = _load_json(repo_ingestion_path) if repo_ingestion_path.exists() else {"passed": False, "missing": str(repo_ingestion_path)}
+    com_runtime = _load_json(com_runtime_path) if com_runtime_path.exists() else {"passed": False, "missing": str(com_runtime_path)}
     transcript_path = gpt_dir / "transcript.json"
     selected_path = gpt_dir / "selected-invocable.json"
     generated_schema_path = gpt_dir / "generated-mcp-schema.json"
@@ -2929,6 +3043,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "job_history_exists": job_history_path.exists(),
         "windows_gpt_tool_matrix_passed": int(windows_gpt.get("failures", 1)) == 0 and int(windows_gpt.get("total", 0)) > 0,
         "repo_ingestion_proof_passed": bool(repo_ingestion.get("passed")),
+        "windows_com_runtime_proof_passed": bool(com_runtime.get("passed")),
         "vm_deallocation_attempted": bool(deallocation.get("attempted")),
         "vm_deallocation_completed": bool(deallocation.get("completed")),
     }
@@ -2954,6 +3069,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "gpt_format_matrix_summary": str(gpt_matrix_path),
         "windows_gpt_summary": str(windows_gpt_path),
         "repo_ingestion_summary": str(repo_ingestion_path),
+        "com_runtime_summary": str(com_runtime_path),
         "transcript": str(transcript_path),
         "selected_invocable": str(selected_path),
         "generated_schema": str(generated_schema_path),
@@ -3008,6 +3124,15 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "sentinel_seen": bool(repo_ingestion.get("sentinel_seen")),
             "missing": repo_ingestion.get("missing", ""),
         },
+        "com_runtime": {
+            "passed": bool(com_runtime.get("passed")),
+            "proof_level": com_runtime.get("proof_level", "com_runtime"),
+            "runtime_mode": com_runtime.get("runtime_mode", "com_runtime"),
+            "dcom_surface": com_runtime.get("dcom_surface", "local_com_automation"),
+            "remote_dcom_activation_claimed": bool(com_runtime.get("remote_dcom_activation_claimed")),
+            "com_objects": com_runtime.get("com_objects", []),
+            "missing": com_runtime.get("missing", ""),
+        },
         "gpt": {
             "job_id": job_id,
             "selected_tool": selected_tool,
@@ -3042,6 +3167,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             f"- Adapter-backed required format cases: {', '.join(gpt_matrix.get('adapter_backed_cases', [])) or 'none'}",
             f"- Windows GPT tool-result-observed proofs: {windows_gpt.get('passed', 0)}/{windows_gpt.get('total', 0)}",
             f"- Repo ingestion GPT proof passed: {bool(repo_ingestion.get('passed'))}",
+            f"- Windows COM runtime proof passed: {bool(com_runtime.get('passed'))}",
             f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
             f"- Sentinel seen in tool result: {checks['gpt_sentinel_seen']}",
             f"- Generated schema tools: {schema_tool_count}",
@@ -3070,6 +3196,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         _append_mcp_llm_story(lines, mcp_llm_story)
         _append_windows_gpt_proofs(lines, windows_gpt)
         _append_repo_ingestion_proof(lines, repo_ingestion)
+        _append_com_runtime_proof(lines, com_runtime)
         _append_requirement_matrix(lines, requirement_matrix)
         _append_diagnostic_table(
             lines,
@@ -3203,6 +3330,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chat-timeout", type=int, default=240)
     p.set_defaults(func=cmd_windows_gpt_tool_matrix)
 
+    p = sub.add_parser("windows-com-runtime-proof")
+    p.add_argument("--resource-group", default=os.getenv("RESOURCE_GROUP", ""))
+    p.add_argument("--vm-name", default=os.getenv("VM_NAME", ""))
+    p.add_argument("--out", default="ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json")
+    p.add_argument("--sentinel", default="")
+    p.add_argument("--timeout", type=int, default=120)
+    p.set_defaults(func=cmd_windows_com_runtime_proof)
+
     p = sub.add_parser("repo-ingestion-gpt-proof")
     p.add_argument("--base-url", required=True)
     p.add_argument("--pipeline-key", default=os.getenv("PIPELINE_API_KEY", ""))
@@ -3266,6 +3401,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpt-matrix-summary", default="ci_artifacts/demo/gpt-format-matrix/summary.json")
     p.add_argument("--windows-gpt-summary", default="ci_artifacts/demo/windows-gpt/summary.json")
     p.add_argument("--repo-ingestion-summary", default="ci_artifacts/demo/repo-ingestion/summary.json")
+    p.add_argument("--com-runtime-summary", default="ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json")
     p.add_argument("--vm-deallocation", default="ci_artifacts/demo/vm-deallocation.json")
     p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
     p.add_argument("--markdown", default="")

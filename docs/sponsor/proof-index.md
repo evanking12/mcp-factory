@@ -39,5 +39,5 @@ downloads served through `/api/download/{job_id}/{filename}`.
 Use `sponsor-report.html` for live review and `final-summary.json` for exact
 automation status. The caveat page should be shown when discussing CORBA, RPC,
 JNDI, DCOM, or arbitrary closed-source binary recovery. JSON-RPC, SOAP, and SQL
-are runtime-backed in the expanded proof; CORBA remains adapter-backed unless a
-future campaign adds a verified ORB/IIOP runtime.
+are runtime-backed in the expanded proof; JNDI, RPC, and CORBA are now
+runtime-shaped proofs with explicit non-production infrastructure caveats.

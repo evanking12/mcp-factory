@@ -17,14 +17,17 @@ does not claim.
   SQL Server infrastructure.
 - REST/OpenAPI is route-validated against declared paths and methods before the
   provider returns a tool result.
-- JNDI uses deterministic binding lookup semantics and RPC uses an XML-RPC-style
-  deterministic runtime proof. They are runtime-shaped proofs, not production
-  LDAP/JNDI or DCE/MSRPC infrastructure.
-- CORBA remains a deterministic hosted adapter. It proves discovery, schema
-  generation, GPT tool-call selection, and a real hosted tool result, but it is
-  not a production CORBA ORB/IIOP deployment.
-- COM/TLB discovery is proven through the Windows bridge. Remote DCOM activation
-  and remote DCOM invocation are not deeply proven by the sponsor demo.
+- JNDI is runtime-shaped through deterministic LDAP/JNDI bind, search, and
+  lookup semantics. It proves directory-style lookup behavior, not production
+  enterprise LDAP operations or identity infrastructure.
+- RPC IDL is runtime-shaped through real XML-RPC `methodCall`, `methodResponse`,
+  and `fault` envelopes. It is not DCE/RPC or MSRPC infrastructure.
+- CORBA IDL is runtime-shaped through an IDL-derived object registry, repository
+  IDs, object references, and operation allowlist validation. It proves CORBA
+  IDL dispatch behavior but is not a production CORBA ORB/IIOP deployment.
+- COM/TLB discovery and local COM automation are proven through the Windows
+  bridge. Remote DCOM activation and remote DCOM invocation are not claimed by
+  the sponsor demo.
 
 ## Binary Recovery Scope
 

@@ -1,8 +1,9 @@
-"""Deterministic legacy-provider adapters for sponsor demo tool execution.
+"""Deterministic legacy-provider runtimes for sponsor demo tool execution.
 
-These endpoints are intentionally small and predictable. They do not claim to
-be production CORBA/RPC/JNDI infrastructure; they provide live backing services
-for the generated MCP tools so GPT proof cases observe a real tool result.
+These endpoints are intentionally small and predictable. They provide live,
+runtime-shaped backing services for generated MCP tools while avoiding claims
+that the capstone deploys production CORBA ORB/IIOP, DCE/MSRPC, enterprise
+LDAP/JNDI, or remote DCOM infrastructure.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import xmlrpc.client
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -24,18 +26,18 @@ PROVIDERS = {
     "jsonrpc": "JSON-RPC 2.0 hosted Contoso runtime",
     "soap": "SOAP/WSDL envelope-validating Contoso runtime",
     "sql": "SQLite-backed Contoso runtime",
-    "corba": "CORBA IDL deterministic adapter",
-    "rpc": "XML-RPC style deterministic runtime",
-    "jndi": "JNDI binding lookup runtime",
+    "corba": "CORBA IDL object-registry runtime-shaped provider",
+    "rpc": "XML-RPC hosted Contoso runtime",
+    "jndi": "LDAP/JNDI binding lookup runtime",
 }
 PROVIDER_MODES = {
     "rest": "validated_runtime",
     "jsonrpc": "real_runtime",
     "soap": "real_runtime",
     "sql": "real_runtime",
-    "corba": "adapter_backed",
+    "corba": "corba_idl_runtime",
     "rpc": "xmlrpc_runtime",
-    "jndi": "lookup_runtime",
+    "jndi": "ldap_jndi_runtime",
 }
 
 JSONRPC_METHODS = {
@@ -64,22 +66,46 @@ REST_ROUTES = [
     ("POST", re.compile(r"^tickets$")),
     ("GET", re.compile(r"^customers/[^/]+/loyalty$")),
 ]
+RPC_METHODS = {
+    "RpcCreateTicket",
+    "RpcGetTicketStatus",
+    "RpcCloseTicket",
+}
 JNDI_BINDINGS = {
     "jdbc/ContosoCustomerDB": {
         "type": "javax.sql.DataSource",
+        "dn": "cn=ContosoCustomerDB,ou=jdbc,dc=contoso,dc=com",
         "url": "jdbc:sqlserver://db.contoso.internal:1433;databaseName=CustomerDB",
     },
     "jdbc/ContosoReportingDB": {
         "type": "javax.sql.DataSource",
+        "dn": "cn=ContosoReportingDB,ou=jdbc,dc=contoso,dc=com",
         "url": "jdbc:sqlserver://rdb.contoso.internal:1433;databaseName=CustomerDB",
     },
-    "jms/OrderProcessingQueue": {"type": "javax.jms.Queue"},
-    "jms/SupportTicketTopic": {"type": "javax.jms.Topic"},
-    "jms/RefundApprovalQueue": {"type": "javax.jms.Queue"},
-    "jms/ContosoConnectionFactory": {"type": "javax.jms.ConnectionFactory"},
-    "ejb/CustomerServiceBean": {"type": "EJB remote interface"},
-    "ejb/OrderServiceBean": {"type": "EJB remote interface"},
-    "java:comp/env/defaultPriority": {"type": "java.lang.String", "value": "Normal"},
+    "jms/OrderProcessingQueue": {"type": "javax.jms.Queue", "dn": "cn=OrderProcessingQueue,ou=jms,dc=contoso,dc=com"},
+    "jms/SupportTicketTopic": {"type": "javax.jms.Topic", "dn": "cn=SupportTicketTopic,ou=jms,dc=contoso,dc=com"},
+    "jms/RefundApprovalQueue": {"type": "javax.jms.Queue", "dn": "cn=RefundApprovalQueue,ou=jms,dc=contoso,dc=com"},
+    "jms/ContosoConnectionFactory": {"type": "javax.jms.ConnectionFactory", "dn": "cn=ContosoConnectionFactory,ou=jms,dc=contoso,dc=com"},
+    "ejb/CustomerServiceBean": {"type": "EJB remote interface", "dn": "cn=CustomerServiceBean,ou=ejb,dc=contoso,dc=com"},
+    "ejb/OrderServiceBean": {"type": "EJB remote interface", "dn": "cn=OrderServiceBean,ou=ejb,dc=contoso,dc=com"},
+    "java:comp/env/defaultPriority": {"type": "java.lang.String", "value": "Normal", "dn": "cn=defaultPriority,ou=env,dc=contoso,dc=com"},
+}
+CORBA_OBJECTS = {
+    "ICustomerService": {
+        "repository_id": "IDL:contoso.com/CustomerService/ICustomerService:1.0",
+        "object_ref": "corbaloc:iiop:legacy-provider/Contoso/ICustomerService",
+        "operations": {"getCustomer", "registerCustomer", "updateEmail", "getLoyaltyBalance", "redeemPoints"},
+    },
+    "IOrderService": {
+        "repository_id": "IDL:contoso.com/CustomerService/IOrderService:1.0",
+        "object_ref": "corbaloc:iiop:legacy-provider/Contoso/IOrderService",
+        "operations": {"createOrder", "getOrder", "cancelOrder", "processRefund"},
+    },
+    "ISupportService": {
+        "repository_id": "IDL:contoso.com/CustomerService/ISupportService:1.0",
+        "object_ref": "corbaloc:iiop:legacy-provider/Contoso/ISupportService",
+        "operations": {"submitTicket", "escalateTicket", "closeTicket"},
+    },
 }
 
 
@@ -236,6 +262,35 @@ def _float_arg(payload: dict[str, Any], name: str, default: float) -> float:
         return default
 
 
+def _ldap_entry(name: str, binding: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "dn": binding.get("dn") or f"cn={name.replace('/', '_')},dc=contoso,dc=com",
+        "objectClass": ["top", "javaNamingReference"],
+        "attributes": {
+            "javaClassName": binding.get("type", "java.lang.Object"),
+            "javaFactory": "com.contoso.naming.DeterministicObjectFactory",
+            **{k: v for k, v in binding.items() if k not in {"dn", "type"}},
+        },
+    }
+
+
+def _jndi_lookup_name(payload: dict[str, Any]) -> str:
+    raw_lookup = payload.get("lookup_name") or payload.get("name") or payload.get("binding") or "lookup"
+    if isinstance(raw_lookup, list):
+        raw_lookup = raw_lookup[0] if raw_lookup else "lookup"
+    return str(raw_lookup)
+
+
+def _corba_match_operation(raw_operation: str) -> tuple[str, str, dict[str, Any]] | None:
+    operation = raw_operation.split("/")[-1]
+    for interface_name, obj in CORBA_OBJECTS.items():
+        for candidate in obj["operations"]:
+            if operation == candidate or operation == f"{interface_name}_{candidate}" or operation.endswith(f"_{candidate}"):
+                return interface_name, candidate, obj
+    return None
+
+
 async def _json_or_query(request: Request, extra: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = dict(request.query_params)
     if request.method in {"POST", "PUT", "PATCH"}:
@@ -262,7 +317,7 @@ def legacy_health() -> dict[str, Any]:
         "enabled_providers": sorted(PROVIDERS),
         "providers": PROVIDERS,
         "provider_modes": PROVIDER_MODES,
-        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "xmlrpc_runtime"}),
+        "runtime_backed": sorted(k for k, v in PROVIDER_MODES.items() if v in {"real_runtime", "validated_runtime", "lookup_runtime", "ldap_jndi_runtime", "xmlrpc_runtime", "corba_idl_runtime"}),
         "adapter_backed": sorted(k for k, v in PROVIDER_MODES.items() if v == "adapter_backed"),
     }
 
@@ -424,40 +479,122 @@ async def sql_provider(operation: str, request: Request) -> JSONResponse:
 @router.post("/corba/{operation}")
 async def corba_provider(operation: str, request: Request) -> JSONResponse:
     payload = await _json_or_query(request, {"operation": operation})
-    return JSONResponse(build_legacy_result("corba", operation, payload))
-
-
-@router.post("/rpc/{procedure}")
-async def rpc_provider(procedure: str, request: Request) -> JSONResponse:
-    payload = await _json_or_query(request, {"procedure": procedure})
-    result = build_legacy_result("rpc", procedure, payload)
+    matched = _corba_match_operation(operation)
+    if matched is None:
+        return JSONResponse(
+            {
+                "provider": "corba",
+                "runtime_mode": PROVIDER_MODES["corba"],
+                "error": f"CORBA IDL operation not declared: {operation}",
+                "allowed_interfaces": sorted(CORBA_OBJECTS),
+            },
+            status_code=404,
+        )
+    interface_name, method_name, obj = matched
+    result = build_legacy_result("corba", method_name, payload)
     result.update({
-        "runtime_mode": PROVIDER_MODES["rpc"],
-        "transport": "xmlrpc_style",
-        "xmlrpc_response": {
-            "methodResponse": {
-                "params": [{"param": {"value": result["result"]}}],
-            }
+        "runtime_mode": PROVIDER_MODES["corba"],
+        "idl_module": "Contoso.CustomerService",
+        "interface": interface_name,
+        "repository_id": obj["repository_id"],
+        "object_ref": obj["object_ref"],
+        "allowed_operation": True,
+        "corba_request": {
+            "object_key": interface_name,
+            "operation": method_name,
+            "repository_id": obj["repository_id"],
+            "args": payload.get("args", payload),
+        },
+        "corba_response": {
+            "reply_status": "NO_EXCEPTION",
+            "operation": method_name,
+            "result": result["result"],
         },
     })
     return JSONResponse(result)
 
 
+@router.post("/rpc/{procedure}")
+async def rpc_provider(procedure: str, request: Request) -> Response:
+    body = await request.body()
+    parsed_args: Any = {}
+    method_name = procedure
+    if body.strip().startswith(b"<"):
+        try:
+            params, parsed_method = xmlrpc.client.loads(body)
+            method_name = parsed_method or procedure
+            parsed_args = list(params)
+        except Exception as exc:
+            fault = xmlrpc.client.Fault(400, f"Invalid XML-RPC request: {exc}")
+            return Response(content=xmlrpc.client.dumps(fault), media_type="text/xml", status_code=400)
+    else:
+        payload = await _json_or_query(request, {"procedure": procedure})
+        parsed_args = payload.get("args", payload)
+    if method_name not in RPC_METHODS:
+        fault = xmlrpc.client.Fault(404, f"RPC method not declared in IDL: {method_name}")
+        return Response(content=xmlrpc.client.dumps(fault), media_type="text/xml", status_code=200)
+    result = build_legacy_result("rpc", method_name, parsed_args)
+    result.update({
+        "runtime_mode": PROVIDER_MODES["rpc"],
+        "transport": "xmlrpc",
+        "idl_interface": "ContosoRpcSupport",
+        "declared_method": method_name,
+    })
+    return Response(content=xmlrpc.client.dumps((result,), methodresponse=True), media_type="text/xml")
+
+
+@router.post("/jndi/bind")
+async def jndi_bind_provider(request: Request) -> JSONResponse:
+    payload = await _json_or_query(request)
+    principal = str(payload.get("principal") or "cn=serviceaccount,dc=contoso,dc=com")
+    ok = principal.endswith("dc=contoso,dc=com")
+    return JSONResponse({
+        "provider": "jndi",
+        "runtime_mode": PROVIDER_MODES["jndi"],
+        "operation": "bind",
+        "protocol": "ldap",
+        "principal": principal,
+        "bound": ok,
+        "sentinel": extract_sentinel(payload),
+    }, status_code=200 if ok else 401)
+
+
+@router.post("/jndi/search")
+async def jndi_search_provider(request: Request) -> JSONResponse:
+    payload = await _json_or_query(request)
+    query = str(payload.get("filter") or payload.get("query") or "")
+    entries = [
+        _ldap_entry(name, binding)
+        for name, binding in JNDI_BINDINGS.items()
+        if not query or query.lower() in name.lower() or query.lower() in str(binding).lower()
+    ]
+    return JSONResponse({
+        "provider": "jndi",
+        "runtime_mode": PROVIDER_MODES["jndi"],
+        "operation": "search",
+        "protocol": "ldap",
+        "base_dn": payload.get("base_dn") or "dc=contoso,dc=com",
+        "filter": query or "(objectClass=javaNamingReference)",
+        "entries": entries,
+        "sentinel": extract_sentinel(payload),
+    })
+
+
 @router.post("/jndi/lookup")
 async def jndi_provider(request: Request) -> JSONResponse:
     payload = await _json_or_query(request)
-    raw_lookup = payload.get("lookup_name") or payload.get("name") or payload.get("binding") or "lookup"
-    if isinstance(raw_lookup, list):
-        raw_lookup = raw_lookup[0] if raw_lookup else "lookup"
-    lookup = str(raw_lookup)
+    lookup = _jndi_lookup_name(payload)
     binding = JNDI_BINDINGS.get(lookup)
     if binding is None:
-        binding = {"type": "dynamic.lookup", "value": extract_sentinel(payload)}
+        binding = {"type": "dynamic.lookup", "value": extract_sentinel(payload), "dn": f"cn={lookup.replace('/', '_')},dc=contoso,dc=com"}
     result = build_legacy_result("jndi", lookup, payload)
     result.update({
         "runtime_mode": PROVIDER_MODES["jndi"],
+        "protocol": "ldap",
+        "operation": "lookup",
         "lookup_name": lookup,
         "binding": binding,
+        "ldap_entry": _ldap_entry(lookup, binding),
         "lookup_found": lookup in JNDI_BINDINGS,
     })
     return JSONResponse(result)

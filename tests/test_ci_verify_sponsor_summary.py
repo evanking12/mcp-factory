@@ -22,6 +22,7 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
     gpt_matrix = tmp_path / "gpt-format-matrix" / "summary.json"
     windows_gpt = tmp_path / "windows-gpt" / "summary.json"
     repo_ingestion = tmp_path / "repo-ingestion" / "summary.json"
+    com_runtime = tmp_path / "windows" / "com_runtime" / "com_runtime.summary.json"
     gpt_dir = tmp_path / "gpt4o"
     deallocation = tmp_path / "vm-deallocation.json"
 
@@ -59,6 +60,17 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
     _write(gpt_dir / "downloaded-mcp-schema.json", {"tools": [{"name": "EchoSentinel"}]})
     _write(gpt_dir / "job-status-history.json", [{"status": "done"}])
     _write(deallocation, {"attempted": True, "completed": True})
+    _write(
+        com_runtime,
+        {
+            "passed": True,
+            "proof_level": "com_runtime",
+            "runtime_mode": "com_runtime",
+            "dcom_surface": "local_com_automation",
+            "remote_dcom_activation_claimed": False,
+            "com_objects": ["Scripting.Dictionary", "WScript.Shell"],
+        },
+    )
 
     return SimpleNamespace(
         non_vm_summary=str(non_vm),
@@ -67,9 +79,12 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
         gpt_matrix_summary=str(gpt_matrix),
         windows_gpt_summary=str(windows_gpt),
         repo_ingestion_summary=str(repo_ingestion),
+        com_runtime_summary=str(com_runtime),
         vm_deallocation=str(deallocation),
         out=str(tmp_path / "final-summary.json"),
         markdown=str(tmp_path / "final-summary.md"),
+        html="",
+        canonical_run_url="",
     )
 
 
@@ -269,7 +284,9 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     assert "GitHub Actions proof bundle is separate from app /api/download job artifacts" in ui
     assert "`/api/download/${state.jobId}/${encodeURIComponent" in ui
     assert "schemaBlob" in ui
-    assert "Load Demo Target" in ui
+    assert "Load SOAP/WSDL Showcase" in ui
+    assert "Legacy Protocol Showcase" in ui
+    assert "24547629781" in ui
     assert "Run Canonical Proof" in ui
     assert "tool_call:" in ui
     assert "tool_result:" in ui
@@ -308,9 +325,9 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
                         "jsonrpc": "real_runtime",
                         "soap_wsdl": "real_runtime",
                         "sql": "real_runtime",
-                        "jndi": "lookup_runtime",
+                        "jndi": "ldap_jndi_runtime",
                         "rpc_idl_contract": "xmlrpc_runtime",
-                        "corba_idl": "adapter_backed",
+                        "corba_idl": "corba_idl_runtime",
                     }.get(case_id, "local_runtime"),
                 }
                 for case_id in cases
@@ -327,15 +344,15 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
             "not_live_executed_because_provider_required": [],
             "all_required_cases_live_execution": True,
             "runtime_mode_counts": {
-                "adapter_backed": 1,
+                "corba_idl_runtime": 1,
                 "local_runtime": 6,
-                "lookup_runtime": 1,
+                "ldap_jndi_runtime": 1,
                 "real_runtime": 3,
                 "validated_runtime": 1,
                 "xmlrpc_runtime": 1,
             },
-            "runtime_backed_cases": [case for case in cases if case != "corba_idl"],
-            "adapter_backed_cases": ["corba_idl"],
+            "runtime_backed_cases": cases,
+            "adapter_backed_cases": [],
         },
     )
     _write(
@@ -358,12 +375,14 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
     assert summary["gpt_format_matrix"]["real_execution_passed"] == 13
     assert summary["gpt_format_matrix"]["provider_required_total"] == 0
     assert summary["gpt_format_matrix"]["runtime_mode_counts"]["real_runtime"] == 3
-    assert summary["gpt_format_matrix"]["adapter_backed_cases"] == ["corba_idl"]
+    assert summary["gpt_format_matrix"]["adapter_backed_cases"] == []
     assert summary["proof_semantics"]["provider_required"]["cases"] == []
-    assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["adapter_backed"] == ["corba_idl"]
+    assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["corba_idl_runtime"] == ["corba_idl"]
+    assert summary["com_runtime"]["passed"] is True
     assert "Real execution format proofs: 13/13" in text
     assert "Required provider-required cases: 0" in text
-    assert "Runtime mode `adapter_backed`: corba_idl" in text
+    assert "Runtime mode `corba_idl_runtime`: corba_idl" in text
+    assert "## COM/DCOM Surface Proof" in text
 
 
 def test_sponsor_report_html_rendering(tmp_path: Path) -> None:
@@ -382,6 +401,7 @@ def test_sponsor_report_html_rendering(tmp_path: Path) -> None:
 
 def test_sponsor_workflows_expose_fast_iteration_controls() -> None:
     workflow = (ROOT / ".github" / "workflows" / "sponsor-demo-e2e.yml").read_text(encoding="utf-8")
+    com_workflow = (ROOT / ".github" / "workflows" / "sponsor-windows-com-runtime.yml").read_text(encoding="utf-8")
     report_only = (ROOT / ".github" / "workflows" / "sponsor-demo-report-only.yml").read_text(encoding="utf-8")
     fixture = (ROOT / ".github" / "workflows" / "sponsor-report-fixture.yml").read_text(encoding="utf-8")
 
@@ -399,8 +419,11 @@ def test_sponsor_workflows_expose_fast_iteration_controls() -> None:
         "repo-ingestion-gpt-proof",
         "sponsor-report.html",
         "--canonical-run-url",
+        "windows-com-runtime-proof",
+        "--com-runtime-summary",
     ]:
         assert token in workflow
+    assert "windows-com-runtime-proof" in com_workflow
     assert "gh run download" in report_only
     assert "tests/test_legacy_provider_executor.py" in fixture
 
@@ -417,7 +440,7 @@ def test_pushback_docs_and_index_reference_caveats() -> None:
     assert "sponsor-report.html" in proof_index
     assert "SOAP is now runtime-backed" in caveats
     assert "SQLite-backed" in caveats
-    assert "CORBA remains a deterministic hosted adapter" in caveats
+    assert "CORBA IDL is runtime-shaped" in caveats
     assert "Remote DCOM activation" in caveats
     assert "$150/month" in non_code
     assert "FERPA" in non_code
@@ -610,6 +633,29 @@ def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:
     text = Path(args.markdown).read_text(encoding="utf-8")
     assert "## Proof Semantics" in text
     assert "does not claim local live execution" in text
+
+
+def test_sponsor_manifest_rejects_stale_corba_adapter_mode(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    ci_verify._write_json(
+        manifest,
+        {
+            "non_vm_cases": [
+                {
+                    "id": "corba_idl",
+                    "kind": "file",
+                    "category": "CORBA/IDL",
+                    "path": "tests/fixtures/sponsor/contoso_service.idl",
+                    "min_invocables": 1,
+                    "proof_level": "real_execution",
+                    "runtime_mode": "adapter_backed",
+                    "expected_result": "sentinel",
+                }
+            ]
+        },
+    )
+    with pytest.raises(AssertionError, match="stale runtime_mode='adapter_backed'"):
+        ci_verify.cmd_run_sponsor_contract(SimpleNamespace(manifest=str(manifest), out=str(tmp_path / "out")))
 
 
 def test_final_summary_contains_mcp_llm_story(tmp_path: Path) -> None:
