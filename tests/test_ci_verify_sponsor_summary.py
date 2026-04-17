@@ -23,6 +23,10 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
     windows_gpt = tmp_path / "windows-gpt" / "summary.json"
     repo_ingestion = tmp_path / "repo-ingestion" / "summary.json"
     com_runtime = tmp_path / "windows" / "com_runtime" / "com_runtime.summary.json"
+    stretch_runtime = tmp_path / "legacy-runtime-matrix" / "summary.json"
+    ghidra_recovery = tmp_path / "ghidra" / "summary.json"
+    remote_dcom = tmp_path / "windows" / "dcom" / "dcom.summary.json"
+    windows_runtime = tmp_path / "windows" / "runtime_fixture" / "runtime_fixture.summary.json"
     gpt_dir = tmp_path / "gpt4o"
     deallocation = tmp_path / "vm-deallocation.json"
 
@@ -80,6 +84,10 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
         windows_gpt_summary=str(windows_gpt),
         repo_ingestion_summary=str(repo_ingestion),
         com_runtime_summary=str(com_runtime),
+        stretch_runtime_summary=str(stretch_runtime),
+        ghidra_recovery_summary=str(ghidra_recovery),
+        remote_dcom_summary=str(remote_dcom),
+        windows_runtime_summary=str(windows_runtime),
         vm_deallocation=str(deallocation),
         out=str(tmp_path / "final-summary.json"),
         markdown=str(tmp_path / "final-summary.md"),
@@ -379,10 +387,13 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
     assert summary["proof_semantics"]["provider_required"]["cases"] == []
     assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["corba_idl_runtime"] == ["corba_idl"]
     assert summary["com_runtime"]["passed"] is True
+    assert summary["stretch_goals_passed"] is False
+    assert "ldap_runtime" in summary["stretch_proof_matrix"]["not_yet_run_ids"]
     assert "Real execution format proofs: 13/13" in text
     assert "Required provider-required cases: 0" in text
     assert "Runtime mode `corba_idl_runtime`: corba_idl" in text
     assert "## COM/DCOM Surface Proof" in text
+    assert "## Stretch Goal Proof Matrix" in text
 
 
 def test_sponsor_report_html_rendering(tmp_path: Path) -> None:

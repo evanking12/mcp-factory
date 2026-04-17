@@ -315,6 +315,112 @@ RUNTIME_MODE_BY_FORMAT_CASE = {
 }
 
 
+STRETCH_PROOF_REQUIREMENTS = [
+    {
+        "id": "jsonrpc_runtime",
+        "label": "JSON-RPC 2.0 runtime",
+        "target_mode": "jsonrpc_runtime",
+        "current_mode": "real_runtime",
+        "required_artifacts": ["ci_artifacts/demo/gpt-format-matrix/jsonrpc/transcript.json"],
+    },
+    {
+        "id": "soap_runtime",
+        "label": "SOAP/WSDL runtime",
+        "target_mode": "soap_runtime",
+        "current_mode": "real_runtime",
+        "required_artifacts": ["ci_artifacts/demo/gpt-format-matrix/soap_wsdl/transcript.json"],
+    },
+    {
+        "id": "sqlite_runtime",
+        "label": "SQLite SQL runtime",
+        "target_mode": "sqlite_runtime",
+        "current_mode": "real_runtime",
+        "required_artifacts": ["ci_artifacts/demo/gpt-format-matrix/sql/transcript.json"],
+    },
+    {
+        "id": "rest_validated_runtime",
+        "label": "OpenAPI/REST route-validated runtime",
+        "target_mode": "rest_validated_runtime",
+        "current_mode": "validated_runtime",
+        "required_artifacts": ["ci_artifacts/demo/gpt-format-matrix/openapi/transcript.json"],
+    },
+    {
+        "id": "ldap_runtime",
+        "label": "Real LDAP/JNDI runtime",
+        "target_mode": "ldap_runtime",
+        "current_mode": "ldap_jndi_runtime",
+        "required_artifacts": [
+            "ci_artifacts/demo/legacy/jndi_ldap/ldap-server-config.ldif",
+            "ci_artifacts/demo/legacy/jndi_ldap/bind-result.json",
+            "ci_artifacts/demo/legacy/jndi_ldap/search-result.json",
+            "ci_artifacts/demo/gpt-format-matrix/jndi/transcript.json",
+        ],
+    },
+    {
+        "id": "corba_orb_runtime",
+        "label": "CORBA ORB/IIOP runtime",
+        "target_mode": "corba_orb_runtime",
+        "current_mode": "corba_idl_runtime",
+        "required_artifacts": [
+            "ci_artifacts/demo/legacy/corba_orb/contoso_support.idl",
+            "ci_artifacts/demo/legacy/corba_orb/orb-server.log",
+            "ci_artifacts/demo/legacy/corba_orb/client-invocation.json",
+            "ci_artifacts/demo/gpt-format-matrix/corba_idl/transcript.json",
+        ],
+    },
+    {
+        "id": "msrpc_runtime",
+        "label": "Controlled MSRPC / Windows RPC runtime",
+        "target_mode": "msrpc_runtime",
+        "current_mode": "xmlrpc_runtime",
+        "required_artifacts": [
+            "ci_artifacts/demo/legacy/msrpc/contoso_rpc.idl",
+            "ci_artifacts/demo/legacy/msrpc/endpoint-registration.json",
+            "ci_artifacts/demo/legacy/msrpc/client-invocation.json",
+            "ci_artifacts/demo/gpt-format-matrix/rpc_idl_contract/transcript.json",
+        ],
+    },
+    {
+        "id": "remote_dcom_runtime",
+        "label": "Controlled remote DCOM runtime",
+        "target_mode": "remote_dcom_runtime",
+        "current_mode": "com_runtime",
+        "required_artifacts": [
+            "ci_artifacts/demo/windows/dcom/dcom.summary.json",
+            "ci_artifacts/demo/windows/dcom/remote-activation-transcript.json",
+        ],
+    },
+    {
+        "id": "evidence_ranked_binary_recovery",
+        "label": "Ghidra + dynamic evidence-ranked binary recovery",
+        "target_mode": "evidence_ranked_binary_recovery",
+        "current_mode": "not_yet_run",
+        "required_artifacts": [
+            "ci_artifacts/demo/ghidra/summary.json",
+            "ci_artifacts/demo/ghidra/undocumented_fixture/evidence-ranking.json",
+            "ci_artifacts/demo/ghidra/undocumented_fixture/transcript.json",
+        ],
+    },
+    {
+        "id": "windows_runtime_fixture",
+        "label": "Compiled Windows fixture runtime invocation",
+        "target_mode": "windows_runtime_fixture",
+        "current_mode": "tool_result_observed",
+        "required_artifacts": [
+            "ci_artifacts/demo/windows/runtime_fixture/runtime_fixture.summary.json",
+            "ci_artifacts/demo/windows-gpt/summary.json",
+        ],
+    },
+    {
+        "id": "repo_live_execution",
+        "label": "Expanded multi-language repo live execution",
+        "target_mode": "repo_live_execution",
+        "current_mode": "repo_live_execution",
+        "required_artifacts": ["ci_artifacts/demo/repo-ingestion/summary.json"],
+    },
+]
+
+
 def _runtime_mode_for_case(case: dict) -> str:
     return str(case.get("runtime_mode") or RUNTIME_MODE_BY_FORMAT_CASE.get(str(case.get("id")), "unknown"))
 
@@ -325,6 +431,84 @@ def _runtime_mode_counts(cases: list[dict]) -> dict[str, int]:
         mode = str(item.get("runtime_mode") or "unknown")
         counts[mode] = counts.get(mode, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _load_optional_summary(path: Path) -> dict:
+    return _load_json(path) if path.exists() else {"passed": False, "missing": str(path)}
+
+
+def _build_stretch_proof_matrix(
+    *,
+    gpt_matrix: dict,
+    repo_ingestion: dict,
+    com_runtime: dict,
+    stretch_runtime: dict,
+    ghidra_recovery: dict,
+    remote_dcom: dict,
+    windows_runtime: dict,
+) -> dict:
+    mode_counts = gpt_matrix.get("runtime_mode_counts") or {}
+    cases = gpt_matrix.get("cases") or []
+    case_by_id = {str(item.get("id")): item for item in cases if isinstance(item, dict)}
+
+    def gpt_case_passed(case_id: str) -> bool:
+        item = case_by_id.get(case_id)
+        if item:
+            return bool(item.get("passed") and item.get("tool_call_seen") and item.get("tool_result_seen"))
+        return case_id in set(gpt_matrix.get("runtime_backed_cases") or [])
+
+    stretch_sources = {
+        "ldap_runtime": stretch_runtime.get("ldap_runtime") or {},
+        "corba_orb_runtime": stretch_runtime.get("corba_orb_runtime") or {},
+        "msrpc_runtime": stretch_runtime.get("msrpc_runtime") or {},
+        "remote_dcom_runtime": remote_dcom,
+        "evidence_ranked_binary_recovery": ghidra_recovery,
+        "windows_runtime_fixture": windows_runtime,
+        "repo_live_execution": repo_ingestion,
+    }
+    gpt_cases = {
+        "jsonrpc_runtime": "jsonrpc",
+        "soap_runtime": "soap_wsdl",
+        "sqlite_runtime": "sql",
+        "rest_validated_runtime": "openapi",
+    }
+
+    entries = []
+    for requirement in STRETCH_PROOF_REQUIREMENTS:
+        proof_id = requirement["id"]
+        source = stretch_sources.get(proof_id, {})
+        passed = bool(source.get("passed"))
+        if proof_id in gpt_cases:
+            passed = gpt_case_passed(gpt_cases[proof_id])
+        if proof_id == "repo_live_execution":
+            passed = bool(repo_ingestion.get("passed"))
+        if proof_id == "remote_dcom_runtime":
+            passed = bool(remote_dcom.get("passed") and remote_dcom.get("remote_dcom_activation_claimed"))
+        if proof_id == "windows_runtime_fixture":
+            passed = bool(windows_runtime.get("passed"))
+        if proof_id == "evidence_ranked_binary_recovery":
+            passed = bool(ghidra_recovery.get("passed"))
+
+        status = "pass" if passed else ("not_yet_run" if source.get("missing") or not source else "fail")
+        entries.append(
+            {
+                **requirement,
+                "status": status,
+                "passed": passed,
+                "source_summary": source.get("summary_path", source.get("missing", "")) if isinstance(source, dict) else "",
+                "current_count": mode_counts.get(requirement["current_mode"], 0),
+            }
+        )
+
+    return {
+        "passed": all(item["passed"] for item in entries),
+        "total": len(entries),
+        "passed_count": sum(1 for item in entries if item["passed"]),
+        "not_yet_run_count": sum(1 for item in entries if item["status"] == "not_yet_run"),
+        "failed_ids": [item["id"] for item in entries if item["status"] == "fail"],
+        "not_yet_run_ids": [item["id"] for item in entries if item["status"] == "not_yet_run"],
+        "entries": entries,
+    }
 
 
 def _call_generated_tool_with_gpt(
@@ -2978,6 +3162,45 @@ def _append_com_runtime_proof(lines: list[str], com_runtime: dict) -> None:
     lines.append(f"- COM objects: {', '.join(com_runtime.get('com_objects') or []) or '-'}")
 
 
+def _append_stretch_proof_matrix(lines: list[str], stretch_matrix: dict) -> None:
+    lines.extend(["", "## Stretch Goal Proof Matrix", ""])
+    lines.append(
+        f"Summary: {stretch_matrix.get('passed_count', 0)}/{stretch_matrix.get('total', 0)} "
+        "stretch proofs passed."
+    )
+    lines.append("")
+    lines.append("| Proof | Status | Target Mode | Current Mode | Required Artifacts |")
+    lines.append("|---|---|---|---|---|")
+    for item in stretch_matrix.get("entries") or []:
+        artifacts = "<br>".join(f"`{path}`" for path in item.get("required_artifacts") or [])
+        lines.append(
+            f"| {item.get('label')} | {item.get('status')} | `{item.get('target_mode')}` | "
+            f"`{item.get('current_mode')}` | {artifacts} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Hard Legacy Runtime Proofs",
+            "",
+            "LDAP/JNDI, CORBA ORB/IIOP, MSRPC, and remote DCOM are treated as hard stretch proofs. "
+            "They are not considered complete until their focused runtime artifacts exist and the "
+            "final stretch proof matrix marks them `pass`.",
+            "",
+            "## Undocumented Binary Recovery Proof",
+            "",
+            "Ghidra/dynamic recovery is treated as an evidence-ranked proof. The project should only "
+            "claim recovered invocations for fixtures with `confirmed_invocation` or explicitly accepted "
+            "`probable_invocation` evidence.",
+            "",
+            "## Remaining Truthful Boundaries",
+            "",
+            "Until the stretch matrix passes, the canonical public claim remains the prior green proof. "
+            "Even after Ghidra recovery passes, arbitrary closed-source binary semantic recovery remains "
+            "best-effort and evidence-ranked, not guaranteed perfect recovery.",
+        ]
+    )
+
+
 def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     non_vm_path = Path(args.non_vm_summary)
     windows_path = Path(args.windows_summary)
@@ -2986,6 +3209,10 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     windows_gpt_path = Path(args.windows_gpt_summary)
     repo_ingestion_path = Path(args.repo_ingestion_summary)
     com_runtime_path = Path(args.com_runtime_summary)
+    stretch_runtime_path = Path(args.stretch_runtime_summary)
+    ghidra_recovery_path = Path(args.ghidra_recovery_summary)
+    remote_dcom_path = Path(args.remote_dcom_summary)
+    windows_runtime_path = Path(args.windows_runtime_summary)
     deallocation_path = Path(args.vm_deallocation)
     out_path = Path(args.out)
     canonical_run_url = str(getattr(args, "canonical_run_url", "") or os.getenv("CANONICAL_SPONSOR_RUN_URL", ""))
@@ -2996,6 +3223,10 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     windows_gpt = _load_json(windows_gpt_path) if windows_gpt_path.exists() else {"cases": [], "failures": 0, "missing": str(windows_gpt_path)}
     repo_ingestion = _load_json(repo_ingestion_path) if repo_ingestion_path.exists() else {"passed": False, "missing": str(repo_ingestion_path)}
     com_runtime = _load_json(com_runtime_path) if com_runtime_path.exists() else {"passed": False, "missing": str(com_runtime_path)}
+    stretch_runtime = _load_optional_summary(stretch_runtime_path)
+    ghidra_recovery = _load_optional_summary(ghidra_recovery_path)
+    remote_dcom = _load_optional_summary(remote_dcom_path)
+    windows_runtime = _load_optional_summary(windows_runtime_path)
     transcript_path = gpt_dir / "transcript.json"
     selected_path = gpt_dir / "selected-invocable.json"
     generated_schema_path = gpt_dir / "generated-mcp-schema.json"
@@ -3063,6 +3294,15 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         job_id=job_id,
     )
     proof_semantics = _proof_semantics(gpt_matrix)
+    stretch_proof_matrix = _build_stretch_proof_matrix(
+        gpt_matrix=gpt_matrix,
+        repo_ingestion=repo_ingestion,
+        com_runtime=com_runtime,
+        stretch_runtime=stretch_runtime,
+        ghidra_recovery=ghidra_recovery,
+        remote_dcom=remote_dcom,
+        windows_runtime=windows_runtime,
+    )
     artifacts = {
         "non_vm_summary": str(non_vm_path),
         "windows_summary": str(windows_path),
@@ -3070,6 +3310,10 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "windows_gpt_summary": str(windows_gpt_path),
         "repo_ingestion_summary": str(repo_ingestion_path),
         "com_runtime_summary": str(com_runtime_path),
+        "stretch_runtime_summary": str(stretch_runtime_path),
+        "ghidra_recovery_summary": str(ghidra_recovery_path),
+        "remote_dcom_summary": str(remote_dcom_path),
+        "windows_runtime_summary": str(windows_runtime_path),
         "transcript": str(transcript_path),
         "selected_invocable": str(selected_path),
         "generated_schema": str(generated_schema_path),
@@ -3091,6 +3335,26 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         "proof_semantics": proof_semantics,
         "mcp_llm_proof_story": mcp_llm_story,
         "requirement_matrix": requirement_matrix,
+        "stretch_goals_passed": bool(stretch_proof_matrix.get("passed")),
+        "stretch_proof_matrix": stretch_proof_matrix,
+        "runtime_mode_matrix": {
+            "gpt_format_modes": gpt_matrix.get("runtime_mode_counts", {}),
+            "stretch_modes": {
+                item["id"]: item["target_mode"]
+                for item in stretch_proof_matrix.get("entries", [])
+            },
+        },
+        "legacy_runtime_matrix": {
+            "ldap_runtime": stretch_runtime.get("ldap_runtime", {"missing": stretch_runtime.get("missing", "")}),
+            "corba_orb_runtime": stretch_runtime.get("corba_orb_runtime", {"missing": stretch_runtime.get("missing", "")}),
+            "msrpc_runtime": stretch_runtime.get("msrpc_runtime", {"missing": stretch_runtime.get("missing", "")}),
+            "remote_dcom_runtime": remote_dcom,
+        },
+        "ghidra_binary_recovery": ghidra_recovery,
+        "remote_dcom": remote_dcom,
+        "corba_orb": stretch_runtime.get("corba_orb_runtime", {"missing": stretch_runtime.get("missing", "")}),
+        "ldap_runtime": stretch_runtime.get("ldap_runtime", {"missing": stretch_runtime.get("missing", "")}),
+        "msrpc_runtime": stretch_runtime.get("msrpc_runtime", {"missing": stretch_runtime.get("missing", "")}),
         "non_vm": non_vm_counts,
         "windows": windows_counts,
         "gpt_format_matrix": {
@@ -3168,6 +3432,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             f"- Windows GPT tool-result-observed proofs: {windows_gpt.get('passed', 0)}/{windows_gpt.get('total', 0)}",
             f"- Repo ingestion GPT proof passed: {bool(repo_ingestion.get('passed'))}",
             f"- Windows COM runtime proof passed: {bool(com_runtime.get('passed'))}",
+            f"- Stretch proof matrix: {stretch_proof_matrix.get('passed_count', 0)}/{stretch_proof_matrix.get('total', 0)} passed",
+            f"- Stretch proofs not yet run: {', '.join(stretch_proof_matrix.get('not_yet_run_ids', [])) or 'none'}",
             f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
             f"- Sentinel seen in tool result: {checks['gpt_sentinel_seen']}",
             f"- Generated schema tools: {schema_tool_count}",
@@ -3197,6 +3463,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         _append_windows_gpt_proofs(lines, windows_gpt)
         _append_repo_ingestion_proof(lines, repo_ingestion)
         _append_com_runtime_proof(lines, com_runtime)
+        _append_stretch_proof_matrix(lines, stretch_proof_matrix)
         _append_requirement_matrix(lines, requirement_matrix)
         _append_diagnostic_table(
             lines,
@@ -3402,6 +3669,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--windows-gpt-summary", default="ci_artifacts/demo/windows-gpt/summary.json")
     p.add_argument("--repo-ingestion-summary", default="ci_artifacts/demo/repo-ingestion/summary.json")
     p.add_argument("--com-runtime-summary", default="ci_artifacts/demo/windows/com_runtime/com_runtime.summary.json")
+    p.add_argument("--stretch-runtime-summary", default="ci_artifacts/demo/legacy-runtime-matrix/summary.json")
+    p.add_argument("--ghidra-recovery-summary", default="ci_artifacts/demo/ghidra/summary.json")
+    p.add_argument("--remote-dcom-summary", default="ci_artifacts/demo/windows/dcom/dcom.summary.json")
+    p.add_argument("--windows-runtime-summary", default="ci_artifacts/demo/windows/runtime_fixture/runtime_fixture.summary.json")
     p.add_argument("--vm-deallocation", default="ci_artifacts/demo/vm-deallocation.json")
     p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
     p.add_argument("--markdown", default="")
