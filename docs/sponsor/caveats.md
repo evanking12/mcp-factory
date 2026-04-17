@@ -46,6 +46,8 @@ semantically executed by GPT.
 ## Current Required Green Contract
 
 The current canonical green contract is run
-[24547284139](https://github.com/evanking12/mcp-factory/actions/runs/24547284139).
-Run [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
+[24547629781](https://github.com/evanking12/mcp-factory/actions/runs/24547629781).
+Run [24547284139](https://github.com/evanking12/mcp-factory/actions/runs/24547284139)
+is the previous runtime-expansion green run, and run
+[24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
 remains a historical fallback before the runtime expansion campaign.

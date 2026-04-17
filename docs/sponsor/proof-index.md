@@ -4,7 +4,8 @@ This is the static landing page for sponsor proof artifacts.
 
 ## Canonical Green Run
 
-- Canonical green run: [24547284139](https://github.com/evanking12/mcp-factory/actions/runs/24547284139)
+- Canonical green run: [24547629781](https://github.com/evanking12/mcp-factory/actions/runs/24547629781)
+- Previous runtime-expansion green run: [24547284139](https://github.com/evanking12/mcp-factory/actions/runs/24547284139)
 - Historical baseline fallback: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
 - Workflow: [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml)
 - Artifact name: `sponsor-demo-e2e`

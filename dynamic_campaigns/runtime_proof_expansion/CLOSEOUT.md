@@ -2,8 +2,8 @@
 
 ## Canonical Green Proof
 
-- Full Sponsor Demo E2E: https://github.com/evanking12/mcp-factory/actions/runs/24547284139
-- Commit: `44d40bd`
+- Full Sponsor Demo E2E: https://github.com/evanking12/mcp-factory/actions/runs/24547629781
+- Commit: `4b4f54c`
 - Artifact name: `sponsor-demo-e2e`
 - Final report files:
   - `final-summary.md`
@@ -13,6 +13,7 @@
 ## Verified Artifact Results
 
 - Overall final summary: PASS.
+- The artifact embeds `canonical_run_url` as `https://github.com/evanking12/mcp-factory/actions/runs/24547629781`.
 - GPT format matrix: `13/13` real execution proofs.
 - Provider-required required cases: `0`.
 - Runtime modes:
@@ -36,6 +37,8 @@
 - Windows GPT focused proof: https://github.com/evanking12/mcp-factory/actions/runs/24546660554
 - SOAP one-case GPT proof: https://github.com/evanking12/mcp-factory/actions/runs/24546660545
 - SQL one-case GPT proof after coercion fix: https://github.com/evanking12/mcp-factory/actions/runs/24547182990
+- Previous runtime-expansion full green before URL embedding: https://github.com/evanking12/mcp-factory/actions/runs/24547284139
+- Contract CI after closeout URL wiring: https://github.com/evanking12/mcp-factory/actions/runs/24547612298
 
 ## Bugs Found And Fixed
 
@@ -53,4 +56,3 @@
   return recorded discovery proof, not arbitrary semantic execution of Windows
   system binaries.
 - Ghidra/deep stripped-binary semantic recovery remains out of capstone scope.
-

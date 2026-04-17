@@ -411,6 +411,7 @@ def test_pushback_docs_and_index_reference_caveats() -> None:
     caveats = (ROOT / "docs" / "sponsor" / "caveats.md").read_text(encoding="utf-8")
     non_code = (ROOT / "docs" / "sponsor" / "non-code-artifacts.md").read_text(encoding="utf-8")
 
+    assert "24547629781" in proof_index
     assert "24547284139" in proof_index
     assert "24542583216" in proof_index
     assert "sponsor-report.html" in proof_index
