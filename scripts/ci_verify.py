@@ -825,7 +825,7 @@ Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue
     ConvertTo-Json -Compress
 """
     cmd = [
-        "az", "vm", "run-command", "invoke",
+        _az_executable(), "vm", "run-command", "invoke",
         "-g", resource_group,
         "-n", vm_name,
         "--command-id", "RunPowerShellScript",
@@ -860,7 +860,7 @@ def _restart_bridge_vm(*, resource_group: str, vm_name: str, timeout: int = 420)
             "ok": False,
             "error": "VM restart skipped: resource group or VM name missing",
         }
-    cmd = ["az", "vm", "restart", "-g", resource_group, "-n", vm_name]
+    cmd = [_az_executable(), "vm", "restart", "-g", resource_group, "-n", vm_name]
     started = time.perf_counter()
     try:
         proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
@@ -890,7 +890,7 @@ def _ensure_bridge_vm_running(*, resource_group: str, vm_name: str, timeout: int
         }
 
     view_cmd = [
-        "az", "vm", "get-instance-view",
+        _az_executable(), "vm", "get-instance-view",
         "-g", resource_group,
         "-n", vm_name,
         "--query", "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus|[0]",
@@ -911,7 +911,7 @@ def _ensure_bridge_vm_running(*, resource_group: str, vm_name: str, timeout: int
     except Exception:
         power = ""
 
-    cmd = ["az", "vm", "start", "-g", resource_group, "-n", vm_name]
+    cmd = [_az_executable(), "vm", "start", "-g", resource_group, "-n", vm_name]
     try:
         proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
         return {
@@ -973,7 +973,7 @@ if (-not $proc) {
 } | ConvertTo-Json -Compress
 """
     cmd = [
-        "az", "vm", "run-command", "invoke",
+        _az_executable(), "vm", "run-command", "invoke",
         "-g", resource_group,
         "-n", vm_name,
         "--command-id", "RunPowerShellScript",
@@ -1008,9 +1008,13 @@ if (-not $proc) {
         }
 
 
+def _az_executable() -> str:
+    return shutil.which("az") or shutil.which("az.cmd") or "az"
+
+
 def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, timeout: int) -> dict:
     cmd = [
-        "az", "vm", "run-command", "invoke",
+        _az_executable(), "vm", "run-command", "invoke",
         "-g", resource_group,
         "-n", vm_name,
         "--command-id", "RunPowerShellScript",
@@ -1051,7 +1055,13 @@ def _run_vm_powershell_json(*, resource_group: str, vm_name: str, script: str, t
 
 
 def _run_local_powershell_json(*, script: str, timeout: int) -> dict:
-    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+    module_path_reset = (
+        "$machinePath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'); "
+        "$userPath = [Environment]::GetEnvironmentVariable('PSModulePath', 'User'); "
+        "$env:PSModulePath = (($machinePath, $userPath) | Where-Object { $_ }) -join ';'; "
+        "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; "
+    )
+    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", module_path_reset + script]
     started = time.perf_counter()
     try:
         proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
@@ -1085,7 +1095,7 @@ def _run_local_powershell_json(*, script: str, timeout: int) -> dict:
 
 
 def _az_tsv(args: list[str], *, timeout: int = 120) -> str:
-    proc = subprocess.run(["az", *args, "-o", "tsv"], check=False, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run([_az_executable(), *args, "-o", "tsv"], check=False, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
         raise RuntimeError(f"az {' '.join(args)} failed: {proc.stderr.strip() or proc.stdout.strip()}")
     return proc.stdout.strip()
@@ -1285,7 +1295,7 @@ def _touch_bridge_lease(*, storage_account: str, container: str, reason: str, jo
         temp_path = fh.name
     try:
         cmd = [
-            "az", "storage", "blob", "upload",
+            _az_executable(), "storage", "blob", "upload",
             "--auth-mode", "login",
             "--account-name", storage_account,
             "--container-name", container,
