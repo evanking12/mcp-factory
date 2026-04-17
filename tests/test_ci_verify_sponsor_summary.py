@@ -533,7 +533,9 @@ def test_non_ghidra_dcom_campaign_and_workflow_use_same_subnet_client() -> None:
     assert "CI Proof Bundle" in ui
     assert "schtasks.exe /Create" in client_script
     assert "Start-Process -FilePath $powerShellPath -Credential" not in client_script
-    assert 'Test-Path "HKLM:\\SOFTWARE\\Microsoft\\Ole"' in server_script
+    assert "$taskUser = \"$env:COMPUTERNAME\\$username\"" in client_script
+    assert 'reg.exe add "HKLM\\SOFTWARE\\Microsoft\\Ole"' in server_script
+    assert "LocalAccountTokenFilterPolicy" in server_script
 
 
 def test_required_remote_dcom_missing_fails_final_summary(tmp_path: Path) -> None:

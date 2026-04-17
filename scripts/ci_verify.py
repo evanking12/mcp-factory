@@ -2332,7 +2332,7 @@ $result | ConvertTo-Json -Compress
 
 def _remote_dcom_server_setup_script(*, username: str, password: str, sentinel: str) -> str:
     return f"""
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $username = {_ps_quote(username)}
 $password = {_ps_quote(password)}
 $sentinel = {_ps_quote(sentinel)}
@@ -2352,12 +2352,10 @@ try {{
 if (-not $isAdmin) {{
     Add-LocalGroupMember -Group "Administrators" -Member $username
 }}
-if (-not (Test-Path "HKLM:\\SOFTWARE\\Microsoft\\Ole")) {{
-    New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Force | Out-Null
-}}
-New-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Ole" -Name "EnableDCOM" -PropertyType String -Value "Y" -Force | Out-Null
-New-Item -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Force | Out-Null
-New-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Name "LocalAccountTokenFilterPolicy" -PropertyType DWord -Value 1 -Force | Out-Null
+& reg.exe add "HKLM\\SOFTWARE\\Microsoft\\Ole" /v EnableDCOM /t REG_SZ /d Y /f | Out-Null
+$enableDcomExit = $LASTEXITCODE
+& reg.exe add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f | Out-Null
+$tokenPolicyExit = $LASTEXITCODE
 New-Item -Path "HKLM:\\SOFTWARE\\MCPFactory\\DCOM" -Force | Out-Null
 New-ItemProperty -Path "HKLM:\\SOFTWARE\\MCPFactory\\DCOM" -Name "Sentinel" -PropertyType String -Value $sentinel -Force | Out-Null
 $firewallRules = @()
@@ -2390,7 +2388,9 @@ $result = [ordered]@{{
     clsid = $clsid
     appid = $appid
     dcom_enabled = "Y"
+    enable_dcom_exit_code = $enableDcomExit
     local_account_token_filter_policy = 1
+    local_account_token_filter_policy_exit_code = $tokenPolicyExit
     proof_user = $username
     firewall_rules = $firewallRules
     registry_sentinel_path = "HKLM\\SOFTWARE\\MCPFactory\\DCOM\\Sentinel"
@@ -2437,7 +2437,7 @@ $result | ConvertTo-Json -Depth 12 -Compress | Set-Content -Path $proofPath -Enc
 """
     encoded = base64.b64encode(inner.encode("utf-16le")).decode("ascii")
     return f"""
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $username = {_ps_quote(username)}
 $password = {_ps_quote(password)}
 $proofPath = {_ps_quote(proof_path)}
@@ -2463,7 +2463,8 @@ $powerShellPath = Join-Path $env:SystemRoot "System32\\WindowsPowerShell\\v1.0\\
 $taskName = "MCPFactoryRemoteDcomProof-" + ([Guid]::NewGuid().ToString("N"))
 $taskRun = "`"$powerShellPath`" -NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
 $taskStart = (Get-Date).AddMinutes(1).ToString("HH:mm")
-$taskCreateOutput = & schtasks.exe /Create /TN $taskName /TR $taskRun /SC ONCE /ST $taskStart /RU ".\\$username" /RP $password /RL HIGHEST /F 2>&1
+$taskUser = "$env:COMPUTERNAME\\$username"
+$taskCreateOutput = & schtasks.exe /Create /TN $taskName /TR $taskRun /SC ONCE /ST $taskStart /RU $taskUser /RP $password /RL HIGHEST /F 2>&1
 $taskCreateExit = $LASTEXITCODE
 if ($taskCreateExit -ne 0) {{
     [ordered]@{{
