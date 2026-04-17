@@ -2361,7 +2361,15 @@ New-ItemProperty -Path "HKLM:\\SOFTWARE\\MCPFactory\\DCOM" -Name "Sentinel" -Pro
 $firewallRules = @()
 try {{
     Enable-NetFirewallRule -DisplayGroup "COM+ Network Access" -ErrorAction SilentlyContinue | Out-Null
+    $firewallRules += "COM+ Network Access"
 }} catch {{ }}
+try {{
+    Enable-NetFirewallRule -DisplayGroup "Windows Management Instrumentation (WMI)" -ErrorAction SilentlyContinue | Out-Null
+    $firewallRules += "Windows Management Instrumentation (WMI)"
+}} catch {{ }}
+try {{ Start-Service winmgmt -ErrorAction SilentlyContinue }} catch {{ }}
+try {{ Start-Service RpcSs -ErrorAction SilentlyContinue }} catch {{ }}
+try {{ Start-Service DcomLaunch -ErrorAction SilentlyContinue }} catch {{ }}
 foreach ($rule in @(
     @{{ Name = "MCPFactory-Remote-DCOM-EndpointMapper"; Port = "135" }},
     @{{ Name = "MCPFactory-Remote-DCOM-DynamicRPC"; Port = "49152-65535" }}
@@ -2373,20 +2381,26 @@ foreach ($rule in @(
 }}
 $clsid = ""
 $appid = ""
-try {{ $clsid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\WScript.Shell\\CLSID").GetValue("") }} catch {{ }}
+$wmiClassOk = $false
+try {{ $clsid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\WbemScripting.SWbemLocator\\CLSID").GetValue("") }} catch {{ }}
 try {{
     if ($clsid) {{ $appid = (Get-Item "Registry::HKEY_CLASSES_ROOT\\CLSID\\$clsid").GetValue("AppID") }}
 }} catch {{ }}
+try {{
+    $wmiClassOk = [bool](Get-CimClass -Namespace root/default -ClassName StdRegProv -ErrorAction SilentlyContinue)
+}} catch {{ $wmiClassOk = $false }}
 $result = [ordered]@{{
-    passed = ($clsid -ne "")
+    passed = $wmiClassOk
     proof_level = "remote_dcom_runtime"
     runtime_mode = "remote_dcom_runtime"
     dcom_surface = "server_configured_for_remote_activation"
     remote_dcom_activation_claimed = $false
     server_computer_name = $env:COMPUTERNAME
-    prog_id = "WScript.Shell"
+    prog_id = "WMI.StdRegProv"
+    com_transport = "WMI over DCOM"
     clsid = $clsid
     appid = $appid
+    wmi_stdregprov_available = $wmiClassOk
     dcom_enabled = "Y"
     enable_dcom_exit_code = $enableDcomExit
     local_account_token_filter_policy = 1
@@ -2415,21 +2429,22 @@ $result = [ordered]@{{
     remote_dcom_activation_claimed = $true
     client_computer_name = $env:COMPUTERNAME
     server_target = $serverTarget
-    prog_id = "WScript.Shell"
+    prog_id = "WMI.StdRegProv"
+    com_transport = "WMI over DCOM"
     remote_computer_name = ""
     remote_sentinel = ""
     distinct_remote_context = $false
     error = ""
 }}
 try {{
-    $type = [type]::GetTypeFromProgID("WScript.Shell", $serverTarget, $true)
-    $object = [Activator]::CreateInstance($type)
-    $remoteComputer = $object.ExpandEnvironmentStrings("%COMPUTERNAME%")
-    $remoteSentinel = $object.RegRead("HKLM\\SOFTWARE\\MCPFactory\\DCOM\\Sentinel")
-    $result.remote_computer_name = [string]$remoteComputer
-    $result.remote_sentinel = [string]$remoteSentinel
-    $result.distinct_remote_context = ([string]$remoteComputer -ne "" -and [string]$remoteComputer -ne $env:COMPUTERNAME)
-    $result.passed = ($result.distinct_remote_context -and [string]$remoteSentinel -eq $sentinel)
+    $computer = Get-WmiObject -Class Win32_ComputerSystem -ComputerName $serverTarget -ErrorAction Stop | Select-Object -First 1
+    $reg = Get-WmiObject -List -Namespace root\\default -ComputerName $serverTarget -Class StdRegProv -ErrorAction Stop
+    $hklm = 2147483650
+    $value = $reg.GetStringValue($hklm, "SOFTWARE\\MCPFactory\\DCOM", "Sentinel")
+    $result.remote_computer_name = [string]$computer.Name
+    $result.remote_sentinel = [string]$value.sValue
+    $result.distinct_remote_context = ([string]$result.remote_computer_name -ne "" -and [string]$result.remote_computer_name -ne $env:COMPUTERNAME)
+    $result.passed = ($result.distinct_remote_context -and [string]$result.remote_sentinel -eq $sentinel)
 }} catch {{
     $result.error = $_.Exception.Message
 }}
@@ -2541,7 +2556,7 @@ def _remote_dcom_invocable(summary: dict) -> dict:
     return {
         "name": "remote_dcom_activation_result",
         "source_type": "remote_dcom_runtime",
-        "description": "Return the recorded controlled remote DCOM activation and invocation proof from CI.",
+        "description": "Return the recorded controlled remote WMI/DCOM activation and invocation proof from CI.",
         "parameters": [
             {
                 "name": "acknowledgement",
@@ -2612,7 +2627,7 @@ def cmd_windows_remote_dcom_runtime_proof(args: argparse.Namespace) -> int:
     runtime_passed = all(checks.values())
     summary = {
         "label": "remote_dcom_runtime",
-        "target": "Controlled remote DCOM WScript.Shell activation",
+        "target": "Controlled remote DCOM WMI StdRegProv activation",
         "passed": runtime_passed,
         "proof_level": "remote_dcom_runtime",
         "runtime_mode": "remote_dcom_runtime",
@@ -2623,7 +2638,7 @@ def cmd_windows_remote_dcom_runtime_proof(args: argparse.Namespace) -> int:
         "client_vm_name": args.client_vm_name,
         "client_mode": args.client_mode,
         "server_target": server_target,
-        "prog_id": "WScript.Shell",
+        "prog_id": "WMI.StdRegProv",
         "clsid": server_setup.get("clsid", ""),
         "appid": server_setup.get("appid", ""),
         "checks": checks,

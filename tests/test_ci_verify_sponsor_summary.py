@@ -536,6 +536,8 @@ def test_non_ghidra_dcom_campaign_and_workflow_use_same_subnet_client() -> None:
     assert "$taskUser = \"$env:COMPUTERNAME\\$username\"" in client_script
     assert 'reg.exe add "HKLM\\SOFTWARE\\Microsoft\\Ole"' in server_script
     assert "LocalAccountTokenFilterPolicy" in server_script
+    assert "Windows Management Instrumentation (WMI)" in server_script
+    assert "StdRegProv" in server_script
 
 
 def test_required_remote_dcom_missing_fails_final_summary(tmp_path: Path) -> None:

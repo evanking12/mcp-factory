@@ -7,13 +7,12 @@ Baseline canonical green Sponsor Demo E2E run is
 
 Current frontier:
 
-- Focused runs `24575880821`, `24576385559`, and `24576877981` proved Azure
-  same-subnet client VM creation and cleanup are working.
-- Run `24576877981` exposed Windows-native setup issues: registry provider
-  access on policy path and `.\\mcpdcom` SID resolution in `schtasks`.
-- Commit the native `reg.exe` and `COMPUTERNAME\\user` scheduled-task fix,
-  rerun focused Remote DCOM, then promote only if the parsed artifact proves
-  `remote_dcom_runtime`.
+- Focused runs through `24577375644` prove Azure same-subnet client VM creation,
+  bridge startup, scheduled-task execution, and cleanup are working.
+- Run `24577375644` proved server setup but showed `WScript.Shell` is not a
+  valid remote activation surface here (`80040154`).
+- Commit the WMI-over-DCOM proof-surface change, rerun focused Remote DCOM,
+  then promote only if the parsed artifact proves `remote_dcom_runtime`.
 
 Campaign goals:
 
