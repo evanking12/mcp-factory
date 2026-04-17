@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,14 @@ from api.storage import _upload_to_blob, _get_job_status, _persist_job_status
 from api.vm_lifecycle import ensure_bridge_ready, touch_bridge_activity
 
 logger = logging.getLogger("mcp_factory.api")
+
+
+def _safe_discovery_tag(hints: str, max_length: int = 40) -> str:
+    """Return a filesystem-safe discovery tag derived from user hints."""
+    tag = (hints or "").strip()[:max_length]
+    tag = re.sub(r"[^A-Za-z0-9_.-]+", "_", tag)
+    tag = tag.strip("._-")
+    return tag
 
 
 def _persist_bridge_warning(job_id: str, message: str) -> None:
@@ -308,8 +317,9 @@ def _run_discovery(binary_path: Path, job_id: str, hints: str = "") -> dict:
         "--out", str(out_dir),
         "--no-demangle",
     ]
-    if hints:
-        cmd += ["--tag", hints[:40].replace(" ", "_")]
+    safe_tag = _safe_discovery_tag(hints)
+    if safe_tag:
+        cmd += ["--tag", safe_tag]
     if IS_WINDOWS:
         cmd += ["--registry"]  # scan HKLM App Paths, Uninstall, COM CLSIDs (§1.c / P9)
 

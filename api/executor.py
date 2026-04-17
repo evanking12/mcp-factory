@@ -31,6 +31,7 @@ from api.config import (
     ENABLE_LEGACY_PROVIDERS,
     LEGACY_PROVIDER_BASE_URL,
 )
+from api.error_enrichment import build_error_payload
 from api.vm_lifecycle import ensure_bridge_ready, touch_bridge_activity
 
 logger = logging.getLogger("mcp_factory.api")
@@ -624,3 +625,28 @@ def _execute_tool(inv: dict, args: dict) -> str:
     if method == "observed_result":
         return _execute_observed_result(execution, name, args)
     return _execute_cli(execution, name, args)
+
+
+def _execute_tool_traced(inv: dict, args: dict, findings_for_fn: list[dict] | None = None) -> dict:
+    """Execute a tool while preserving the legacy string API plus diagnostics."""
+    name = inv.get("name", "")
+    execution = inv.get("execution") or inv.get("mcp", {}).get("execution", {})
+    trace = {
+        "backend": execution.get("method", "cli") or "cli",
+        "tool": name,
+    }
+    try:
+        result = _execute_tool(inv, args)
+        error = build_error_payload(
+            name,
+            result,
+            trace,
+            None,
+            findings_for_fn or inv.get("findings_summary", {}).get("findings") or [],
+            execution.get("error_codes") or inv.get("error_codes"),
+        )
+        return {"result_str": result, "trace": trace, "error": error}
+    except Exception as exc:
+        trace["exception"] = str(exc)
+        error = build_error_payload(name, None, trace, str(exc), findings_for_fn or [])
+        return {"result_str": f"Tool '{name}' raised an exception: {exc}", "trace": trace, "error": error}

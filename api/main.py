@@ -40,7 +40,7 @@ from api.storage import (
     _enqueue_analysis,
 )
 from api.worker import _queue_worker_loop, _analyze_worker
-from api.executor import _execute_tool
+from api.executor import _execute_tool_traced
 from api.chat import stream_chat
 from api.generate import run_generate
 from api.legacy_provider import router as legacy_provider_router
@@ -332,8 +332,13 @@ def execute_tool(body: dict[str, Any]):
             arguments = {}
 
     logger.info(f"[execute] {tool_name} args={arguments}")
-    result = _execute_tool(inv, arguments)
-    return JSONResponse({"tool_name": tool_name, "result": result})
+    traced = _execute_tool_traced(inv, arguments)
+    return JSONResponse({
+        "tool_name": tool_name,
+        "result": traced["result_str"],
+        "error": traced.get("error"),
+        "trace": traced.get("trace"),
+    })
 
 
 @app.post("/api/chat")

@@ -1163,6 +1163,46 @@ except ImportError:
 INVOCABLES = json.loads(r"""__INVOCABLES_JSON__""")
 INVOCABLE_MAP = {inv["name"]: inv for inv in INVOCABLES}
 
+
+def _tool_error_payload(function_name: str, result: str) -> dict | None:
+    text = str(result or "")
+    lower = text.lower()
+    category = None
+    severity = "recoverable"
+    if "0xffffffff" in lower or "4294967295" in lower or "sentinel" in lower:
+        category = "sentinel"
+    elif "timed out" in lower or "timeout" in lower:
+        category = "timeout"
+        severity = "blocking"
+    elif lower.startswith("provider required:"):
+        category = "provider_required"
+        severity = "blocking"
+    elif "not found" in lower and "tool" in lower:
+        category = "unknown_tool"
+        severity = "blocking"
+    elif lower.startswith(("dll call error:", "cli error:", "gui close error:", "script error:")):
+        category = "exception"
+        severity = "blocking"
+    if not category:
+        return None
+    return {
+        "category": category,
+        "severity": severity,
+        "classified_name": None,
+        "raw_code": "0xFFFFFFFF" if "0xffffffff" in lower or "4294967295" in lower else None,
+        "what_tried": [],
+        "known_good": [],
+        "suggestion": "Inspect the generated schema arguments and retry with the selected invocable's required parameters.",
+        "human": text or f"Tool {function_name} failed.",
+    }
+
+
+def _format_tool_result(function_name: str, result: str) -> str:
+    payload = _tool_error_payload(function_name, result)
+    if not payload:
+        return result
+    return result + "\n\n```json\n" + json.dumps({"error": payload}, indent=2) + "\n```"
+
 # ---------------------------------------------------------------------------
 # Type maps for ctypes dispatch
 # ---------------------------------------------------------------------------
@@ -1290,16 +1330,21 @@ def _make_tool_fn(inv: dict):
 
     if not _params:
         def _tool_fn() -> str:
-            return _execute_tool(inv, {})
+            return _format_tool_result(_name, _execute_tool(inv, {}))
     else:
         # Build a function with explicit keyword args so FastMCP can infer the JSON schema.
         param_list = ", ".join(f"{p['name']}: str = ''" for p in _params)
         args_dict  = "{" + ", ".join(f'"{p["name"]}": {p["name"]}' for p in _params) + "}"
         src = (
             f"def _tool_fn({param_list}) -> str:\n"
-            f"    return _execute_tool(_inv, {args_dict})\n"
+            f"    return _format_tool_result(_name, _execute_tool(_inv, {args_dict}))\n"
         )
-        ns: dict = {"_execute_tool": _execute_tool, "_inv": inv}
+        ns: dict = {
+            "_execute_tool": _execute_tool,
+            "_format_tool_result": _format_tool_result,
+            "_inv": inv,
+            "_name": _name,
+        }
         exec(src, ns)  # noqa: S102
         _tool_fn = ns["_tool_fn"]
 

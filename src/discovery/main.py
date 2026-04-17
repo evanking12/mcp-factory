@@ -7,11 +7,18 @@ Parses arguments, runs the analysis pipeline, and writes outputs.
 
 import argparse
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_output_name(value: str) -> str:
+    """Sanitize filename fragments used for discovery artifacts."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value or "")
+    return safe.strip("._-") or "analysis"
 
 from classify import classify_file, FileType, extract_signature, get_architecture
 from headers_scan import scan_headers, scan_docs_for_exports
@@ -730,7 +737,9 @@ def main():
         dll_path = None
 
     if args.tag:
-        base_name = f"{base_name}_{args.tag}"
+        base_name = _safe_output_name(f"{base_name}_{args.tag}")
+    else:
+        base_name = _safe_output_name(base_name)
 
     # ── §2.a: Accept installed directory (c:\Program Files\AppD\) ────────────
     if dll_path and dll_path.is_dir():

@@ -46,3 +46,8 @@ JNDI/LDAP, CORBA ORB/IIOP, and controlled MSRPC are runtime-backed in the
 expanded proof. Canonical run `24578415657` imports focused run `24577926238`
 and proves controlled same-subnet Remote DCOM through WMI over DCOM as part of
 the full sponsor artifact.
+
+For the recorded UI walkthrough, use
+[Sponsor Video Demo Walkthrough](video-demo-walkthrough.md). It gives the
+SOAP/WSDL demo target, copy-ready GPT prompts, backend diagram, and the
+teammate structured-error-output refactor assessment.

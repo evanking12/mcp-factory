@@ -137,13 +137,22 @@ The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](ht
 
 Canonical green run: [24578415657](https://github.com/evanking12/mcp-factory/actions/runs/24578415657).
 Focused Remote DCOM runtime source proof: [24577926238](https://github.com/evanking12/mcp-factory/actions/runs/24577926238).
+Deployed demo UI: [mcp-factory-ui.icycoast-8ddfa278.eastus.azurecontainerapps.io](https://mcp-factory-ui.icycoast-8ddfa278.eastus.azurecontainerapps.io).
 
 Static sponsor references:
 
+- [Sponsor video demo walkthrough](docs/sponsor/video-demo-walkthrough.md) gives the recommended SOAP/WSDL UI demo path, GPT prompts, backend diagram, and teammate error-output refactor assessment.
 - [Sponsor proof index](docs/sponsor/proof-index.md) maps the canonical run to the exact artifact paths and fast proof workflows.
 - [Sponsor demo caveats](docs/sponsor/caveats.md) states the proof boundary for JSON-RPC, SOAP, CORBA, RPC, JNDI, COM/DCOM, and arbitrary binary recovery.
 - [Non-Ghidra stretch closeout](dynamic_campaigns/non_ghidra_stretch_closeout/README.md) tracks the same-subnet Remote DCOM proof path without adding Ghidra or undocumented binary recovery scope.
 - [Non-code sponsor artifacts](docs/sponsor/non-code-artifacts.md) covers Azure cost posture, FERPA/access control, architecture references, and rerun guidance.
+
+Recommended recorded demo target: SOAP/WSDL through the deployed UI. Use the
+`Load SOAP/WSDL Showcase` button or upload
+`tests/fixtures/sponsor/contoso_service.wsdl`, then analyze, select
+`GetCustomer` or `SubmitTicket`, generate the MCP schema, and ask GPT to call
+the generated tool with a deterministic sentinel. The walkthrough above has
+copy-ready prompts and the exact evidence to show on screen.
 
 Interpret the artifact as the canonical sponsor proof bundle:
 

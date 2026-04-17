@@ -387,6 +387,29 @@ _HTML = r"""<!DOCTYPE html>
       font-family: monospace;
       font-size: 0.78rem;
     }
+    .chat-msg.tool-error {
+      align-self: flex-start;
+      background: rgba(240,91,91,.12);
+      border: 1px solid rgba(240,91,91,.42);
+      color: #f5b1b1;
+      font-family: monospace;
+      font-size: 0.78rem;
+    }
+    .tool-error-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+    .tool-error-badge {
+      background: rgba(240,91,91,.24);
+      border: 1px solid rgba(240,91,91,.5);
+      color: #f09090;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      text-transform: uppercase;
+    }
+    .tool-error-suggestion { color: #ffd7d7; margin-top: 6px; font-family: var(--font); font-size: 0.82rem; }
+    .tool-error details { margin-top: 6px; }
+    .tool-error summary { cursor: pointer; color: #d9a0a0; font-size: 0.72rem; }
+    .tool-error pre { margin-top: 6px; white-space: pre-wrap; font-size: 0.72rem; color: #c9a9a9; }
     .chat-empty {
       flex: 1; display: flex; align-items: center; justify-content: center;
       color: var(--muted); font-size: 0.85rem; text-align: center;
@@ -741,7 +764,7 @@ $('load-demo-btn').addEventListener('click', () => {
   fileInput.value = '';
   $('dir-path').value = '';
   $('file-name').textContent = `${state.demoFile.name} (SOAP/WSDL showcase)`;
-  $('hints').value = 'Video demo target: SOAP/WSDL legacy customer service. Show discovery, generated MCP schema, GPT tool_call, and backend tool_result.';
+  $('hints').value = 'Video demo target: SOAP WSDL legacy customer service. Show discovery, generated MCP schema, GPT tool_call, and backend tool_result.';
   _syncAnalyzeBtn();
   clearError('upload-error');
 });
@@ -1112,6 +1135,7 @@ async function sendMessage() {
 
         } else if (evt.type === 'tool_result') {
           appendChatMsg('tool-call', `tool_result: ${evt.result ?? ''}`);
+          if (evt.error) appendToolError(evt.name, evt.error);
 
         } else if (evt.type === 'status') {
           appendChatMsg('tool-call', `⏳ ${evt.message ?? 'Working...'}`);
@@ -1157,6 +1181,64 @@ function appendChatBubble(role, text) {
 
 function appendChatMsg(role, text) {
   appendChatBubble(role, text);
+}
+
+function appendToolError(fnName, err) {
+  if (!err || typeof err !== 'object') return;
+  const win = $('chat-window');
+  $('chat-empty')?.remove();
+  const div = document.createElement('div');
+  div.className = 'chat-msg tool-error';
+
+  const head = document.createElement('div');
+  head.className = 'tool-error-head';
+  const badge = document.createElement('span');
+  badge.className = 'tool-error-badge';
+  badge.textContent = err.classified_name || err.category || 'error';
+  head.appendChild(badge);
+  if (fnName) {
+    const fn = document.createElement('span');
+    fn.textContent = fnName;
+    head.appendChild(fn);
+  }
+  if (err.raw_code) {
+    const raw = document.createElement('span');
+    raw.textContent = err.raw_code;
+    head.appendChild(raw);
+  }
+  div.appendChild(head);
+
+  if (err.human) {
+    const human = document.createElement('div');
+    human.textContent = err.human;
+    div.appendChild(human);
+  }
+  if (err.suggestion) {
+    const suggestion = document.createElement('div');
+    suggestion.className = 'tool-error-suggestion';
+    suggestion.textContent = `Next: ${err.suggestion}`;
+    div.appendChild(suggestion);
+  }
+
+  const hasTried = Array.isArray(err.what_tried) && err.what_tried.length;
+  const hasKnown = Array.isArray(err.known_good) && err.known_good.length;
+  if (hasTried || hasKnown) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'Diagnostics';
+    details.appendChild(summary);
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(
+      { what_tried: err.what_tried || [], known_good: err.known_good || [] },
+      null,
+      2,
+    );
+    details.appendChild(pre);
+    div.appendChild(details);
+  }
+
+  win.appendChild(div);
+  win.scrollTop = win.scrollHeight;
 }
 
 $('send-btn').addEventListener('click', sendMessage);

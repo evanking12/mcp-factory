@@ -9,6 +9,7 @@ never blocked — SSE events are flushed to the client between rounds.
 
 SSE event format:  data: <json>\n\n
 Event types:
+  tool_result events include "error": null on success or a structured error payload on failure.
   {"type": "token",       "content": "..."}          – final text content
   {"type": "tool_call",   "name": "...", "args": {}}  – tool about to execute
   {"type": "tool_result", "name": "...", "result": "..."} – tool output
@@ -30,7 +31,8 @@ from typing import Any, AsyncGenerator
 from fastapi import HTTPException
 
 from api.config import OPENAI_ENDPOINT, OPENAI_DEPLOYMENT, OPENAI_MAX_TOOLS
-from api.executor import _execute_tool
+from api.error_enrichment import build_error_payload
+from api.executor import _execute_tool_traced
 from api.storage import _register_invocables, _get_invocable
 from api.telemetry import _openai_client
 
@@ -365,13 +367,16 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                     _TOOL_HARD_TIMEOUT = 30  # seconds; DLL/COM/GUI calls can hang
                     _tool_t0 = time.perf_counter()
                     _tool_future = loop.run_in_executor(
-                        None, lambda i=inv, a=fn_args: _execute_tool(i, a)
+                        None, lambda i=inv, a=fn_args: _execute_tool_traced(i, a)
                     )
+                    tool_error = None
                     while True:
                         try:
-                            tool_result = await asyncio.wait_for(
+                            traced_result = await asyncio.wait_for(
                                 asyncio.shield(_tool_future), timeout=5.0
                             )
+                            tool_result = traced_result["result_str"]
+                            tool_error = traced_result.get("error")
                             break
                         except asyncio.TimeoutError:
                             if time.perf_counter() - _tool_t0 > _TOOL_HARD_TIMEOUT:
@@ -383,6 +388,8 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                                 "name": fn_name,
                                 "message": f"Waiting for tool '{fn_name}'...",
                             })
+                    if tool_error is None:
+                        tool_error = build_error_payload(fn_name, tool_result)
                     _tool_ms = (time.perf_counter() - _tool_t0) * 1000.0
                     if inv.get("source_type") == "cli" and \
                             Path(inv.get("dll_path", "")).stem.lower() == fn_name.lower():
@@ -392,9 +399,14 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                         f"Tool '{fn_name}' not found — pass 'invocables' in the "
                         f"request body or call /api/generate first."
                     )
+                    tool_error = build_error_payload(
+                        fn_name,
+                        tool_result,
+                        {"backend": "unknown_tool", "category": "unknown_tool", "severity": "blocking"},
+                    )
                     _tool_ms = 0.0
 
-                yield _sse({"type": "tool_result", "name": fn_name, "result": tool_result})
+                yield _sse({"type": "tool_result", "name": fn_name, "result": tool_result, "error": tool_error})
                 logger.info(
                     "[stream_chat/%d] tool=%s latency=%.1f ms result=%s",
                     _round,
