@@ -201,8 +201,9 @@ workflow uses GitHub-hosted Windows to avoid creating temporary Azure resources.
 Strongest risk: public DCOM activation may be blocked by Azure edge routing or
 server firewall/NAT behavior.
 
-Next correction: inspect the remote activation transcript and write a blocker
-if the failure is DCOM transport/security rather than workflow code.
+Next correction: stop this tranche and require either same-subnet client
+permission or a pre-existing Windows client VM in the VNet; do not downgrade to
+local COM.
 
 `delegation_effectiveness`: 2
 

@@ -23,6 +23,8 @@ Trust boundary:
   unknown COM servers, or broad DCOM security posture.
 
 Next blocker:
-- Validate whether public endpoint routing, Windows firewall, local-account DCOM
-  authentication, and WScript.Shell remote activation work together. If not,
-  stop here and write a blocker with the exact failing layer.
+- Public endpoint routing does not support the current remote DCOM proof:
+  focused run `24573214799` failed with `0x800706ba` RPC server unavailable.
+  Same-subnet client provisioning is blocked by missing NIC read permission.
+  The next credible move is a same-subnet Windows client VM with sufficient
+  Azure permissions, or a pre-provisioned client VM in the bridge VNet.
