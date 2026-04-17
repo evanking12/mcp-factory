@@ -4,6 +4,11 @@ Status: local implementation ready; remote proof not yet dispatched.
 
 Implemented:
 - Focused Remote DCOM workflow now uses same-subnet Azure client VM mode.
+- First focused run `24574763841` failed before real DCOM proof because the
+  workflow called `az group show`, requiring
+  `Microsoft.Resources/subscriptions/resourcegroups/read`. The workflow now uses
+  the known `eastus` location instead, so the next run reaches the intended
+  VM/NIC/subnet permission checks.
 - Full Sponsor Demo E2E accepts `remote_dcom_run_id` and imports the focused
   `sponsor-remote-dcom-runtime` artifact.
 - Final Sponsor Demo summary can require Remote DCOM with

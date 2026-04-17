@@ -27,6 +27,7 @@ env:
   KEY_VAULT: mcp-factory-kv
   PIPELINE_URL: https://mcp-factory-pipeline.icycoast-8ddfa278.eastus.azurecontainerapps.io
   CLIENT_ADMIN_USERNAME: mcpdcomclient
+  LOCATION: eastus
 
 jobs:
   remote-dcom-runtime:
@@ -82,7 +83,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci_artifacts/demo/windows/dcom
-          location="$(az group show --name "$RESOURCE_GROUP" --query location -o tsv)"
           server_nic_id="$(az vm show --resource-group "$RESOURCE_GROUP" --name "$SERVER_VM_NAME" --query 'networkProfile.networkInterfaces[0].id' -o tsv)"
           subnet_id="$(az network nic show --ids "$server_nic_id" --query 'ipConfigurations[0].subnet.id' -o tsv)"
           server_private_ip="$(az network nic show --ids "$server_nic_id" --query 'ipConfigurations[0].privateIPAddress' -o tsv)"
@@ -98,7 +98,6 @@ jobs:
           client_nic_name="${client_vm_name}-nic"
           client_os_disk_name="${client_vm_name}-osdisk"
           {
-            echo "LOCATION=$location"
             echo "SERVER_NIC_ID=$server_nic_id"
             echo "SUBNET_ID=$subnet_id"
             echo "SERVER_PRIVATE_IP=$server_private_ip"
@@ -107,7 +106,6 @@ jobs:
             echo "CLIENT_OS_DISK_NAME=$client_os_disk_name"
             echo "CLIENT_VM_CREATED=$created_client"
           } >> "$GITHUB_ENV"
-          export LOCATION="$location"
           export SERVER_NIC_ID="$server_nic_id"
           export SUBNET_ID="$subnet_id"
           export SERVER_PRIVATE_IP="$server_private_ip"
