@@ -1,7 +1,6 @@
 # Tranche 003 Summary
 
-Status: local implementation complete; focused workflow evidence pending after
-deploy.
+Status: complete.
 
 Scope:
 - Added Linux-only `jeteve-omniorb` dependency for the pipeline API image.
@@ -23,13 +22,37 @@ Local validation:
 - `python scripts/ci_verify.py corba-orb-runtime-proof --help` passed.
 
 Focused workflow gate:
-- Pending until this branch is committed, pushed, deployed, and
-  `sponsor-corba-orb.yml` passes against the pipeline ACA.
-- The campaign must not advance to `004-msrpc-runtime` until the focused CORBA
-  ORB workflow and focused CORBA GPT matrix evidence are recorded here.
+- Contract CI initially failed on run `24571122121` because the ORB thread
+  started during Linux unit tests and aborted on process teardown after tests
+  passed.
+- Fix: ORB startup is now gated by `ENABLE_CORBA_ORB_RUNTIME=true`; Contract CI
+  validates fallback wiring and the deployed ACA enables the real ORB runtime.
+- Contract CI passed after the fix:
+  https://github.com/evanking12/mcp-factory/actions/runs/24571268064
+- Deploy Pipeline passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24571268046
+- Focused CORBA ORB proof passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24571375852
+- Focused CORBA GPT proof passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24571403523
+
+Downloaded artifact checks from run `24571403523`:
+- `legacy-runtime-matrix/summary.json` has
+  `corba_orb_runtime.passed=true`.
+- `legacy-runtime-matrix/summary.json` has
+  `corba_orb_runtime.runtime_mode=corba_orb_runtime`.
+- `legacy-runtime-matrix/summary.json` has
+  `corba_orb_runtime.wire_protocol=IIOP`.
+- `legacy-runtime-matrix/summary.json` checks confirm the Contoso IDL, IOR
+  object reference, server registration log, client invocation, and sentinel.
+- `gpt-format-matrix/corba_idl/summary.json` has `passed=true`,
+  `tool_call_seen=true`, `tool_result_seen=true`, `sentinel_seen=true`, and
+  `downloaded_schema_exists=true`.
 
 Truthful claim after focused workflow passes:
 - CORBA IDL has a controlled OmniORB/IIOP runtime proof for deterministic
   Contoso IDL, including IDL, IOR object reference, server log, client
   invocation result, GPT `tool_call`, and backend `tool_result`.
 - This is not generalized CORBA estate migration.
+
+Next tranche: `004-msrpc-runtime`.

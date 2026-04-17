@@ -5,7 +5,7 @@ Implement the full stretch runtime and binary recovery campaign sequentially.
 Current baseline is canonical green Sponsor Demo E2E run `24568108685`. Preserve
 it as the fallback until a newer full stretch run passes.
 
-Current frontier: `003-corba-orb-runtime`.
+Current frontier: `004-msrpc-runtime`.
 
 Do not advance until the current tranche has tests, artifacts, campaign
 writeback, and focused workflow evidence. If a hard runtime cannot be made
