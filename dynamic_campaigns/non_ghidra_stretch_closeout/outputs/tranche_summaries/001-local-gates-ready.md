@@ -23,6 +23,11 @@ Implemented:
   CLI JSON parsing error `Extra data: line 1 column 4`, matching the known image
   alias resolution failure pattern. The workflow now uses the fully qualified
   Windows Server image URN instead of the `Win2022Datacenter` alias.
+- Sixth focused run `24575091779` created and cleaned the same-subnet Windows
+  client VM. The Remote DCOM proof then failed because the bridge server VM was
+  deallocated, so Azure Run Command could not configure server-side DCOM. The
+  workflow now starts the bridge VM before proof, uses the shared
+  `bridge-vm-e2e` concurrency group, and deallocates the bridge VM afterward.
 - Full Sponsor Demo E2E accepts `remote_dcom_run_id` and imports the focused
   `sponsor-remote-dcom-runtime` artifact.
 - Final Sponsor Demo summary can require Remote DCOM with

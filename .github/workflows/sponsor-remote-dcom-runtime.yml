@@ -21,6 +21,10 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: bridge-vm-e2e
+  cancel-in-progress: false
+
 env:
   RESOURCE_GROUP: mcp-factory-rg
   SERVER_VM_NAME: mcpfactory-runner-vm
@@ -168,6 +172,13 @@ jobs:
             --scripts '$env:COMPUTERNAME' \
             --query value[0].message -o tsv
 
+      - name: Start bridge server VM
+        shell: bash
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          az vm start --resource-group "$RESOURCE_GROUP" --name "$SERVER_VM_NAME"
+
       - name: Run same-subnet remote DCOM runtime proof
         shell: bash
         timeout-minutes: 24
@@ -185,6 +196,27 @@ jobs:
             --out ci_artifacts/demo/windows/dcom/dcom.summary.json \
             --artifact-dir ci_artifacts/demo/windows/dcom \
             --sentinel "MCP_FACTORY_REMOTE_DCOM_${GITHUB_RUN_ID}"
+
+      - name: Deallocate bridge server VM
+        if: always()
+        shell: bash
+        timeout-minutes: 8
+        run: |
+          set +e
+          az vm deallocate --resource-group "$RESOURCE_GROUP" --name "$SERVER_VM_NAME"
+          status=$?
+          export DEALLOCATE_STATUS="$status"
+          mkdir -p ci_artifacts/demo/windows/dcom
+          python - <<'PY'
+          import json, os, pathlib
+          pathlib.Path("ci_artifacts/demo/windows/dcom/server-vm-deallocation.json").write_text(json.dumps({
+              "server_vm_name": os.environ.get("SERVER_VM_NAME"),
+              "attempted": True,
+              "status_code": int(os.environ.get("DEALLOCATE_STATUS", "1")),
+              "completed": os.environ.get("DEALLOCATE_STATUS") == "0",
+          }, indent=2), encoding="utf-8")
+          PY
+          exit "$status"
 
       - name: Cleanup temporary Windows client VM
         if: always() && env.CLIENT_VM_CREATED == 'true' && github.event.inputs.keep_client_vm != 'true'
