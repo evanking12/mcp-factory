@@ -1,14 +1,13 @@
-# Active Prompt: 008-campaign-closeout
+# Active Prompt: closed
 
-Write campaign closeout and durable blocker notes after final green Sponsor Demo E2E.
+Campaign closed with canonical green Sponsor Demo E2E run `24541068734`.
 
 ## Required Work
 
-- Rerun Sponsor Demo E2E after all changes.
-- Download and parse artifact.
-- Record green run URL, artifact paths, known risks, optional diagnostics, and UI/backend verification.
-- Add family-blocker writebacks for cmd.exe analyzer instability, bridge recovery/Azure Run Command risk, and fragmented requirement evidence.
-- Update README Sponsor Demo section with canonical final run and artifact interpretation.
+- Final green run recorded in README and closeout.
+- Artifact downloaded and parsed.
+- Family-blocker writebacks recorded.
+- UI/backend route alignment recorded.
 
 ## Passing Criteria
 

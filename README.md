@@ -135,6 +135,8 @@ az containerapp update --name mcp-factory-ui --resource-group mcp-factory-rg --i
 
 The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml). The workflow uploads a GitHub Actions artifact named `sponsor-demo-e2e`.
 
+Canonical green run: [24541068734](https://github.com/evanking12/mcp-factory/actions/runs/24541068734).
+
 Interpret the artifact as the canonical sponsor proof bundle:
 
 - `final-summary.md` is the sponsor-readable report. It includes overall pass/fail, slow-target diagnostics, bridge/session proof, and a requirement-to-proof matrix.
