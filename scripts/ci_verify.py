@@ -830,7 +830,7 @@ Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue
         "-n", vm_name,
         "--command-id", "RunPowerShellScript",
         "--scripts", script,
-        "--query", "value[0].message",
+        "--query", "value[].message",
         "-o", "tsv",
     ]
     started = time.perf_counter()

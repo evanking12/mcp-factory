@@ -28,6 +28,11 @@ Implemented:
   deallocated, so Azure Run Command could not configure server-side DCOM. The
   workflow now starts the bridge VM before proof, uses the shared
   `bridge-vm-e2e` concurrency group, and deallocates the bridge VM afterward.
+- Seventh focused run `24575395818` created/cleaned the client VM and started
+  the bridge VM, but the bridge VM was deallocated during proof by the reaper
+  because this focused workflow did not refresh the bridge lease. The workflow
+  now touches the bridge lease around start, proof, and deallocation, and Run
+  Command parsing now reads all message entries instead of only `value[0]`.
 - Full Sponsor Demo E2E accepts `remote_dcom_run_id` and imports the focused
   `sponsor-remote-dcom-runtime` artifact.
 - Final Sponsor Demo summary can require Remote DCOM with
