@@ -1,6 +1,6 @@
 # Tranche 004 Summary
 
-Status: implementation pushed for authoritative workflow validation.
+Status: complete.
 
 Scope:
 - Added `api/msrpc_runtime.py`, a controlled DCE/RPC-compatible runtime proof
@@ -24,15 +24,35 @@ Local validation before push:
 - `python scripts/ci_verify.py msrpc-runtime-proof --help` passed.
 
 Focused workflow gate:
-- Pending. The tranche is not complete until the deployed pipeline proves:
+- Contract CI passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24572015457
+- Deploy Pipeline passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24572015464
+- Deploy UI passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24572015516
+- Focused MSRPC runtime proof passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24572152040
+- Focused RPC IDL GPT proof passed:
+  https://github.com/evanking12/mcp-factory/actions/runs/24572186312
+
+Downloaded artifact checks:
+- Focused runtime run `24572152040`:
   - `legacy-runtime-matrix/summary.json` has
     `msrpc_runtime.passed=true`.
   - `legacy-runtime-matrix/summary.json` has
     `msrpc_runtime.runtime_mode=msrpc_runtime`.
-  - The MSRPC artifact records `wire_protocol=DCE/RPC v5 over ncacn_ip_tcp`.
-  - `gpt-format-matrix/rpc_idl_contract/summary.json` has `passed=true`,
-    `tool_call_seen=true`, `tool_result_seen=true`, `sentinel_seen=true`, and
-    `downloaded_schema_exists=true`.
+  - `legacy/msrpc/summary.json` records
+    `wire_protocol=DCE/RPC v5 over ncacn_ip_tcp`.
+  - Runtime checks confirm provider mode, IDL interface, `ncacn_ip_tcp`
+    binding, DCE/RPC protocol, server registration, sentinel result, and
+    provider result mode.
+- Focused GPT run `24572186312`:
+  - `gpt-format-matrix/rpc_idl_contract/summary.json` has `passed=true`.
+  - `tool_call_seen=true`.
+  - `tool_result_seen=true`.
+  - `sentinel_seen=true`.
+  - `downloaded_schema_exists=true`.
+  - `runtime_mode=msrpc_runtime`.
 
 Truthful claim after focused workflow passes:
 - RPC IDL has a controlled DCE/RPC-compatible runtime proof for deterministic
@@ -40,4 +60,4 @@ Truthful claim after focused workflow passes:
   client invocation result, GPT `tool_call`, and backend `tool_result`.
 - This is not arbitrary enterprise MSRPC estate support.
 
-Next tranche after the focused gates pass: `005-remote-dcom-runtime`.
+Next tranche: `005-remote-dcom-runtime`.
