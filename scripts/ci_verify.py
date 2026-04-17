@@ -298,6 +298,35 @@ def _provider_required_seen(text: str) -> bool:
     )
 
 
+RUNTIME_MODE_BY_FORMAT_CASE = {
+    "openapi": "validated_runtime",
+    "jsonrpc": "real_runtime",
+    "soap_wsdl": "real_runtime",
+    "sql": "real_runtime",
+    "jndi": "lookup_runtime",
+    "rpc_idl_contract": "xmlrpc_runtime",
+    "corba_idl": "adapter_backed",
+    "python": "local_runtime",
+    "javascript": "local_runtime",
+    "ruby": "local_runtime",
+    "php": "local_runtime",
+    "powershell": "local_runtime",
+    "cmd": "local_runtime",
+}
+
+
+def _runtime_mode_for_case(case: dict) -> str:
+    return str(case.get("runtime_mode") or RUNTIME_MODE_BY_FORMAT_CASE.get(str(case.get("id")), "unknown"))
+
+
+def _runtime_mode_counts(cases: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in cases:
+        mode = str(item.get("runtime_mode") or "unknown")
+        counts[mode] = counts.get(mode, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _call_generated_tool_with_gpt(
     *,
     base_url: str,
@@ -1325,24 +1354,27 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
         case_dir.mkdir(parents=True, exist_ok=True)
         sentinel = f"{sentinel_prefix}_{case_id}"
         proof_level = case.get("proof_level", "provider_required")
+        runtime_mode = _runtime_mode_for_case(case)
         started = time.perf_counter()
         item = {
             "id": case_id,
             "category": case.get("category", case_id),
             "proof_level": proof_level,
+            "runtime_mode": runtime_mode,
             "expected_result": case.get("expected_result", ""),
             "passed": False,
             "tool_call_seen": False,
             "tool_result_seen": False,
             "sentinel_seen": False,
             "provider_required_seen": False,
+            "transcript_path": str(case_dir / "transcript.json"),
             "job_id": "",
             "selected_tool": "",
             "schema_tool_count": 0,
             "error": "",
             "elapsed_seconds": 0.0,
         }
-        print(f"START GPT format case {case_id}: category={item['category']} proof_level={proof_level}")
+        print(f"START GPT format case {case_id}: category={item['category']} proof_level={proof_level} runtime_mode={runtime_mode}")
         try:
             touch(f"{case_id}-upload-start")
             target = ROOT / case["path"]
@@ -1458,6 +1490,7 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
                 "job_id": job_id,
                 "sentinel": sentinel,
                 "proof_level": proof_level,
+                "runtime_mode": runtime_mode,
                 "selected_tool": selected_name,
                 "events": events,
             }
@@ -1493,6 +1526,13 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
     failures = [item for item in summaries if not item.get("passed")]
     real_cases = [item for item in summaries if item.get("proof_level") == "real_execution"]
     provider_cases = [item for item in summaries if item.get("proof_level") == "provider_required"]
+    runtime_mode_counts = _runtime_mode_counts(summaries)
+    adapter_backed_cases = [item["id"] for item in summaries if item.get("runtime_mode") == "adapter_backed"]
+    runtime_backed_cases = [
+        item["id"]
+        for item in summaries
+        if item.get("runtime_mode") in {"real_runtime", "validated_runtime", "lookup_runtime", "xmlrpc_runtime", "local_runtime"}
+    ]
     aggregate = {
         "cases": summaries,
         "total": len(summaries),
@@ -1509,6 +1549,9 @@ def cmd_cloud_gpt_format_matrix(args: argparse.Namespace) -> int:
         ),
         "not_live_executed_because_provider_required": [item["id"] for item in provider_cases],
         "all_required_cases_live_execution": len(provider_cases) == 0 and len(real_cases) == len(summaries),
+        "runtime_mode_counts": runtime_mode_counts,
+        "runtime_backed_cases": runtime_backed_cases,
+        "adapter_backed_cases": adapter_backed_cases,
     }
     _write_json(out_root / "summary.json", aggregate)
     if failures:
@@ -2130,6 +2173,17 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
         proof_level = case.get("proof_level")
         if proof_level and proof_level not in {"real_execution", "provider_required"}:
             raise AssertionError(f"{case.get('id', '<unknown>')}: invalid proof_level={proof_level!r}")
+        runtime_mode = _runtime_mode_for_case(case)
+        if runtime_mode not in {
+            "local_runtime",
+            "real_runtime",
+            "validated_runtime",
+            "lookup_runtime",
+            "xmlrpc_runtime",
+            "adapter_backed",
+            "unknown",
+        }:
+            raise AssertionError(f"{case.get('id', '<unknown>')}: invalid runtime_mode={runtime_mode!r}")
         expected_result = case.get("expected_result")
         if expected_result and expected_result not in {"sentinel", "provider_required"}:
             raise AssertionError(f"{case.get('id', '<unknown>')}: invalid expected_result={expected_result!r}")
@@ -2151,6 +2205,7 @@ def cmd_run_sponsor_contract(args: argparse.Namespace) -> int:
             error_text = "" if passed else f"matched_invocables={len(matched)} min_invocables={min_invocables}"
             item = {
                 **case,
+                "runtime_mode": runtime_mode,
                 "artifact": str(artifact),
                 "passed": passed,
                 "invocable_count": len(invocables),
@@ -2373,7 +2428,7 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/windows/stdole2_tlb/stdole2_tlb.summary.json",
                 "docs/sponsor/caveats.md",
             ],
-            "notes": "JSON-RPC is hosted as a JSON-RPC 2.0 service. SOAP, CORBA, RPC, and JNDI remain deterministic adapter-backed; COM/TLB discovery is proven and remote DCOM activation is not claimed.",
+            "notes": "JSON-RPC and SOAP are runtime-backed; REST is route-validated; JNDI and RPC use lightweight lookup/XML-RPC-style runtimes; CORBA remains adapter-backed. COM/TLB discovery is proven and remote DCOM activation is not claimed.",
         },
         {
             "requirement": "1.c",
@@ -2394,7 +2449,7 @@ def _build_requirement_matrix(
                 "ci_artifacts/demo/non-vm/sql/contoso_db_sql_file_mcp.json",
                 "ci_artifacts/demo/gpt-format-matrix/sql/summary.json",
             ],
-            "notes": "SQL is represented as a generated tool backed by the deterministic legacy SQL provider in CI.",
+            "notes": "SQL is represented as a generated tool backed by an in-memory SQLite runtime with deterministic Contoso data in CI.",
         },
         {
             "requirement": "1.e",
@@ -2582,18 +2637,31 @@ def _proof_semantics(gpt_matrix: dict) -> dict:
     cases = gpt_matrix.get("cases") or []
     real_cases = [str(item.get("id")) for item in cases if isinstance(item, dict) and item.get("proof_level") == "real_execution"]
     provider_cases = [str(item.get("id")) for item in cases if isinstance(item, dict) and item.get("proof_level") == "provider_required"]
+    runtime_modes: dict[str, list[str]] = {}
+    for item in cases:
+        if not isinstance(item, dict):
+            continue
+        mode = str(item.get("runtime_mode") or "unknown")
+        runtime_modes.setdefault(mode, []).append(str(item.get("id")))
     if not real_cases:
         real_cases = [str(item) for item in gpt_matrix.get("real_execution_cases") or []]
     if not provider_cases:
         provider_cases = [str(item) for item in gpt_matrix.get("provider_required_cases") or gpt_matrix.get("not_live_executed_because_provider_required") or []]
+    if not runtime_modes:
+        for mode, count in (gpt_matrix.get("runtime_mode_counts") or {}).items():
+            runtime_modes[str(mode)] = [f"{count} case(s)"]
     return {
         "live_execution": {
             "cases": real_cases,
-            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution, the hosted JSON-RPC 2.0 runtime, or a hosted legacy provider adapter.",
+            "meaning": "The generated tool is called by the LLM and returns a deterministic sentinel from local executable/script execution, hosted runtime providers, or explicitly adapter-backed providers.",
         },
         "provider_required": {
             "cases": provider_cases,
             "meaning": "The format is discovered and a tool schema is generated; providers are disabled or unreachable, so the tool reports that a live provider, endpoint, service, or database is required.",
+        },
+        "runtime_modes": {
+            "cases_by_mode": dict(sorted(runtime_modes.items())),
+            "meaning": "Runtime modes distinguish local execution, real hosted runtimes, route-validated REST, lookup/XML-RPC-style lightweight runtimes, and adapter-backed legacy protocol modeling.",
         },
     }
 
@@ -2615,6 +2683,9 @@ def _append_proof_semantics(lines: list[str], semantics: dict) -> None:
     lines.append(
         "- Provider-required means discovery, schema generation, LLM tool-call selection, and expected provider-required result were proven; it does not claim local live execution of the protocol or database."
     )
+    runtime_modes = semantics.get("runtime_modes", {}).get("cases_by_mode") or {}
+    for mode, cases in runtime_modes.items():
+        lines.append(f"- Runtime mode `{mode}`: " + (", ".join(cases) if cases else "none") + ".")
     if not provider.get("cases"):
         lines.append("- Required provider-required cases: 0. Current required format proofs are live execution proofs.")
 
@@ -2804,6 +2875,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
     repo_ingestion_path = Path(args.repo_ingestion_summary)
     deallocation_path = Path(args.vm_deallocation)
     out_path = Path(args.out)
+    canonical_run_url = str(getattr(args, "canonical_run_url", "") or os.getenv("CANONICAL_SPONSOR_RUN_URL", ""))
 
     non_vm = _load_json(non_vm_path) if non_vm_path.exists() else {"cases": [], "failures": 1, "missing": str(non_vm_path)}
     windows = _load_json(windows_path) if windows_path.exists() else {"targets": [], "failures": 1, "missing": str(windows_path)}
@@ -2915,6 +2987,9 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "provider_required_total": gpt_matrix.get("provider_required_total", 0),
             "not_live_executed_because_provider_required": gpt_matrix.get("not_live_executed_because_provider_required", []),
             "all_required_cases_live_execution": bool(gpt_matrix.get("all_required_cases_live_execution")),
+            "runtime_mode_counts": gpt_matrix.get("runtime_mode_counts", {}),
+            "runtime_backed_cases": gpt_matrix.get("runtime_backed_cases", []),
+            "adapter_backed_cases": gpt_matrix.get("adapter_backed_cases", []),
         },
         "windows_gpt_tool_matrix": {
             "total": windows_gpt.get("total", 0),
@@ -2943,6 +3018,7 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
         },
         "artifacts": artifacts,
         "diagnostics": diagnostics,
+        "canonical_run_url": canonical_run_url,
     }
     _write_json(out_path, summary)
 
@@ -2962,6 +3038,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             f"- GPT format matrix: {gpt_matrix_passed}/{gpt_matrix_total} passed",
             f"- Real execution format proofs: {gpt_matrix.get('real_execution_passed', 0)}/{gpt_matrix.get('real_execution_total', 0)}",
             f"- Provider-required tool-call proofs: {gpt_matrix.get('provider_required_tool_call_passed', 0)}/{gpt_matrix.get('provider_required_total', 0)}",
+            f"- Runtime-backed/provider-mode counts: {json.dumps(gpt_matrix.get('runtime_mode_counts', {}), sort_keys=True)}",
+            f"- Adapter-backed required format cases: {', '.join(gpt_matrix.get('adapter_backed_cases', [])) or 'none'}",
             f"- Windows GPT tool-result-observed proofs: {windows_gpt.get('passed', 0)}/{windows_gpt.get('total', 0)}",
             f"- Repo ingestion GPT proof passed: {bool(repo_ingestion.get('passed'))}",
             f"- GPT tool call seen: {checks['gpt_tool_call_seen']}",
@@ -2973,6 +3051,8 @@ def cmd_summarize_sponsor_demo(args: argparse.Namespace) -> int:
             "",
             f"Final summary artifact: `{out_path}`",
         ]
+        if canonical_run_url:
+            lines.append(f"- Canonical green run: {canonical_run_url}")
         if non_vm_counts["failed_ids"]:
             lines.append(f"- Failed sponsor formats: {', '.join(non_vm_counts['failed_ids'])}")
         if windows_counts["required_failed_ids"]:
@@ -3190,6 +3270,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="ci_artifacts/demo/final-summary.json")
     p.add_argument("--markdown", default="")
     p.add_argument("--html", default="")
+    p.add_argument("--canonical-run-url", default="")
     p.set_defaults(func=cmd_summarize_sponsor_demo)
 
     p = sub.add_parser("render-sponsor-report")

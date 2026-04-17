@@ -481,6 +481,9 @@ _HTML = r"""<!DOCTYPE html>
       <div class="alert alert-error" id="upload-error"></div>
 
       <div class="btn-row">
+        <button class="btn btn-secondary" id="load-demo-btn" type="button">
+          Load Demo Target
+        </button>
         <button class="btn btn-primary" id="analyze-btn" disabled>
           Analyze Binary
         </button>
@@ -570,6 +573,7 @@ _HTML = r"""<!DOCTYPE html>
 
       <div class="btn-row" style="margin-top:18px">
         <button class="btn btn-secondary" id="back3-btn">← Back</button>
+        <button class="btn btn-primary" id="run-proof-btn">Run Canonical Proof</button>
         <button class="btn btn-success" id="download-btn">⬇ Download Schema JSON</button>
         <button class="btn btn-secondary" id="transcript-btn">⬇ Transcript</button>
         <button class="btn btn-secondary" id="restart-btn">↺ Start Over</button>
@@ -591,6 +595,9 @@ const state = {
   tools: [],           // generated MCP tool schemas
   schemaBlob: null,
   messages: [],        // chat history [{role, content}]
+  demoFile: null,
+  demoMode: false,
+  demoSentinel: 'MCP_FACTORY_UI_DEMO_SENTINEL',
 };
 
 // ── DOM refs ─────────────────────────────────────────────
@@ -627,7 +634,11 @@ fileInput.addEventListener('change', () => {
   const name = fileInput.files[0]?.name || '';
   $('file-name').textContent = name ? `✓ ${name}` : '';
   // clear the path field when a file is chosen
-  if (name) $('dir-path').value = '';
+  if (name) {
+    $('dir-path').value = '';
+    state.demoFile = null;
+    state.demoMode = false;
+  }
   _syncAnalyzeBtn();
   clearError('upload-error');
 });
@@ -637,16 +648,37 @@ $('dir-path').addEventListener('input', () => {
   if ($('dir-path').value.trim()) {
     fileInput.value = '';
     $('file-name').textContent = '';
+    state.demoFile = null;
+    state.demoMode = false;
   }
   _syncAnalyzeBtn();
   clearError('upload-error');
 });
 
 function _syncAnalyzeBtn() {
-  const hasFile = !!fileInput.files[0];
+  const hasFile = !!fileInput.files[0] || !!state.demoFile;
   const hasPath = !!$('dir-path').value.trim();
   $('analyze-btn').disabled = !hasFile && !hasPath;
 }
+
+$('load-demo-btn').addEventListener('click', () => {
+  const demoSource = [
+    'def echo_sentinel(sentinel: str) -> str:',
+    '    return f"MCP_FACTORY_UI_DEMO_SENTINEL::{sentinel}"',
+    '',
+    'def summarize_customer(customer_id: str, sentinel: str) -> str:',
+    '    return f"customer={customer_id}; sentinel={sentinel}"',
+    '',
+  ].join('\n');
+  state.demoFile = new File([demoSource], 'sponsor_demo.py', { type: 'text/x-python' });
+  state.demoMode = true;
+  fileInput.value = '';
+  $('dir-path').value = '';
+  $('file-name').textContent = `${state.demoFile.name} (demo target)`;
+  $('hints').value = 'Sponsor demo target: Python callable with deterministic sentinel output.';
+  _syncAnalyzeBtn();
+  clearError('upload-error');
+});
 
 ['dragover','dragleave','drop'].forEach(ev =>
   fileDrop.addEventListener(ev, e => {
@@ -663,7 +695,7 @@ function _syncAnalyzeBtn() {
 // ── Analyze ───────────────────────────────────────────────
 $('analyze-btn').addEventListener('click', async () => {
   clearError('upload-error');
-  const file    = fileInput.files[0];
+  const file    = fileInput.files[0] || state.demoFile;
   const dirPath = $('dir-path').value.trim();
   if (!file && !dirPath) return;
 
@@ -799,7 +831,7 @@ const LIVE_EXECUTION_SOURCES = new Set([
   'python_function', 'js_function', 'ruby_method', 'php_function',
   'powershell_function', 'batch_label', 'cli', 'registry',
   'openapi_operation', 'jsonrpc_method', 'soap_operation',
-  'corba_method', 'rpc', 'jndi', 'sql', 'sql_statement'
+  'corba_method', 'rpc', 'jndi', 'jndi_lookup', 'sql', 'sql_statement'
 ]);
 
 function executionMethod(inv) {
@@ -869,7 +901,7 @@ function buildInvocablesList() {
 
   updateSelCount();
   const pathParts = $('dir-path').value.trim().split(/[\\\\/]/).filter(Boolean);
-  const sourceName = $('file-input').files[0]?.name ?? pathParts[pathParts.length - 1] ?? 'mcp-component';
+  const sourceName = $('file-input').files[0]?.name ?? state.demoFile?.name ?? pathParts[pathParts.length - 1] ?? 'mcp-component';
   $('component-name').value = sourceName.replace(/\.\w+$/,'') || 'mcp-component';
 }
 
@@ -917,6 +949,10 @@ $('generate-btn').addEventListener('click', async () => {
     state.tools = data.mcp_schema?.tools ?? [];
     state.schemaBlob = data.schema_blob;
     $('schema-preview').textContent = JSON.stringify(data.mcp_schema, null, 2);
+    if (state.demoMode) {
+      const toolName = state.tools[0]?.function?.name || state.tools[0]?.name || selected[0]?.name || 'echo_sentinel';
+      $('chat-input').value = `Call the tool named ${toolName} now. Use this exact sentinel string for every required string argument: ${state.demoSentinel}. Show me the tool result.`;
+    }
     showSection(2);
   } catch(e) {
     showError('inv-error', `Generation failed: ${e.message}`);
@@ -995,10 +1031,10 @@ async function sendMessage() {
 
         } else if (evt.type === 'tool_call') {
           const argStr = typeof evt.args === 'string' ? evt.args : JSON.stringify(evt.args ?? {});
-          appendChatMsg('tool-call', `🔧 ${evt.name}(${argStr})`);
+          appendChatMsg('tool-call', `tool_call: ${evt.name}(${argStr})`);
 
         } else if (evt.type === 'tool_result') {
-          appendChatMsg('tool-call', `   ↳ ${evt.result ?? ''}`);
+          appendChatMsg('tool-call', `tool_result: ${evt.result ?? ''}`);
 
         } else if (evt.type === 'status') {
           appendChatMsg('tool-call', `⏳ ${evt.message ?? 'Working...'}`);
@@ -1048,6 +1084,12 @@ function appendChatMsg(role, text) {
 
 $('send-btn').addEventListener('click', sendMessage);
 
+$('run-proof-btn').addEventListener('click', () => {
+  const toolName = state.tools[0]?.function?.name || state.tools[0]?.name || state.invocables[0]?.name || 'echo_sentinel';
+  $('chat-input').value = `Call the tool named ${toolName} now. Use this exact sentinel string for every required string argument: ${state.demoSentinel}. Show me the tool_call and tool_result evidence.`;
+  sendMessage();
+});
+
 $('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
@@ -1081,6 +1123,7 @@ $('back3-btn').addEventListener('click',  () => showSection(2));
 $('restart-btn').addEventListener('click', () => {
   state.jobId = null; state.invocables = []; state.tools = [];
   state.schemaBlob = null; state.messages = [];
+  state.demoFile = null; state.demoMode = false;
   fileInput.value = ''; $('file-name').textContent = '';
   $('dir-path').value = ''; $('hints').value = '';
   $('analyze-btn').disabled = true;

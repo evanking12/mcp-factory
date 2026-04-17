@@ -135,7 +135,7 @@ az containerapp update --name mcp-factory-ui --resource-group mcp-factory-rg --i
 
 The full sponsor demo proof runs in GitHub Actions through [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml). The workflow uploads a GitHub Actions artifact named `sponsor-demo-e2e`.
 
-Canonical green run: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216).
+Canonical green baseline: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216). The runtime expansion campaign will replace this with the newest full green run on `73c8b80` or newer after closeout.
 
 Static sponsor references:
 
@@ -149,7 +149,8 @@ Interpret the artifact as the canonical sponsor proof bundle:
 - `sponsor-report.html` is a browsable rendering of the same report for live review.
 - `final-summary.json` is the machine-readable form of the same gate.
 - Real execution sentinel proofs are required for all 13 non-VM cases: OpenAPI/REST, JSON-RPC, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, SQL, Python, JavaScript, Ruby, PHP, PowerShell, and CMD/BAT.
-- JSON-RPC is hosted as a JSON-RPC 2.0 service in the pipeline API. OpenAPI, SOAP/WSDL, CORBA IDL, RPC IDL, JNDI, and SQL use deterministic hosted legacy provider adapters. A "provider required" result is now a fallback only when those services are disabled or unreachable, not a passing required sponsor result.
+- JSON-RPC is hosted as a JSON-RPC 2.0 service in the pipeline API. SOAP validates SOAP envelopes and dispatches WSDL-named operations. SQL executes against deterministic SQLite-backed Contoso data. OpenAPI/REST validates declared routes and methods. JNDI and RPC use lightweight lookup/XML-RPC-style runtime proofs. CORBA remains an explicitly adapter-backed proof, not a production ORB/IIOP deployment. A "provider required" result is now a fallback only when those services are disabled or unreachable, not a passing required sponsor result.
+- `ci_artifacts/demo/gpt-format-matrix/summary.json` records `runtime_mode_counts`, `runtime_backed_cases`, `adapter_backed_cases`, per-case `tool_call`/`tool_result` flags, and transcript paths.
 - The canonical run above reports `13/13` live execution format proofs and `0` required provider-required cases.
 - Target input supports both uploaded files and installed paths/directories. Installed paths must be accessible to the server or Windows bridge VM context performing discovery; `system32_directory` is the required installed-directory proof for requirement `2.a`.
 - `cmd_exe` is an optional Windows diagnostic. The required CMD/BAT evidence is the deterministic `.cmd` fixture in the GPT format matrix.

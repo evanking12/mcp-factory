@@ -8,10 +8,21 @@ does not claim.
 - JSON-RPC is hosted as a JSON-RPC 2.0 service in the pipeline API. The runtime
   validates the JSON-RPC version, dispatches named methods, and returns standard
   `result` or `error` envelopes.
-- SOAP, CORBA IDL, RPC IDL, and JNDI are deterministic hosted adapters. They
-  prove discovery, schema generation, GPT tool-call selection, and a real hosted
-  tool result. They are not production SOAP middleware, CORBA ORB/IIOP, RPC
-  runtime, LDAP, or JNDI infrastructure.
+- SOAP is now runtime-backed in the pipeline API as a SOAP envelope validator
+  and dispatcher for WSDL-named Contoso operations. It returns SOAP XML
+  responses and SOAP faults, but it is not production enterprise SOAP
+  middleware.
+- SQL is now SQLite-backed with deterministic Contoso data. It proves generated
+  SQL tools can execute against a real database runtime in CI without requiring
+  SQL Server infrastructure.
+- REST/OpenAPI is route-validated against declared paths and methods before the
+  provider returns a tool result.
+- JNDI uses deterministic binding lookup semantics and RPC uses an XML-RPC-style
+  deterministic runtime proof. They are runtime-shaped proofs, not production
+  LDAP/JNDI or DCE/MSRPC infrastructure.
+- CORBA remains a deterministic hosted adapter. It proves discovery, schema
+  generation, GPT tool-call selection, and a real hosted tool result, but it is
+  not a production CORBA ORB/IIOP deployment.
 - COM/TLB discovery is proven through the Windows bridge. Remote DCOM activation
   and remote DCOM invocation are not deeply proven by the sponsor demo.
 

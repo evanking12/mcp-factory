@@ -27,17 +27,32 @@ def test_legacy_provider_routes_echo_sentinel() -> None:
     health = client.get("/api/legacy/health").json()
     assert health["status"] == "ok"
     assert set(["rest", "jsonrpc", "soap", "sql", "corba", "rpc", "jndi"]).issubset(health["enabled_providers"])
+    assert health["provider_modes"]["jsonrpc"] == "real_runtime"
+    assert health["provider_modes"]["soap"] == "real_runtime"
+    assert health["provider_modes"]["sql"] == "real_runtime"
+    assert health["provider_modes"]["rest"] == "validated_runtime"
+    assert health["provider_modes"]["jndi"] == "lookup_runtime"
+    assert health["provider_modes"]["rpc"] == "xmlrpc_runtime"
+    assert health["provider_modes"]["corba"] == "adapter_backed"
 
     assert sentinel in client.post("/api/legacy/rest/tickets", json={"sentinel": sentinel}).text
     assert sentinel in client.post(
         "/api/legacy/jsonrpc",
         json={"jsonrpc": "2.0", "method": "createTicket", "params": {"sentinel": sentinel}, "id": 7},
     ).text
-    assert sentinel in client.post("/api/legacy/soap", content=f"<Envelope>{sentinel}</Envelope>").text
+    assert sentinel in client.post(
+        "/api/legacy/soap",
+        headers={"SOAPAction": "SubmitTicket"},
+        content=(
+            '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
+            f"<soapenv:Body><SubmitTicket><sentinel>{sentinel}</sentinel></SubmitTicket></soapenv:Body>"
+            "</soapenv:Envelope>"
+        ),
+    ).text
     assert sentinel in client.post("/api/legacy/sql/GetCustomerInfo", json={"sentinel": sentinel}).text
     assert sentinel in client.post("/api/legacy/corba/getCustomer", json={"sentinel": sentinel}).text
     assert sentinel in client.post("/api/legacy/rpc/RpcCreateTicket", json={"sentinel": sentinel}).text
-    assert sentinel in client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/Contoso", "sentinel": sentinel}).text
+    assert sentinel in client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/ContosoCustomerDB", "sentinel": sentinel}).text
 
 
 def test_jsonrpc_runtime_returns_standard_errors() -> None:
@@ -50,6 +65,87 @@ def test_jsonrpc_runtime_returns_standard_errors() -> None:
     missing = client.post("/api/legacy/jsonrpc", json={"jsonrpc": "2.0", "method": "missingMethod", "id": 9})
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == -32601
+
+
+def test_rest_runtime_validates_declared_openapi_routes() -> None:
+    client = _client()
+
+    ok = client.get("/api/legacy/rest/customers/1", params={"sentinel": "MCP_FACTORY_REST_ROUTE"})
+    assert ok.status_code == 200
+    assert ok.json()["runtime_mode"] == "validated_runtime"
+    assert "MCP_FACTORY_REST_ROUTE" in ok.text
+
+    rejected = client.delete("/api/legacy/rest/customers/1")
+    assert rejected.status_code == 404
+    assert rejected.json()["runtime_mode"] == "validated_runtime"
+    assert "not declared" in rejected.json()["error"]
+
+
+def test_soap_runtime_validates_envelope_and_dispatches_operation() -> None:
+    client = _client()
+    sentinel = "MCP_FACTORY_SOAP_RUNTIME"
+    valid = client.post(
+        "/api/legacy/soap",
+        headers={"SOAPAction": "GetCustomer"},
+        content=(
+            '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
+            f"<soapenv:Body><GetCustomer><sentinel>{sentinel}</sentinel></GetCustomer></soapenv:Body>"
+            "</soapenv:Envelope>"
+        ),
+    )
+    assert valid.status_code == 200
+    assert "<runtimeMode>real_runtime</runtimeMode>" in valid.text
+    assert sentinel in valid.text
+
+    invalid = client.post("/api/legacy/soap", content=f"<NotSoap>{sentinel}</NotSoap>")
+    assert invalid.status_code == 400
+    assert "<soapenv:Fault>" in invalid.text
+
+    unknown = client.post(
+        "/api/legacy/soap",
+        headers={"SOAPAction": "UnknownOperation"},
+        content=(
+            '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
+            "<soapenv:Body><UnknownOperation /></soapenv:Body></soapenv:Envelope>"
+        ),
+    )
+    assert unknown.status_code == 404
+    assert "Unknown SOAP operation" in unknown.text
+
+
+def test_sql_runtime_uses_sqlite_and_returns_deterministic_contoso_data() -> None:
+    client = _client()
+
+    customer = client.post("/api/legacy/sql/GetCustomerInfo", json={"customer_id": 1, "sentinel": "MCP_FACTORY_SQL_RUNTIME"})
+    assert customer.status_code == 200
+    data = customer.json()
+    assert data["runtime_mode"] == "real_runtime"
+    assert data["database"] == "sqlite"
+    assert data["result"]["customer"][0]["name"] == "Ada Lovelace"
+    assert "MCP_FACTORY_SQL_RUNTIME" in data["proof"]
+
+    ticket = client.post(
+        "/api/legacy/sql/CreateSupportTicket",
+        json={"customerId": 1, "subject": "Runtime proof", "description": "MCP_FACTORY_SQL_TICKET"},
+    )
+    assert ticket.status_code == 200
+    assert ticket.json()["result"]["status"] == "Open"
+
+
+def test_jndi_and_rpc_runtime_modes_are_explicit() -> None:
+    client = _client()
+
+    jndi = client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/ContosoCustomerDB", "sentinel": "MCP_FACTORY_JNDI"})
+    assert jndi.status_code == 200
+    assert jndi.json()["runtime_mode"] == "lookup_runtime"
+    assert jndi.json()["lookup_found"] is True
+    assert jndi.json()["binding"]["type"] == "javax.sql.DataSource"
+
+    rpc = client.post("/api/legacy/rpc/RpcCreateTicket", json={"sentinel": "MCP_FACTORY_RPC"})
+    assert rpc.status_code == 200
+    assert rpc.json()["runtime_mode"] == "xmlrpc_runtime"
+    assert rpc.json()["transport"] == "xmlrpc_style"
+    assert "xmlrpc_response" in rpc.json()
 
 
 class _Resp:

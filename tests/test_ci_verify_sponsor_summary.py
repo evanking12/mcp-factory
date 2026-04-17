@@ -38,6 +38,9 @@ def _summary_args(tmp_path: Path) -> SimpleNamespace:
             "provider_required_total": 0,
             "provider_required_tool_call_passed": 0,
             "not_live_executed_because_provider_required": [],
+            "runtime_mode_counts": {"local_runtime": 1},
+            "runtime_backed_cases": ["cmd"],
+            "adapter_backed_cases": [],
         },
     )
     _write(
@@ -266,6 +269,10 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     assert "GitHub Actions proof bundle is separate from app /api/download job artifacts" in ui
     assert "`/api/download/${state.jobId}/${encodeURIComponent" in ui
     assert "schemaBlob" in ui
+    assert "Load Demo Target" in ui
+    assert "Run Canonical Proof" in ui
+    assert "tool_call:" in ui
+    assert "tool_result:" in ui
 
 
 def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path: Path) -> None:
@@ -296,6 +303,15 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
                     "tool_call_seen": True,
                     "tool_result_seen": True,
                     "sentinel_seen": True,
+                    "runtime_mode": {
+                        "openapi": "validated_runtime",
+                        "jsonrpc": "real_runtime",
+                        "soap_wsdl": "real_runtime",
+                        "sql": "real_runtime",
+                        "jndi": "lookup_runtime",
+                        "rpc_idl_contract": "xmlrpc_runtime",
+                        "corba_idl": "adapter_backed",
+                    }.get(case_id, "local_runtime"),
                 }
                 for case_id in cases
             ],
@@ -310,6 +326,16 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
             "provider_required_tool_call_passed": 0,
             "not_live_executed_because_provider_required": [],
             "all_required_cases_live_execution": True,
+            "runtime_mode_counts": {
+                "adapter_backed": 1,
+                "local_runtime": 6,
+                "lookup_runtime": 1,
+                "real_runtime": 3,
+                "validated_runtime": 1,
+                "xmlrpc_runtime": 1,
+            },
+            "runtime_backed_cases": [case for case in cases if case != "corba_idl"],
+            "adapter_backed_cases": ["corba_idl"],
         },
     )
     _write(
@@ -331,9 +357,13 @@ def test_final_summary_all_live_matrix_has_zero_required_provider_cases(tmp_path
 
     assert summary["gpt_format_matrix"]["real_execution_passed"] == 13
     assert summary["gpt_format_matrix"]["provider_required_total"] == 0
+    assert summary["gpt_format_matrix"]["runtime_mode_counts"]["real_runtime"] == 3
+    assert summary["gpt_format_matrix"]["adapter_backed_cases"] == ["corba_idl"]
     assert summary["proof_semantics"]["provider_required"]["cases"] == []
+    assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["adapter_backed"] == ["corba_idl"]
     assert "Real execution format proofs: 13/13" in text
     assert "Required provider-required cases: 0" in text
+    assert "Runtime mode `adapter_backed`: corba_idl" in text
 
 
 def test_sponsor_report_html_rendering(tmp_path: Path) -> None:
@@ -382,7 +412,9 @@ def test_pushback_docs_and_index_reference_caveats() -> None:
 
     assert "24542583216" in proof_index
     assert "sponsor-report.html" in proof_index
-    assert "deterministic hosted adapters" in caveats
+    assert "SOAP is now runtime-backed" in caveats
+    assert "SQLite-backed" in caveats
+    assert "CORBA remains a deterministic hosted adapter" in caveats
     assert "Remote DCOM activation" in caveats
     assert "$150/month" in non_code
     assert "FERPA" in non_code
@@ -548,8 +580,8 @@ def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:
         Path(args.gpt_matrix_summary),
         {
             "cases": [
-                {"id": "cmd", "passed": True, "proof_level": "real_execution"},
-                {"id": "openapi", "passed": True, "proof_level": "provider_required"},
+                {"id": "cmd", "passed": True, "proof_level": "real_execution", "runtime_mode": "local_runtime"},
+                {"id": "openapi", "passed": True, "proof_level": "provider_required", "runtime_mode": "validated_runtime"},
             ],
             "total": 2,
             "failures": 0,
@@ -561,6 +593,7 @@ def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:
             "provider_required_total": 1,
             "provider_required_tool_call_passed": 1,
             "not_live_executed_because_provider_required": ["openapi"],
+            "runtime_mode_counts": {"local_runtime": 1, "validated_runtime": 1},
         },
     )
     _write(Path(args.windows_summary), {"targets": [{"label": "kernel32_dll", "required": True, "passed": True}], "failures": 0})
@@ -570,6 +603,7 @@ def test_final_summary_makes_proof_semantics_explicit(tmp_path: Path) -> None:
 
     assert summary["proof_semantics"]["live_execution"]["cases"] == ["cmd"]
     assert summary["proof_semantics"]["provider_required"]["cases"] == ["openapi"]
+    assert summary["proof_semantics"]["runtime_modes"]["cases_by_mode"]["local_runtime"] == ["cmd"]
     text = Path(args.markdown).read_text(encoding="utf-8")
     assert "## Proof Semantics" in text
     assert "does not claim local live execution" in text
