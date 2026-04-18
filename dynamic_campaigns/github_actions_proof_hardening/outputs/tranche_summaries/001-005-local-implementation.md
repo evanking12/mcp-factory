@@ -23,5 +23,16 @@ Local implementation completed for tranches 001 through 005.
 
 ## Next Gate
 
-Run focused workflows and record their URLs before tranche 006 closeout.
+Focused hardening workflows passed on commit `e5f4a68`:
 
+- Demo Readiness: https://github.com/evanking12/mcp-factory/actions/runs/24612467853
+- Deployed Provider Smoke: https://github.com/evanking12/mcp-factory/actions/runs/24612467850
+- Sponsor Proof Integrity against canonical run `24578415657`: https://github.com/evanking12/mcp-factory/actions/runs/24612449837
+- Contract CI: https://github.com/evanking12/mcp-factory/actions/runs/24612448031
+
+Full Sponsor Demo E2E attempt `24612495773` reached final report generation
+with GPT matrix `13/13`, Windows GPT `5/5`, repo proof pass, and hard runtime
+proofs intact, but failed because `remote_dcom_run_id` defaulted to empty and
+the focused Remote DCOM artifact was not imported. The corrective action is to
+default `remote_dcom_run_id` to the current focused Remote DCOM pass
+`24577926238`, then rerun full Sponsor Demo E2E and integrity validation.

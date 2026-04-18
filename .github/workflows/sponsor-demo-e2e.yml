@@ -38,7 +38,7 @@ on:
       remote_dcom_run_id:
         description: "Focused sponsor-remote-dcom-runtime run ID to import into the canonical final summary"
         type: string
-        default: ""
+        default: "24577926238"
 
 permissions:
   id-token: write
