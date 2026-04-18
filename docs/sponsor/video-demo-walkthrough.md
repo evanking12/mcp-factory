@@ -9,7 +9,9 @@ infrastructure during the video.
 ## Demo URL
 
 - Web UI: <https://mcp-factory-ui.icycoast-8ddfa278.eastus.azurecontainerapps.io>
-- Canonical proof run: <https://github.com/evanking12/mcp-factory/actions/runs/24578415657>
+- Canonical proof run: <https://github.com/evanking12/mcp-factory/actions/runs/24613173130>
+- Hardening integrity proof: <https://github.com/evanking12/mcp-factory/actions/runs/24613434034>
+- Demo readiness proof: <https://github.com/evanking12/mcp-factory/actions/runs/24613487718>
 - Focused Remote DCOM source proof: <https://github.com/evanking12/mcp-factory/actions/runs/24577926238>
 - Artifact name: `sponsor-demo-e2e`
 
