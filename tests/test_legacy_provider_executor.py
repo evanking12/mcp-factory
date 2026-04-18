@@ -98,6 +98,10 @@ def test_soap_runtime_validates_envelope_and_dispatches_operation() -> None:
     assert valid.status_code == 200
     assert "<runtimeMode>real_runtime</runtimeMode>" in valid.text
     assert sentinel in valid.text
+    assert "<customerId>MCP_FACTORY_SOAP_RUNTIME</customerId>" in valid.text
+    assert "<customerName>Contoso Demo Customer</customerName>" in valid.text
+    assert "<summary>Found Contoso customer MCP_FACTORY_SOAP_RUNTIME</summary>" in valid.text
+    assert "&lt;soapenv:Envelope" not in valid.text
 
     invalid = client.post("/api/legacy/soap", content=f"<NotSoap>{sentinel}</NotSoap>")
     assert invalid.status_code == 400
@@ -115,6 +119,41 @@ def test_soap_runtime_validates_envelope_and_dispatches_operation() -> None:
     assert "Unknown SOAP operation" in unknown.text
 
 
+def test_legacy_demo_outputs_are_domain_shaped() -> None:
+    client = _client()
+    sentinel = "MCP_FACTORY_DEMO_OUTPUT"
+
+    rest = client.get("/api/legacy/rest/customers/1", params={"sentinel": sentinel}).json()
+    assert rest["business_result"]["kind"] == "customer"
+    assert rest["business_result"]["customerName"] == "Contoso Demo Customer"
+    assert rest["proof"]["sentinel"] == sentinel
+
+    jsonrpc = client.post(
+        "/api/legacy/jsonrpc",
+        json={"jsonrpc": "2.0", "method": "getCustomer", "params": {"sentinel": sentinel}, "id": 3},
+    ).json()
+    assert jsonrpc["result"]["business_result"]["kind"] == "customer"
+    assert jsonrpc["result"]["result"] == f"Found Contoso customer {sentinel}"
+
+    jndi = client.post("/api/legacy/jndi/lookup", json={"name": "jdbc/ContosoCustomerDB", "sentinel": sentinel}).json()
+    assert jndi["business_result"]["kind"] == "directory_binding"
+    assert jndi["business_result"]["lookupName"] == "jdbc/ContosoCustomerDB"
+
+    corba = client.post("/api/legacy/corba/ICustomerService_getCustomer", json={"sentinel": sentinel}).json()
+    assert corba["business_result"]["kind"] == "customer"
+    assert corba["corba_response"]["result"] == f"Found Contoso customer {sentinel}"
+
+    rpc_payload = xmlrpc.client.dumps(({"sentinel": sentinel},), methodname="RpcCreateTicket")
+    rpc = client.post("/api/legacy/rpc/RpcCreateTicket", content=rpc_payload, headers={"Content-Type": "text/xml"})
+    if rpc.headers.get("content-type", "").startswith("application/json"):
+        rpc_body = rpc.json()
+    else:
+        values, _method = xmlrpc.client.loads(rpc.text.encode("utf-8"))
+        rpc_body = values[0]
+    assert rpc_body["business_result"]["kind"] == "support_ticket"
+    assert rpc_body["business_result"]["status"] == "open"
+
+
 def test_sql_runtime_uses_sqlite_and_returns_deterministic_contoso_data() -> None:
     client = _client()
 
@@ -124,6 +163,7 @@ def test_sql_runtime_uses_sqlite_and_returns_deterministic_contoso_data() -> Non
     assert data["runtime_mode"] == "real_runtime"
     assert data["database"] == "sqlite"
     assert data["result"]["customer"][0]["name"] == "Ada Lovelace"
+    assert data["business_result"]["kind"] == "customer"
     assert "MCP_FACTORY_SQL_RUNTIME" in data["proof"]
 
     gpt_style = client.post(
@@ -163,11 +203,13 @@ def test_jndi_and_rpc_runtime_modes_are_explicit() -> None:
     assert bind.status_code == 200
     assert bind.json()["bound"] is True
     assert bind.json()["ldap_result"]["wire_protocol"] == "ldapv3"
+    assert bind.json()["business_result"]["kind"] == "directory_bind"
 
     search = client.post("/api/legacy/jndi/search", json={"filter": "Customer"})
     assert search.status_code == 200
     assert search.json()["entries"]
     assert search.json()["wire_protocol"] == "ldapv3"
+    assert search.json()["business_result"]["kind"] == "directory_search"
     ldif = client.get("/api/legacy/jndi/ldif")
     assert ldif.status_code == 200
     assert "objectClass: javaNamingReference" in ldif.text

@@ -13,6 +13,7 @@ import json
 import re
 import sqlite3
 import xmlrpc.client
+import hashlib
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -142,15 +143,134 @@ def extract_sentinel(value: Any) -> str:
     return strings[0] if strings else "legacy-provider-ok"
 
 
+def _lookup_payload_value(value: Any, *names: str) -> Any:
+    if not isinstance(value, dict):
+        return None
+    candidates: list[dict[str, Any]] = []
+    args = value.get("args")
+    if isinstance(args, dict):
+        candidates.append(args)
+    candidates.append(value)
+    normalized_names = {name for name in names}
+    normalized_names.update(name.replace("_", "") for name in names)
+    normalized_names.update(name.lower() for name in names)
+    normalized_names.update(name.lstrip("@") for name in names)
+    for candidate in candidates:
+        for key, child in candidate.items():
+            key_variants = {str(key), str(key).replace("_", ""), str(key).lower(), str(key).lstrip("@")}
+            if normalized_names & key_variants:
+                return child
+    return None
+
+
+def _nonempty(value: Any, default: str) -> str:
+    text = "" if value is None else str(value).strip()
+    return text or default
+
+
+def build_demo_result(provider: str, operation: str, args: Any, sentinel: str | None = None) -> dict[str, Any]:
+    """Return a sponsor-readable Contoso business result with proof fields.
+
+    Raw protocol details still live in transport-specific fields and CI artifacts.
+    This payload is optimized for the UI/video path: domain-shaped first,
+    evidence fields always present.
+    """
+    proof_sentinel = sentinel or extract_sentinel(args)
+    op = operation.split("/")[-1]
+    op_lower = op.lower()
+    customer_id = _nonempty(
+        _lookup_payload_value(args, "customerId", "customer_id", "id"),
+        proof_sentinel,
+    )
+    order_id = _nonempty(_lookup_payload_value(args, "orderId", "order_id"), "1001")
+    subject = _nonempty(_lookup_payload_value(args, "subject"), "Customer service demo request")
+    lookup_name = _nonempty(_lookup_payload_value(args, "name", "lookup_name", "binding"), "jdbc/ContosoCustomerDB")
+
+    base = {
+        "proof_sentinel": proof_sentinel,
+        "provider": provider,
+        "operation": op,
+        "runtime_mode": PROVIDER_MODES.get(provider, "adapter_backed"),
+    }
+    if "ticket" in op_lower or "support" in op_lower or "rpc" in op_lower or op_lower in {"submitticket", "escalateticket", "closeticket"}:
+        ticket_hash = hashlib.sha1(f"{provider}:{op}:{proof_sentinel}".encode("utf-8")).hexdigest()[:5].upper()
+        return {
+            **base,
+            "kind": "support_ticket",
+            "ticketId": f"TICKET-{ticket_hash}",
+            "customerId": customer_id,
+            "subject": subject,
+            "status": "open" if "close" not in op_lower else "closed",
+            "priority": "normal",
+            "summary": f"Created Contoso support ticket for {customer_id}",
+        }
+    if "order" in op_lower or "refund" in op_lower or "cancel" in op_lower:
+        status = "refund_requested" if "refund" in op_lower else "cancelled" if "cancel" in op_lower else "found"
+        return {
+            **base,
+            "kind": "order",
+            "orderId": order_id,
+            "customerId": customer_id,
+            "status": status,
+            "total": 128.50,
+            "summary": f"Order {order_id} status is {status}",
+        }
+    if "loyalty" in op_lower or "redeem" in op_lower:
+        return {
+            **base,
+            "kind": "loyalty",
+            "customerId": customer_id,
+            "tier": "Gold",
+            "points": 4200,
+            "status": "available",
+            "summary": f"Customer {customer_id} has 4200 loyalty points",
+        }
+    if provider == "jndi":
+        return {
+            **base,
+            "kind": "directory_binding",
+            "lookupName": lookup_name,
+            "bindingType": "javax.sql.DataSource" if lookup_name.startswith("jdbc/") else "java.naming.Reference",
+            "status": "found",
+            "summary": f"Resolved JNDI binding {lookup_name}",
+        }
+    if "customer" in op_lower or provider in {"jsonrpc", "soap", "rest", "corba"}:
+        return {
+            **base,
+            "kind": "customer",
+            "customerId": customer_id,
+            "customerName": "Contoso Demo Customer",
+            "supportTier": "Gold",
+            "status": "found",
+            "recommendedAction": "Display account summary and offer support-ticket creation",
+            "summary": f"Found Contoso customer {customer_id}",
+        }
+    return {
+        **base,
+        "kind": "legacy_operation",
+        "status": "completed",
+        "summary": f"Executed {provider} operation {op}",
+    }
+
+
 def build_legacy_result(provider: str, operation: str, args: Any) -> dict[str, Any]:
     sentinel = extract_sentinel(args)
+    demo_result = build_demo_result(provider, operation, args, sentinel)
     return {
         "provider": provider,
         "operation": operation,
         "version": PROVIDER_VERSION,
         "runtime_mode": PROVIDER_MODES.get(provider, "adapter_backed"),
         "sentinel": sentinel,
-        "result": f"{provider}:{operation}: {sentinel}",
+        "status": demo_result.get("status", "completed"),
+        "business_result": demo_result,
+        "result": demo_result["summary"],
+        "proof": {
+            "sentinel": sentinel,
+            "provider": provider,
+            "runtime_mode": PROVIDER_MODES.get(provider, "adapter_backed"),
+            "operation": operation,
+        },
         "args": args if isinstance(args, (dict, list)) else {"value": args},
     }
 
@@ -167,6 +287,33 @@ def _xml_escape(value: Any) -> str:
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].split(":")[-1]
+
+
+def _soap_params(operation_node: ET.Element) -> dict[str, str]:
+    return {_local_name(child.tag): (child.text or "") for child in list(operation_node)}
+
+
+def _safe_xml_name(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_")
+    if not cleaned or not re.match(r"^[A-Za-z_]", cleaned):
+        cleaned = f"field_{cleaned or 'value'}"
+    return cleaned
+
+
+def _xml_fragment(name: str, value: Any) -> str:
+    safe_name = _safe_xml_name(name)
+    if isinstance(value, dict):
+        inner = "".join(_xml_fragment(k, v) for k, v in value.items())
+        return f"<{safe_name}>{inner}</{safe_name}>"
+    if isinstance(value, list):
+        item_name = safe_name[:-1] if safe_name.endswith("s") else "item"
+        inner = "".join(_xml_fragment(item_name, item) for item in value)
+        return f"<{safe_name}>{inner}</{safe_name}>"
+    if isinstance(value, bool):
+        text = "true" if value else "false"
+    else:
+        text = "" if value is None else str(value)
+    return f"<{safe_name}>{_xml_escape(text)}</{safe_name}>"
 
 
 def _soap_fault(message: str, *, status_code: int = 400) -> Response:
@@ -374,7 +521,6 @@ async def jsonrpc_provider(request: Request) -> JSONResponse:
 async def soap_provider(request: Request) -> Response:
     body = (await request.body()).decode("utf-8", errors="replace")
     action = request.headers.get("SOAPAction", "").strip('"') or "SoapOperation"
-    sentinel = extract_sentinel(body)
     try:
         root = ET.fromstring(body)
     except ET.ParseError as exc:
@@ -392,13 +538,20 @@ async def soap_provider(request: Request) -> Response:
     action = action.split("/")[-1]
     if action not in SOAP_OPERATIONS:
         return _soap_fault(f"Unknown SOAP operation: {action}", status_code=404)
+    params = _soap_params(operation_node)
+    sentinel = extract_sentinel(params if params else body)
+    payload = {"args": params, **params}
+    business_result = build_demo_result("soap", action, payload, sentinel)
     envelope = (
         '<?xml version="1.0"?>'
         '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
         "<soapenv:Body>"
         f"<{action}Response><LegacyProviderResult><provider>soap</provider>"
         f"<runtimeMode>{PROVIDER_MODES['soap']}</runtimeMode><operation>{_xml_escape(action)}</operation>"
-        f"<sentinel>{_xml_escape(sentinel)}</sentinel><result>soap:{_xml_escape(action)}: {_xml_escape(sentinel)}</result>"
+        f"<sentinel>{_xml_escape(sentinel)}</sentinel><status>{_xml_escape(str(business_result.get('status', 'completed')))}</status>"
+        f"{_xml_fragment('businessResult', business_result)}"
+        f"<result>{_xml_escape(str(business_result['summary']))}</result>"
+        "<transportProof><soapEnvelopeValidated>true</soapEnvelopeValidated><soapBodyValidated>true</soapBodyValidated></transportProof>"
         "</LegacyProviderResult>"
         f"</{action}Response>"
         "</soapenv:Body>"
@@ -463,6 +616,7 @@ async def sql_provider(operation: str, request: Request) -> JSONResponse:
         "runtime_mode": PROVIDER_MODES["sql"],
         "database": "sqlite",
         "sentinel": sentinel,
+        "business_result": build_demo_result("sql", operation, payload, sentinel),
         "result": result,
         "proof": f"sql:{operation}: {sentinel}",
     })
@@ -620,6 +774,15 @@ async def jndi_bind_provider(request: Request) -> JSONResponse:
         "bound": ok,
         "ldap_result": bind,
         "sentinel": extract_sentinel(payload),
+        "business_result": {
+            "kind": "directory_bind",
+            "provider": "jndi",
+            "runtime_mode": PROVIDER_MODES["jndi"],
+            "principal": principal,
+            "status": "bound" if ok else "denied",
+            "proof_sentinel": extract_sentinel(payload),
+            "summary": f"LDAP bind {'succeeded' if ok else 'failed'} for {principal}",
+        },
     }, status_code=200 if ok else 401)
 
 
@@ -639,6 +802,17 @@ async def jndi_search_provider(request: Request) -> JSONResponse:
         "entries": search["entries"],
         "ldap_result": search,
         "sentinel": extract_sentinel(payload),
+        "business_result": {
+            "kind": "directory_search",
+            "provider": "jndi",
+            "runtime_mode": PROVIDER_MODES["jndi"],
+            "baseDn": search["base_dn"],
+            "filter": search["filter"],
+            "matchCount": len(search["entries"]),
+            "status": "found" if search["entries"] else "empty",
+            "proof_sentinel": extract_sentinel(payload),
+            "summary": f"LDAP search returned {len(search['entries'])} Contoso binding(s)",
+        },
     })
 
 
