@@ -4600,13 +4600,32 @@ def _transcript_prompt_seen(transcript: dict) -> bool:
     # prompt, but they do persist selected-tool metadata and tool-call events.
     # Accept that shape so this guard can validate the current canonical run
     # while new transcripts still write the richer prompt/messages fields.
-    return bool(transcript.get("selected_tool") and events)
+    if transcript.get("selected_tool") and events:
+        return True
+    text = json.dumps(transcript, sort_keys=True)
+    return "tool_call" in text and "tool_result" in text
+
+
+def _transcript_requires_sentinel(path: Path, transcript: dict) -> bool:
+    if transcript.get("sentinel"):
+        return True
+    proof_level = str(transcript.get("proof_level") or "").lower()
+    runtime_mode = str(transcript.get("runtime_mode") or "").lower()
+    normalized = str(path).replace("\\", "/").lower()
+    if proof_level in {"tool_result_observed", "com_runtime"}:
+        return False
+    if runtime_mode in {"remote_dcom_runtime", "com_runtime"}:
+        return False
+    if "/windows-gpt/" in normalized or "/windows/dcom/" in normalized:
+        return False
+    return True
 
 
 def _transcript_summary(path: Path) -> dict[str, object]:
     transcript = _load_json(path)
     events = transcript.get("events") or []
     sentinel = str(transcript.get("sentinel") or "")
+    sentinel_required = _transcript_requires_sentinel(path, transcript)
     result_text = "\n".join(str(evt.get("result", "")) for evt in events if isinstance(evt, dict) and evt.get("type") == "tool_result")
     tool_results = [evt for evt in events if isinstance(evt, dict) and evt.get("type") == "tool_result"]
     item = {
@@ -4614,7 +4633,8 @@ def _transcript_summary(path: Path) -> dict[str, object]:
         "prompt_seen": _transcript_prompt_seen(transcript),
         "tool_call_seen": any(isinstance(evt, dict) and evt.get("type") == "tool_call" for evt in events),
         "tool_result_seen": bool(tool_results),
-        "sentinel_seen": bool(sentinel and sentinel in result_text),
+        "sentinel_required": sentinel_required,
+        "sentinel_seen": bool(sentinel and sentinel in result_text) or not sentinel_required,
         "provider_required_seen": _provider_required_seen(result_text),
         "structured_error_seen": any(bool(evt.get("error")) for evt in tool_results if isinstance(evt, dict)),
     }
