@@ -49,5 +49,10 @@
 - Added local verifier commands and focused tests.
 - Added GitHub Actions workflows for readiness, provider smoke, and proof
   integrity.
-- Next evidence branch: dispatch focused workflows and record run URLs.
-
+- Focused hardening workflows passed on `e5f4a68`.
+- Full Sponsor Demo E2E passed on `b9e3fdc` as run `24612781469`.
+- Structured-error enrichment was corrected on `979f711` so successful
+  observed-result and CORBA `NO_EXCEPTION` tool results do not carry error
+  metadata.
+- Final full Sponsor Demo E2E passed on `979f711` as run `24613173130`.
+- Sponsor Proof Integrity passed against run `24613173130` as run `24613434034`.

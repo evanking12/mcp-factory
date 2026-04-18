@@ -45,3 +45,11 @@ classifier matched strings such as `timeout_or_failure_classification` and
 `NO_EXCEPTION`. The corrective action is to classify domain-shaped JSON/XML
 success payloads as success before textual error heuristics, redeploy, rerun
 full Sponsor Demo E2E, and rerun proof integrity against the new artifact.
+
+Final hardening evidence on commit `979f711`:
+
+- Contract CI: https://github.com/evanking12/mcp-factory/actions/runs/24613098234
+- Deploy Pipeline: https://github.com/evanking12/mcp-factory/actions/runs/24613098223
+- Deployed Provider Smoke: https://github.com/evanking12/mcp-factory/actions/runs/24613155471
+- Full Sponsor Demo E2E: https://github.com/evanking12/mcp-factory/actions/runs/24613173130
+- Sponsor Proof Integrity: https://github.com/evanking12/mcp-factory/actions/runs/24613434034

@@ -4,9 +4,11 @@ This is the static landing page for sponsor proof artifacts.
 
 ## Canonical Green Run
 
-- Canonical green run: [24578415657](https://github.com/evanking12/mcp-factory/actions/runs/24578415657)
+- Canonical green run: [24613173130](https://github.com/evanking12/mcp-factory/actions/runs/24613173130)
+- Hardening integrity proof: [24613434034](https://github.com/evanking12/mcp-factory/actions/runs/24613434034)
 - Focused Remote DCOM runtime pass: [24577926238](https://github.com/evanking12/mcp-factory/actions/runs/24577926238)
-- Previous full green run: [24568108685](https://github.com/evanking12/mcp-factory/actions/runs/24568108685)
+- Previous full green run: [24578415657](https://github.com/evanking12/mcp-factory/actions/runs/24578415657)
+- Earlier full green run: [24568108685](https://github.com/evanking12/mcp-factory/actions/runs/24568108685)
 - Previous runtime-expansion green run: [24547629781](https://github.com/evanking12/mcp-factory/actions/runs/24547629781)
 - Historical baseline fallback: [24542583216](https://github.com/evanking12/mcp-factory/actions/runs/24542583216)
 - Workflow: [Sponsor Demo E2E](https://github.com/evanking12/mcp-factory/actions/workflows/sponsor-demo-e2e.yml)
@@ -43,7 +45,7 @@ Use `sponsor-report.html` for live review and `final-summary.json` for exact
 automation status. The caveat page should be shown when discussing CORBA, RPC,
 JNDI, DCOM, or arbitrary closed-source binary recovery. JSON-RPC, SOAP, SQL,
 JNDI/LDAP, CORBA ORB/IIOP, and controlled MSRPC are runtime-backed in the
-expanded proof. Canonical run `24578415657` imports focused run `24577926238`
+expanded proof. Canonical run `24613173130` imports focused run `24577926238`
 and proves controlled same-subnet Remote DCOM through WMI over DCOM as part of
 the full sponsor artifact.
 
