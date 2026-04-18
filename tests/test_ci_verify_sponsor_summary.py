@@ -832,3 +832,135 @@ def test_final_summary_contains_mcp_llm_story(tmp_path: Path) -> None:
     text = Path(args.markdown).read_text(encoding="utf-8")
     assert "## MCP Generation And LLM Invocation" in text
     assert "downloaded-mcp-schema.json" in text
+
+
+def test_deployed_ui_smoke_checks_domain_shaped_soap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    sentinel = "MCP_FACTORY_UI_DEMO_SENTINEL"
+
+    def fake_bytes(method: str, url: str, **kwargs: object) -> bytes:
+        if url.endswith("/health"):
+            return b'{"status":"ok"}'
+        return b"Load SOAP/WSDL Showcase Legacy Protocol Showcase CI Proof Bundle app /api/download job artifacts"
+
+    def fake_json(method: str, url: str, **kwargs: object) -> dict:
+        assert method == "POST"
+        return {
+            "tool_name": "GetCustomer",
+            "error": None,
+            "result": (
+                "<runtimeMode>real_runtime</runtimeMode>"
+                f"<customerId>{sentinel}</customerId>"
+                "<customerName>Contoso Demo Customer</customerName>"
+            ),
+        }
+
+    monkeypatch.setattr(ci_verify, "_http_bytes", fake_bytes)
+    monkeypatch.setattr(ci_verify, "_http_json", fake_json)
+    out = tmp_path / "ui-smoke.json"
+    assert ci_verify.cmd_deployed_ui_smoke(SimpleNamespace(ui_url="https://ui.example", pipeline_key="", sentinel=sentinel, timeout=5, out=str(out))) == 0
+    assert ci_verify._load_json(out)["checks"]["error_null"] is True
+
+
+def test_provider_matrix_smoke_accepts_runtime_business_results(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    sentinel = "MCP_FACTORY_MATRIX"
+
+    def fake_json(method: str, url: str, **kwargs: object) -> dict:
+        if url.endswith("/health"):
+            return {"provider_modes": {"corba": "corba_orb_runtime", "rpc": "msrpc_runtime"}}
+        if "/rest/" in url:
+            return {"runtime_mode": "validated_runtime", "sentinel": sentinel, "business_result": {"kind": "customer"}}
+        if url.endswith("/jsonrpc"):
+            return {"result": {"runtime_mode": "real_runtime", "sentinel": sentinel, "business_result": {"kind": "customer"}}}
+        if "/sql/" in url:
+            return {"runtime_mode": "real_runtime", "sentinel": sentinel, "business_result": {"kind": "customer"}}
+        if "/jndi/" in url:
+            return {"runtime_mode": "ldap_runtime", "sentinel": sentinel, "business_result": {"kind": "directory_binding"}}
+        if "/corba/" in url:
+            return {"runtime_mode": "corba_orb_runtime", "sentinel": sentinel, "business_result": {"kind": "customer"}}
+        if "/rpc/" in url:
+            return {"runtime_mode": "msrpc_runtime", "sentinel": sentinel, "business_result": {"kind": "support_ticket"}}
+        raise AssertionError(url)
+
+    def fake_bytes(method: str, url: str, **kwargs: object) -> bytes:
+        return f"<runtimeMode>real_runtime</runtimeMode><sentinel>{sentinel}</sentinel><businessResult><kind>customer</kind></businessResult>".encode()
+
+    monkeypatch.setattr(ci_verify, "_http_json", fake_json)
+    monkeypatch.setattr(ci_verify, "_http_bytes", fake_bytes)
+    out = tmp_path / "provider-smoke.json"
+    assert ci_verify.cmd_deployed_provider_matrix_smoke(SimpleNamespace(pipeline_url="https://api.example", pipeline_key="", sentinel=sentinel, timeout=5, out=str(out))) == 0
+    summary = ci_verify._load_json(out)
+    assert summary["passed"] is True
+    assert len(summary["cases"]) == 7
+
+
+def test_sponsor_artifact_and_transcript_integrity(tmp_path: Path) -> None:
+    root = tmp_path / "demo"
+    for path in ["gpt-format-matrix/soap_wsdl", "windows", "repo-ingestion", "legacy-runtime-matrix"]:
+        (root / path).mkdir(parents=True, exist_ok=True)
+    _write(root / "final-summary.json", {
+        "passed": True,
+        "checks": {},
+        "proof_semantics": {},
+        "runtime_mode_matrix": {},
+        "requirement_matrix": [],
+        "artifacts": {},
+        "canonical_run_url": "https://github.com/evanking12/mcp-factory/actions/runs/1",
+    })
+    (root / "final-summary.md").write_text("# ok", encoding="utf-8")
+    (root / "sponsor-report.html").write_text("<html>ok</html>", encoding="utf-8")
+    _write(root / "gpt-format-matrix/summary.json", {"passed": True})
+    _write(root / "windows/summary.json", {"passed": True})
+    _write(root / "repo-ingestion/summary.json", {"passed": True})
+    _write(root / "legacy-runtime-matrix/summary.json", {"passed": True})
+    _write(root / "gpt-format-matrix/soap_wsdl/generated-mcp-schema.json", {"tools": []})
+    _write(root / "gpt-format-matrix/soap_wsdl/transcript.json", {
+        "sentinel": "MCP_FACTORY_T",
+        "prompt": "call tool",
+        "events": [
+            {"type": "tool_call", "name": "GetCustomer"},
+            {"type": "tool_result", "result": "MCP_FACTORY_T", "error": None},
+        ],
+    })
+    schema = tmp_path / "schema.json"
+    _write(schema, {"required": ["passed", "checks", "proof_semantics", "runtime_mode_matrix", "requirement_matrix", "artifacts", "canonical_run_url"]})
+
+    assert ci_verify.cmd_validate_sponsor_artifact(SimpleNamespace(artifact_dir=str(root), schema=str(schema), out=str(tmp_path / "artifact.json"))) == 0
+    assert ci_verify.cmd_validate_transcript_integrity(SimpleNamespace(artifact_dir=str(root), pattern="**/transcript.json", out=str(tmp_path / "transcripts.json"))) == 0
+
+
+def test_runtime_downgrade_guard_and_failure_classifier(tmp_path: Path) -> None:
+    final_summary = tmp_path / "final-summary.json"
+    _write(final_summary, {
+        "proof_semantics": {
+            "runtime_modes": {
+                "cases_by_mode": {
+                    "real_runtime": ["jsonrpc", "soap_wsdl", "sql"],
+                    "validated_runtime": ["openapi"],
+                    "ldap_runtime": ["jndi"],
+                    "corba_orb_runtime": ["corba_idl"],
+                    "msrpc_runtime": ["rpc_idl_contract"],
+                }
+            }
+        },
+        "gpt_format_matrix": {"runtime_mode_counts": {"corba_orb_runtime": 1, "msrpc_runtime": 1}},
+        "remote_dcom": {"passed": True, "runtime_mode": "remote_dcom_runtime", "remote_dcom_activation_claimed": True},
+    })
+    assert ci_verify.cmd_runtime_downgrade_guard(SimpleNamespace(final_summary=str(final_summary), require_corba_orb=True, require_msrpc=True, require_remote_dcom=True, out=str(tmp_path / "guard.json"))) == 0
+
+    log = tmp_path / "log.txt"
+    log.write_text("AuthorizationFailed: does not have authorization", encoding="utf-8")
+    assert ci_verify.cmd_classify_failure(SimpleNamespace(inputs=[str(log)], text="", out=str(tmp_path / "failure.json"))) == 0
+    assert ci_verify._load_json(tmp_path / "failure.json")["classification"] == "azure_permission"
+
+
+def test_caveat_consistency_guard(tmp_path: Path) -> None:
+    text = (
+        "arbitrary enterprise DCOM estate migration is not claimed. "
+        "generalized CORBA estate migration is not claimed. "
+        "enterprise directory migration is not claimed. "
+        "arbitrary MSRPC estate support is not claimed. "
+        "arbitrary binary recovery is best effort."
+    )
+    doc = tmp_path / "caveats.md"
+    doc.write_text(text, encoding="utf-8")
+    assert ci_verify.cmd_caveat_consistency_guard(SimpleNamespace(files=[str(doc)], out=str(tmp_path / "caveat.json"))) == 0

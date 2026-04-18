@@ -56,6 +56,22 @@ jobs:
             --require-remote-dcom
           cat ci_artifacts/demo/final-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Validate re-rendered proof artifact
+        run: |
+          python scripts/ci_verify.py validate-sponsor-artifact \
+            --artifact-dir ci_artifacts/demo \
+            --schema docs/sponsor/schemas/final-summary.schema.json \
+            --out ci_artifacts/demo/proof-integrity/artifact-validation.json
+          python scripts/ci_verify.py runtime-downgrade-guard \
+            --final-summary ci_artifacts/demo/final-summary.json \
+            --require-corba-orb \
+            --require-msrpc \
+            --require-remote-dcom \
+            --out ci_artifacts/demo/proof-integrity/runtime-downgrade-guard.json
+          python scripts/ci_verify.py caveat-consistency-guard \
+            --files README.md docs/sponsor/proof-index.md docs/sponsor/caveats.md \
+            --out ci_artifacts/demo/proof-integrity/caveat-consistency.json
+
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCP Factory Sponsor Demo Final Summary",
+  "type": "object",
+  "required": [
+    "passed",
+    "checks",
+    "proof_semantics",
+    "mcp_llm_proof_story",
+    "requirement_matrix",
+    "stretch_proof_matrix",
+    "runtime_mode_matrix",
+    "legacy_runtime_matrix",
+    "gpt_format_matrix",
+    "windows_gpt_tool_matrix",
+    "repo_ingestion",
+    "artifacts",
+    "canonical_run_url"
+  ],
+  "properties": {
+    "passed": { "type": "boolean" },
+    "checks": { "type": "object" },
+    "proof_semantics": { "type": "object" },
+    "mcp_llm_proof_story": { "type": "object" },
+    "requirement_matrix": { "type": "array" },
+    "stretch_proof_matrix": { "type": "object" },
+    "runtime_mode_matrix": { "type": "object" },
+    "legacy_runtime_matrix": { "type": "object" },
+    "gpt_format_matrix": { "type": "object" },
+    "windows_gpt_tool_matrix": { "type": "object" },
+    "repo_ingestion": { "type": "object" },
+    "artifacts": { "type": "object" },
+    "canonical_run_url": { "type": "string" }
+  }
+}
