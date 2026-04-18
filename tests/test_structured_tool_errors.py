@@ -42,6 +42,14 @@ def test_error_payload_classifies_soap_fault():
     assert "WSDL" in payload["suggestion"]
 
 
+def test_successful_sentinel_result_is_not_an_error():
+    payload = build_error_payload(
+        "GetCustomer",
+        "<GetCustomerResponse><customerId>MCP_FACTORY_UI_DEMO_SENTINEL</customerId><status>found</status></GetCustomerResponse>",
+    )
+    assert payload is None
+
+
 def test_execute_tool_traced_preserves_plain_result_and_adds_error():
     inv = {
         "name": "LaunchThing",

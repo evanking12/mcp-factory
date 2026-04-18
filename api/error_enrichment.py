@@ -27,7 +27,7 @@ def _first_code(text: str) -> str | None:
 
 def _category_from_text(text: str) -> tuple[str | None, str]:
     lower = (text or "").lower()
-    if any(token in lower for token in ("0xffffffff", "4294967295", "sentinel")):
+    if any(token in lower for token in ("0xffffffff", "4294967295")):
         return "sentinel", "recoverable"
     if "bridge /execute error" in lower or "bridge" in lower and "unreachable" in lower:
         return "bridge_unreachable", "blocking"
