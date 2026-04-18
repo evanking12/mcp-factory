@@ -50,6 +50,29 @@ def test_successful_sentinel_result_is_not_an_error():
     assert payload is None
 
 
+def test_domain_json_success_with_no_exception_is_not_an_error():
+    payload = build_error_payload(
+        "getCustomer",
+        (
+            '{"provider":"corba","runtime_mode":"corba_orb_runtime",'
+            '"status":"found","business_result":{"customerName":"Contoso Demo Customer"},'
+            '"corba_response":{"reply_status":"NO_EXCEPTION"}}'
+        ),
+    )
+    assert payload is None
+
+
+def test_observed_result_success_with_timeout_field_name_is_not_an_error():
+    payload = build_error_payload(
+        "kernel32_dll_observed_result",
+        (
+            '{"proof_level":"tool_result_observed","observed_result":{'
+            '"passed":true,"timeout_or_failure_classification":"passed_cached_session"}}'
+        ),
+    )
+    assert payload is None
+
+
 def test_execute_tool_traced_preserves_plain_result_and_adds_error():
     inv = {
         "name": "LaunchThing",

@@ -36,3 +36,12 @@ proofs intact, but failed because `remote_dcom_run_id` defaulted to empty and
 the focused Remote DCOM artifact was not imported. The corrective action is to
 default `remote_dcom_run_id` to the current focused Remote DCOM pass
 `24577926238`, then rerun full Sponsor Demo E2E and integrity validation.
+
+Full Sponsor Demo E2E rerun `24612781469` passed after the Remote DCOM import
+default was corrected. Sponsor Proof Integrity run `24613033915` then exposed a
+source issue in structured-error enrichment: successful observed-result and
+CORBA `NO_EXCEPTION` payloads were still carrying error metadata because the
+classifier matched strings such as `timeout_or_failure_classification` and
+`NO_EXCEPTION`. The corrective action is to classify domain-shaped JSON/XML
+success payloads as success before textual error heuristics, redeploy, rerun
+full Sponsor Demo E2E, and rerun proof integrity against the new artifact.

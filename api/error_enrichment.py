@@ -7,6 +7,7 @@ object when a result is clearly a failure.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -27,6 +28,8 @@ def _first_code(text: str) -> str | None:
 
 def _category_from_text(text: str) -> tuple[str | None, str]:
     lower = (text or "").lower()
+    if "no_exception" in lower and any(token in lower for token in ("runtime_mode", "business_result", "proof_level")):
+        return None, "recoverable"
     if any(token in lower for token in ("0xffffffff", "4294967295")):
         return "sentinel", "recoverable"
     if "bridge /execute error" in lower or "bridge" in lower and "unreachable" in lower:
@@ -63,6 +66,49 @@ def _category_from_text(text: str) -> tuple[str | None, str]:
     return None, "recoverable"
 
 
+def _looks_like_success_payload(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if stripped.startswith("<") and "<fault" not in stripped.lower() and "faultstring" not in stripped.lower():
+        success_tokens = (
+            "response",
+            "<status>found</status>",
+            "<runtimemode>",
+            "<provider>",
+            "legacyproviderresult",
+        )
+        lower = stripped.lower()
+        return any(token in lower for token in success_tokens)
+    if not stripped.startswith(("{", "[")):
+        return False
+    try:
+        data = json.loads(stripped)
+    except Exception:
+        return False
+    if isinstance(data, list):
+        return bool(data) and all(isinstance(item, dict) for item in data)
+    if not isinstance(data, dict):
+        return False
+    if data.get("error"):
+        return False
+    if data.get("passed") is True:
+        return True
+    if str(data.get("status") or "").lower() in {"found", "ok", "success", "passed"}:
+        return True
+    if data.get("business_result") or data.get("proof") or data.get("runtime_mode"):
+        return True
+    if str(data.get("proof_level") or "").lower() == "tool_result_observed":
+        return True
+    response = data.get("corba_response")
+    if isinstance(response, dict) and str(response.get("reply_status") or "").upper() == "NO_EXCEPTION":
+        return True
+    observed = data.get("observed_result")
+    if isinstance(observed, dict) and observed.get("passed") is True:
+        return True
+    return False
+
+
 def build_error_payload(
     function_name: str,
     raw_result: int | str | None = None,
@@ -73,6 +119,8 @@ def build_error_payload(
 ) -> dict[str, Any] | None:
     """Return a structured error payload, or None when the result looks OK."""
     text = str(exception or raw_result or "")
+    if exception is None and _looks_like_success_payload(text):
+        return None
     category = (trace or {}).get("category")
     severity = (trace or {}).get("severity") or "recoverable"
     if not category:
