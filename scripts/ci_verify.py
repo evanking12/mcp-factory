@@ -4386,6 +4386,7 @@ def cmd_deployed_ui_smoke(args: argparse.Namespace) -> int:
     required_markers = [
         "Load SOAP/WSDL Showcase",
         "Legacy Protocol Showcase",
+        "Live Proof Trace",
         "CI Proof Bundle",
         "/api/download",
     ]

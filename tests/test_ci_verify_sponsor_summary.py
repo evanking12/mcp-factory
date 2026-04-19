@@ -335,7 +335,8 @@ def test_ui_backend_route_and_semantics_alignment() -> None:
     assert "json.dumps({'type': 'error', 'message': message})" in ui
     assert "Load SOAP/WSDL Showcase" in ui
     assert "Legacy Protocol Showcase" in ui
-    assert "24578415657" in ui
+    assert "Live Proof Trace" in ui
+    assert "24613173130" in ui
     assert "Run Canonical Proof" in ui
     assert "tool_call:" in ui
     assert "tool_result:" in ui
@@ -840,7 +841,7 @@ def test_deployed_ui_smoke_checks_domain_shaped_soap(monkeypatch: pytest.MonkeyP
     def fake_bytes(method: str, url: str, **kwargs: object) -> bytes:
         if url.endswith("/health"):
             return b'{"status":"ok"}'
-        return b"Load SOAP/WSDL Showcase Legacy Protocol Showcase CI Proof Bundle app /api/download job artifacts"
+        return b"Load SOAP/WSDL Showcase Legacy Protocol Showcase Live Proof Trace CI Proof Bundle app /api/download job artifacts"
 
     def fake_json(method: str, url: str, **kwargs: object) -> dict:
         assert method == "POST"

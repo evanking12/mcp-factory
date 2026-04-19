@@ -47,10 +47,11 @@ Video demo target: SOAP WSDL legacy customer service. Show discovery, generated 
 4. Generate the MCP schema.
 5. Show the generated schema preview and the download button.
 6. Open the chat panel.
-7. Ask GPT to call the generated tool with a deterministic sentinel.
-8. Show the visible `tool_call` and `tool_result` transcript.
-9. Download the generated schema or MCP artifacts through `/api/download/{job_id}/{filename}`.
-10. Show the `CI Proof Bundle` link and explain that GitHub Actions artifacts are separate from app downloads.
+7. Point out the `Live Proof Trace` panel next to chat.
+8. Ask GPT to call the generated tool with a deterministic sentinel.
+9. Show the visible `tool_call`, backend route, runtime mode, and `tool_result` in the trace panel.
+10. Download the generated schema or MCP artifacts through `/api/download/{job_id}/{filename}`.
+11. Show the `CI Proof Bundle` link and explain that GitHub Actions artifacts are separate from app downloads.
 
 ## GPT Prompts
 
@@ -92,6 +93,12 @@ SOAP-specific framing:
 
 ```text
 SOAP/WSDL is a good live target because the input is not source code for a chatbot. It is a legacy service contract. MCP Factory discovers operations from the WSDL, turns them into GPT-callable MCP tools, and routes the tool call to a controlled SOAP runtime that validates the envelope and returns a backend tool result.
+```
+
+Live trace framing:
+
+```text
+The Live Proof Trace panel makes the invisible MCP loop visible: GPT emits a tool_call, the backend routes it through the generated tool and SOAP runtime, and the runtime returns a tool_result with the customer-shaped proof payload.
 ```
 
 Hard-legacy proof framing:

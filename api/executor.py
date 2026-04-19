@@ -233,6 +233,31 @@ def _provider_required(kind: str, name: str, detail: str = "") -> str:
     )
 
 
+def _backend_route_for_execution(method: str, execution: dict) -> str:
+    name = str(execution.get("action") or execution.get("operation") or execution.get("procedure") or "").strip("/")
+    if method == "http_request":
+        return "/api/legacy/rest"
+    if method == "jsonrpc":
+        return "/api/legacy/jsonrpc"
+    if method == "soap":
+        return "/api/legacy/soap"
+    if method == "sql_exec":
+        return "/api/legacy/sql/{operation}"
+    if method == "jndi_lookup":
+        return "/api/legacy/jndi/lookup"
+    if method == "corba_iiop":
+        return f"/api/legacy/corba/{name}" if name else "/api/legacy/corba/{operation}"
+    if method == "rpc_call":
+        return f"/api/legacy/rpc/{name}" if name else "/api/legacy/rpc/{procedure}"
+    if method == "observed_result":
+        return "windows_bridge_summary"
+    if method in {"dll_import", "gui_action"}:
+        return "windows_bridge"
+    if method in {"python_subprocess", "node", "ts-node", "ruby", "php", "powershell", "cmd_call", "bash", "cmd", "cscript"}:
+        return "local_runtime"
+    return ""
+
+
 def _legacy_provider_url(path: str) -> str | None:
     if not ENABLE_LEGACY_PROVIDERS or not LEGACY_PROVIDER_BASE_URL:
         return None
@@ -632,9 +657,13 @@ def _execute_tool_traced(inv: dict, args: dict, findings_for_fn: list[dict] | No
     """Execute a tool while preserving the legacy string API plus diagnostics."""
     name = inv.get("name", "")
     execution = inv.get("execution") or inv.get("mcp", {}).get("execution", {})
+    method = execution.get("method", "cli") or "cli"
     trace = {
-        "backend": execution.get("method", "cli") or "cli",
+        "backend": method,
         "tool": name,
+        "source_type": inv.get("source_type") or inv.get("kind") or "",
+        "runtime_mode": execution.get("runtime_mode") or inv.get("runtime_mode") or "",
+        "backend_route": _backend_route_for_execution(method, execution),
     }
     try:
         result = _execute_tool(inv, args)

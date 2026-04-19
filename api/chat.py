@@ -42,6 +42,95 @@ logger = logging.getLogger("mcp_factory.api")
 # round to bound token growth on long sessions.
 _CONTEXT_WINDOW_TURNS = 20
 
+_PROVIDER_LABELS = {
+    "http_request": "OpenAPI/REST",
+    "jsonrpc": "JSON-RPC",
+    "soap": "SOAP/WSDL",
+    "sql_exec": "SQL",
+    "jndi_lookup": "LDAP/JNDI",
+    "corba_iiop": "CORBA ORB/IIOP",
+    "rpc_call": "MSRPC/RPC",
+    "observed_result": "Windows observed proof",
+}
+
+
+def _extract_result_metadata(result: str) -> dict[str, Any]:
+    text = result or ""
+    metadata: dict[str, Any] = {}
+    if not text:
+        return metadata
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
+        business = parsed.get("business_result") if isinstance(parsed.get("business_result"), dict) else {}
+        proof = parsed.get("proof") if isinstance(parsed.get("proof"), dict) else {}
+        metadata.update({
+            "runtime_mode": parsed.get("runtime_mode") or proof.get("runtime_mode") or business.get("runtime_mode") or "",
+            "operation": parsed.get("operation") or proof.get("operation") or "",
+            "provider": parsed.get("provider") or proof.get("provider") or "",
+            "customerName": business.get("customerName") or parsed.get("customerName") or "",
+            "status": parsed.get("status") or business.get("status") or "",
+            "sentinel": parsed.get("sentinel") or proof.get("sentinel") or business.get("proof_sentinel") or "",
+        })
+        return {k: v for k, v in metadata.items() if v}
+    patterns = {
+        "runtime_mode": r"<runtimeMode>([^<]+)</runtimeMode>",
+        "operation": r"<operation>([^<]+)</operation>",
+        "customerName": r"<customerName>([^<]+)</customerName>",
+        "status": r"<status>([^<]+)</status>",
+        "sentinel": r"<sentinel>([^<]+)</sentinel>",
+        "provider": r"<provider>([^<]+)</provider>",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text)
+        if match:
+            metadata[key] = match.group(1)
+    return metadata
+
+
+def _tool_trace_metadata(inv: dict | None, fn_name: str, job_id: str) -> dict[str, Any]:
+    if not inv:
+        return {"backend_route": "unknown_tool", "artifact_hints": []}
+    execution = inv.get("execution") or inv.get("mcp", {}).get("execution", {})
+    method = execution.get("method", "") or ""
+    backend_route = ""
+    if method == "http_request":
+        backend_route = "/api/legacy/rest"
+    elif method == "jsonrpc":
+        backend_route = "/api/legacy/jsonrpc"
+    elif method == "soap":
+        backend_route = "/api/legacy/soap"
+    elif method == "sql_exec":
+        backend_route = f"/api/legacy/sql/{fn_name}"
+    elif method == "jndi_lookup":
+        backend_route = "/api/legacy/jndi/lookup"
+    elif method == "corba_iiop":
+        backend_route = f"/api/legacy/corba/{fn_name}"
+    elif method == "rpc_call":
+        backend_route = f"/api/legacy/rpc/{fn_name}"
+    elif method == "observed_result":
+        backend_route = "windows_bridge_summary"
+    elif method in {"dll_import", "gui_action"}:
+        backend_route = "windows_bridge"
+    elif method:
+        backend_route = _PROVIDER_LABELS.get(method, method)
+    artifact_hints = []
+    if job_id:
+        artifact_hints = [
+            f"/api/download/{job_id}/mcp_schema.json",
+            f"/api/download/{job_id}/mcp_server.py",
+        ]
+    return {
+        "execution_method": method,
+        "execution_label": _PROVIDER_LABELS.get(method, method or "generated tool"),
+        "source_type": inv.get("source_type") or inv.get("kind") or "",
+        "runtime_mode": inv.get("runtime_mode") or execution.get("runtime_mode") or "",
+        "backend_route": backend_route,
+        "artifact_hints": artifact_hints,
+    }
+
 
 def _keyword_filter_tools(query: str, tools: list, top_k: int) -> list:
     """Score tools by keyword overlap with query; return up to top_k.
@@ -355,11 +444,17 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                 except json.JSONDecodeError:
                     fn_args = {}
 
-                yield _sse({"type": "tool_call", "name": fn_name, "args": fn_args})
-
                 inv = inv_map.get(fn_name)
                 if inv is None and job_id:
                     inv = _get_invocable(job_id, fn_name)
+                trace_meta = _tool_trace_metadata(inv, fn_name, job_id)
+
+                yield _sse({
+                    "type": "tool_call",
+                    "name": fn_name,
+                    "args": fn_args,
+                    **trace_meta,
+                })
 
                 if inv is not None:
                     # Tool execution can be slow (pywinauto, GUI interaction) —
@@ -377,10 +472,12 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                             )
                             tool_result = traced_result["result_str"]
                             tool_error = traced_result.get("error")
+                            tool_trace = traced_result.get("trace") or {}
                             break
                         except asyncio.TimeoutError:
                             if time.perf_counter() - _tool_t0 > _TOOL_HARD_TIMEOUT:
                                 tool_result = f"Tool '{fn_name}' timed out after {_TOOL_HARD_TIMEOUT}s — the call may have hung (COM/DLL deadlock or blocking dialog)."
+                                tool_trace = {**trace_meta, "backend": trace_meta.get("execution_method") or "timeout"}
                                 break
                             yield _sse({
                                 "type": "status",
@@ -405,8 +502,20 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                         {"backend": "unknown_tool", "category": "unknown_tool", "severity": "blocking"},
                     )
                     _tool_ms = 0.0
+                    tool_trace = {"backend": "unknown_tool", "tool": fn_name, "backend_route": "unknown_tool"}
 
-                yield _sse({"type": "tool_result", "name": fn_name, "result": tool_result, "error": tool_error})
+                result_metadata = _extract_result_metadata(tool_result)
+                yield _sse({
+                    "type": "tool_result",
+                    "name": fn_name,
+                    "result": tool_result,
+                    "error": tool_error,
+                    "trace": tool_trace,
+                    "runtime_mode": result_metadata.get("runtime_mode") or tool_trace.get("runtime_mode") or trace_meta.get("runtime_mode") or "",
+                    "backend_route": tool_trace.get("backend_route") or trace_meta.get("backend_route") or "",
+                    "artifact_hints": trace_meta.get("artifact_hints") or [],
+                    "result_metadata": result_metadata,
+                })
                 logger.info(
                     "[stream_chat/%d] tool=%s latency=%.1f ms result=%s",
                     _round,

@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src" / "generation"))
 
 from api.discovery import _safe_discovery_tag
+from api.chat import _extract_result_metadata, _tool_trace_metadata
 from api.error_enrichment import build_error_payload
 from api.executor import _execute_tool_traced
 from section4_generate_server import generate_mcp_sdk_artifacts
@@ -89,6 +90,43 @@ def test_ui_renders_structured_tool_errors():
     assert "if (evt.error) appendToolError(evt.name, evt.error);" in ui
     assert "function appendToolError" in ui
     assert "tool-error-badge" in ui
+    assert "Live Proof Trace" in ui
+    assert "function appendTraceEvent" in ui
+    assert "appendTraceEvent('tool_call', evt);" in ui
+    assert "appendTraceEvent(evt.error ? 'error' : 'tool_result', evt);" in ui
+    assert "/api/download" in ui
+    chat = (ROOT / "api" / "chat.py").read_text(encoding="utf-8")
+    assert '"trace": tool_trace' in chat
+    assert '"backend_route": tool_trace.get("backend_route")' in chat
+
+
+def test_chat_trace_helpers_extract_soap_metadata():
+    xml = (
+        "<LegacyProviderResult><runtimeMode>real_runtime</runtimeMode>"
+        "<operation>GetCustomer</operation><customerName>Contoso Demo Customer</customerName>"
+        "<status>found</status><sentinel>MCP_FACTORY_SOAP_VIDEO</sentinel></LegacyProviderResult>"
+    )
+    meta = _extract_result_metadata(xml)
+    assert meta["runtime_mode"] == "real_runtime"
+    assert meta["operation"] == "GetCustomer"
+    assert meta["customerName"] == "Contoso Demo Customer"
+    assert meta["status"] == "found"
+
+
+def test_chat_trace_helpers_map_provider_routes():
+    meta = _tool_trace_metadata(
+        {
+            "name": "GetCustomer",
+            "source_type": "soap",
+            "execution": {"method": "soap", "runtime_mode": "real_runtime"},
+        },
+        "GetCustomer",
+        "job-123",
+    )
+    assert meta["execution_method"] == "soap"
+    assert meta["backend_route"] == "/api/legacy/soap"
+    assert meta["runtime_mode"] == "real_runtime"
+    assert "/api/download/job-123/mcp_schema.json" in meta["artifact_hints"]
 
 
 def test_generated_mcp_server_formats_error_payloads():

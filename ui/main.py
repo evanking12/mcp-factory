@@ -421,6 +421,92 @@ _HTML = r"""<!DOCTYPE html>
     .chat-input-row textarea {
       flex: 1; min-height: 52px; max-height: 140px;
     }
+    .chat-proof-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr);
+      gap: 14px;
+      align-items: stretch;
+      margin-bottom: 14px;
+    }
+    .chat-proof-layout .chat-window { margin-bottom: 0; }
+    .trace-panel {
+      background: #0a0c14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      height: 380px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .trace-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.025);
+    }
+    .trace-title { font-size: .9rem; font-weight: 700; }
+    .trace-sub { color: var(--muted); font-size: .72rem; }
+    .trace-body {
+      padding: 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .trace-empty {
+      color: var(--muted);
+      font-size: .8rem;
+      line-height: 1.45;
+      padding: 14px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+    }
+    .trace-item {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.025);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: .78rem;
+    }
+    .trace-item.error { border-color: rgba(240,91,91,.42); background: rgba(240,91,91,.08); }
+    .trace-row { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-bottom: 7px; }
+    .trace-badge {
+      border: 1px solid rgba(124,91,240,.45);
+      color: #c0a8f0;
+      background: rgba(124,91,240,.12);
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .trace-badge.runtime { color: var(--green); border-color: rgba(62,207,142,.45); background: rgba(62,207,142,.1); }
+    .trace-badge.error { color: #f09090; border-color: rgba(240,91,91,.5); background: rgba(240,91,91,.12); }
+    .trace-kv {
+      display: grid;
+      grid-template-columns: minmax(78px, auto) minmax(0, 1fr);
+      gap: 5px 8px;
+      line-height: 1.4;
+    }
+    .trace-kv span:nth-child(odd) { color: var(--muted); }
+    .trace-kv span:nth-child(even) { color: var(--text); word-break: break-word; }
+    .trace-item details { margin-top: 7px; }
+    .trace-item summary { color: var(--muted); cursor: pointer; }
+    .trace-item pre {
+      margin-top: 6px;
+      white-space: pre-wrap;
+      color: #a8d0f0;
+      font-size: .72rem;
+      max-height: 180px;
+      overflow: auto;
+    }
+    @media (max-width: 900px) {
+      .chat-proof-layout { grid-template-columns: 1fr; }
+      .trace-panel { height: 320px; }
+    }
     .proof-matrix {
       margin: 12px 0 18px;
       border: 1px solid var(--border);
@@ -457,7 +543,7 @@ _HTML = r"""<!DOCTYPE html>
   <span class="tagline">Binary → MCP tool schema, AI-powered</span>
   <span class="spacer"></span>
   <a class="proof-link"
-     href="https://github.com/evanking12/mcp-factory/actions/runs/24578415657"
+     href="https://github.com/evanking12/mcp-factory/actions/runs/24613173130"
      target="_blank" rel="noopener"
      title="GitHub Actions proof bundle is separate from app /api/download job artifacts.">
     CI Proof Bundle
@@ -544,7 +630,7 @@ _HTML = r"""<!DOCTYPE html>
             <div class="proof-matrix-title">Legacy Protocol Showcase</div>
             <div class="proof-matrix-sub">Video path: SOAP walkthrough, then GitHub Actions proof matrix.</div>
           </div>
-          <a class="proof-link" href="https://github.com/evanking12/mcp-factory/actions/runs/24578415657" target="_blank" rel="noopener">Canonical Run</a>
+          <a class="proof-link" href="https://github.com/evanking12/mcp-factory/actions/runs/24613173130" target="_blank" rel="noopener">Canonical Run</a>
         </div>
         <div class="proof-grid">
           <div class="proof-cell runtime"><strong>Runtime-backed</strong><span>JSON-RPC, SOAP, SQL</span></div>
@@ -624,11 +710,27 @@ _HTML = r"""<!DOCTYPE html>
         generated functions as tools.
       </p>
 
-      <div class="chat-window" id="chat-window">
-        <div class="chat-empty" id="chat-empty">
-          Send a message to start the conversation.<br/>
-          <span style="font-size:.75rem;">e.g. "What tools are available?" or "Run add(3, 4)"</span>
+      <div class="chat-proof-layout">
+        <div class="chat-window" id="chat-window">
+          <div class="chat-empty" id="chat-empty">
+            Send a message to start the conversation.<br/>
+            <span style="font-size:.75rem;">e.g. "What tools are available?" or "Run add(3, 4)"</span>
+          </div>
         </div>
+
+        <aside class="trace-panel" aria-label="Live Proof Trace">
+          <div class="trace-head">
+            <div>
+              <div class="trace-title">Live Proof Trace</div>
+              <div class="trace-sub">LLM, backend route, runtime, artifacts</div>
+            </div>
+          </div>
+          <div class="trace-body" id="trace-body">
+            <div class="trace-empty" id="trace-empty">
+              Send a chat prompt to see the generated tool call, backend route, runtime mode, and tool result.
+            </div>
+          </div>
+        </aside>
       </div>
 
       <div class="chat-input-row">
@@ -666,6 +768,7 @@ const state = {
   mcpServerBlob: null,
   mcpJsonBlob: null,
   messages: [],        // chat history [{role, content}]
+  traceEvents: [],
   demoFile: null,
   demoMode: false,
   demoSentinel: 'MCP_FACTORY_UI_DEMO_SENTINEL',
@@ -792,6 +895,11 @@ $('analyze-btn').addEventListener('click', async () => {
   const file    = fileInput.files[0] || state.demoFile;
   const dirPath = $('dir-path').value.trim();
   if (!file && !dirPath) return;
+  state.messages = [];
+  state.traceEvents = [];
+  $('chat-window').innerHTML =
+    '<div class="chat-empty" id="chat-empty">Send a message to start the conversation.<br/><span style="font-size:.75rem;">e.g. "What tools are available?" or "Run add(3, 4)"</span></div>';
+  resetProofTrace();
 
   const btn = $('analyze-btn');
   btn.disabled = true;
@@ -1072,6 +1180,129 @@ $('generate-btn').addEventListener('click', async () => {
 // ── Chat ──────────────────────────────────────────────────
 $('to-chat-btn').addEventListener('click', () => showSection(3));
 
+function resetProofTrace() {
+  state.traceEvents = [];
+  const body = $('trace-body');
+  if (!body) return;
+  body.innerHTML =
+    '<div class="trace-empty" id="trace-empty">Send a chat prompt to see the generated tool call, backend route, runtime mode, and tool result.</div>';
+}
+
+function parseResultMetadata(result) {
+  const text = String(result ?? '');
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    const business = parsed.business_result && typeof parsed.business_result === 'object' ? parsed.business_result : {};
+    const proof = parsed.proof && typeof parsed.proof === 'object' ? parsed.proof : {};
+    return {
+      runtime_mode: parsed.runtime_mode || proof.runtime_mode || business.runtime_mode || '',
+      operation: parsed.operation || proof.operation || '',
+      provider: parsed.provider || proof.provider || '',
+      customerName: business.customerName || parsed.customerName || '',
+      status: parsed.status || business.status || '',
+      sentinel: parsed.sentinel || proof.sentinel || business.proof_sentinel || '',
+    };
+  } catch {}
+  const getTag = tag => {
+    const m = text.match(new RegExp(`<${tag}>([^<]+)</${tag}>`, 'i'));
+    return m ? m[1] : '';
+  };
+  return {
+    runtime_mode: getTag('runtimeMode'),
+    operation: getTag('operation'),
+    provider: getTag('provider'),
+    customerName: getTag('customerName'),
+    status: getTag('status'),
+    sentinel: getTag('sentinel'),
+  };
+}
+
+function appendTraceItem(kind, title, rows, raw, isError=false) {
+  const body = $('trace-body');
+  if (!body) return;
+  $('trace-empty')?.remove();
+  const item = document.createElement('div');
+  item.className = `trace-item${isError ? ' error' : ''}`;
+
+  const head = document.createElement('div');
+  head.className = 'trace-row';
+  const badge = document.createElement('span');
+  badge.className = `trace-badge ${isError ? 'error' : (kind === 'runtime' || kind === 'tool_result' ? 'runtime' : '')}`;
+  badge.textContent = kind;
+  head.appendChild(badge);
+  const label = document.createElement('strong');
+  label.textContent = title;
+  head.appendChild(label);
+  item.appendChild(head);
+
+  const kv = document.createElement('div');
+  kv.className = 'trace-kv';
+  rows.filter(row => row[1] !== undefined && row[1] !== null && String(row[1]) !== '').forEach(([key, value]) => {
+    const k = document.createElement('span');
+    k.textContent = key;
+    const v = document.createElement('span');
+    v.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+    kv.appendChild(k);
+    kv.appendChild(v);
+  });
+  item.appendChild(kv);
+
+  if (raw) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'Raw event';
+    const pre = document.createElement('pre');
+    pre.textContent = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+    details.appendChild(summary);
+    details.appendChild(pre);
+    item.appendChild(details);
+  }
+
+  body.appendChild(item);
+  body.scrollTop = body.scrollHeight;
+}
+
+function appendTraceEvent(kind, evt) {
+  state.traceEvents.push({ kind, evt });
+  if (kind === 'tool_call') {
+    appendTraceItem('tool_call', evt.name || 'generated tool', [
+      ['LLM', `called ${evt.name || 'tool'}`],
+      ['args', evt.args ?? {}],
+      ['method', evt.execution_method || evt.execution_label || ''],
+      ['source', evt.source_type || ''],
+      ['runtime', evt.runtime_mode || ''],
+      ['route', evt.backend_route || ''],
+    ], evt);
+    return;
+  }
+  if (kind === 'tool_result') {
+    const meta = { ...parseResultMetadata(evt.result), ...(evt.result_metadata || {}) };
+    appendTraceItem('tool_result', evt.name || 'backend result', [
+      ['runtime', evt.runtime_mode || meta.runtime_mode || ''],
+      ['route', evt.backend_route || evt.trace?.backend_route || ''],
+      ['operation', meta.operation || evt.name || ''],
+      ['customerName', meta.customerName || ''],
+      ['status', meta.status || ''],
+      ['sentinel', meta.sentinel || ''],
+      ['artifacts', Array.isArray(evt.artifact_hints) ? evt.artifact_hints.join(', ') : ''],
+    ], evt);
+    return;
+  }
+  if (kind === 'status') {
+    appendTraceItem('status', evt.stage || 'working', [
+      ['message', evt.message || 'Working...'],
+      ['tool', evt.name || ''],
+    ], evt);
+    return;
+  }
+  appendTraceItem('error', evt.name || 'error', [
+    ['message', evt.message || evt.error?.human || ''],
+    ['category', evt.error?.category || ''],
+    ['suggestion', evt.error?.suggestion || ''],
+  ], evt, true);
+}
+
 async function sendMessage() {
   const input = $('chat-input');
   const text = input.value.trim();
@@ -1139,18 +1370,23 @@ async function sendMessage() {
         } else if (evt.type === 'tool_call') {
           const argStr = typeof evt.args === 'string' ? evt.args : JSON.stringify(evt.args ?? {});
           appendChatMsg('tool-call', `tool_call: ${evt.name}(${argStr})`);
+          appendTraceEvent('tool_call', evt);
 
         } else if (evt.type === 'tool_result') {
           appendChatMsg('tool-call', `tool_result: ${evt.result ?? ''}`);
           if (evt.error) appendToolError(evt.name, evt.error);
+          appendTraceEvent(evt.error ? 'error' : 'tool_result', evt);
 
         } else if (evt.type === 'status') {
           appendChatMsg('tool-call', `⏳ ${evt.message ?? 'Working...'}`);
+
+          appendTraceEvent('status', evt);
 
         } else if (evt.type === 'done') {
           roundCount = evt.rounds ?? 1;
 
         } else if (evt.type === 'error') {
+          appendTraceEvent('error', evt);
           throw new Error(evt.message);
         }
       }
@@ -1301,12 +1537,14 @@ $('back3-btn').addEventListener('click',  () => showSection(2));
 $('restart-btn').addEventListener('click', () => {
   state.jobId = null; state.invocables = []; state.tools = [];
   state.schemaBlob = null; state.mcpServerBlob = null; state.mcpJsonBlob = null; state.messages = [];
+  state.traceEvents = [];
   state.demoFile = null; state.demoMode = false;
   fileInput.value = ''; $('file-name').textContent = '';
   $('dir-path').value = ''; $('hints').value = '';
   $('analyze-btn').disabled = true;
   $('chat-window').innerHTML =
     '<div class="chat-empty" id="chat-empty">Send a message to start the conversation.<br/><span style="font-size:.75rem;">e.g. "What tools are available?" or "Run add(3, 4)"</span></div>';
+  resetProofTrace();
   showSection(0);
 });
 

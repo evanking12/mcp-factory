@@ -152,8 +152,10 @@ Recommended recorded demo target: SOAP/WSDL through the deployed UI. Use the
 `Load SOAP/WSDL Showcase` button or upload
 `tests/fixtures/sponsor/contoso_service.wsdl`, then analyze, select
 `GetCustomer` or `SubmitTicket`, generate the MCP schema, and ask GPT to call
-the generated tool with a deterministic sentinel. The walkthrough above has
-copy-ready prompts and the exact evidence to show on screen.
+the generated tool with a deterministic sentinel. The chat step includes a
+`Live Proof Trace` panel showing the GPT `tool_call`, backend route, runtime
+mode, and `tool_result`. The walkthrough above has copy-ready prompts and the
+exact evidence to show on screen.
 
 Interpret the artifact as the canonical sponsor proof bundle:
 
