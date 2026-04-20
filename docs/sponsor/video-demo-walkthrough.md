@@ -58,6 +58,115 @@ Use this as the narration map when recording.
 | Azure/GitHub infrastructure | Show Azure graph and GitHub Actions runs | Azure diagram, canonical run, proof bundle |
 | Broad target coverage | Do not run every target live; show routing graph and proof matrix | `sponsor-demo-e2e` artifact, final summary, runtime matrix |
 
+## Prototype Critique Response
+
+The previous prototype feedback asked for three concrete improvements:
+
+1. Show a real system that allows experimentation.
+2. Demonstrate more than the calculator app.
+3. Demonstrate how Microsoft services are being used.
+
+This final video should answer those points directly.
+
+| Critique item | Final demo response |
+|---|---|
+| Allow experimentation | Show that selected invocables control what the chatbot can call. For example, select only `GetCustomer`, generate the schema, and then ask for a support-ticket action. The model should not have `SubmitTicket` available because it was not selected. |
+| Additional programs beyond calculator | Use SOAP/WSDL as the live target, then show the proof matrix for Windows binaries, scripts, repo ingestion, SQL, REST/OpenAPI, JSON-RPC, LDAP/JNDI, CORBA, RPC, and COM/DCOM proof paths. |
+| Microsoft services | Show the Azure infrastructure graph: Azure Container Apps for UI/API, Azure Blob Storage for artifacts, Azure Key Vault for secrets, Azure OpenAI/GPT tool calls, Windows bridge VM, and GitHub Actions verification. |
+
+Recommended experimentation clip:
+
+1. Load the SOAP/WSDL showcase.
+2. On the invocable-selection screen, select only `GetCustomer`.
+3. Generate the MCP schema.
+4. Ask the chat:
+
+```text
+Create a support ticket for customer CUST-001. If no support-ticket tool is available, explain what tools you can use.
+```
+
+5. Point out that the generated tool surface only contains the selected
+   invocable. This demonstrates that user selection controls what the LLM can
+   invoke.
+
+If time is short, record the normal happy path first, then record this
+selection-control clip as a short second segment.
+
+## Engineering Constraints
+
+Use constraints that come from the project requirements, sponsor environment,
+or implementation assumptions. Avoid presenting generic AI limitations as
+standalone constraints unless they directly affect the proof.
+
+| Constraint | Why it exists | Mitigation / evidence |
+|---|---|---|
+| Installed paths must be reachable from the server or Windows bridge context | Requirement 2.a allows installed instances, but cloud services cannot inspect arbitrary local laptop paths | UI caveat text; Windows bridge proof; `system32_directory` evidence |
+| Windows GUI/COM execution requires the correct desktop/session context | GUI automation and COM/DCOM are Windows-session sensitive | Session enforcement, bridge health checks, focused Windows summaries |
+| Full target-matrix verification can be slow or costly | Azure budget and VM/GPT runtime are finite | Focused workflows, report-only workflow, demo-readiness workflow, VM idle reaper |
+| LLM behavior must be proved, not assumed | The requirement is chatbot interaction through generated tools | GPT transcripts require `tool_call`, backend `tool_result`, sentinel/result evidence |
+| Hard legacy infrastructure must be scoped truthfully | CORBA/RPC/DCOM/JNDI can mean broad enterprise systems | Controlled runtime-backed fixtures and explicit caveats, not arbitrary enterprise migration |
+
+## Standards And Protocols
+
+For the standards portion, distinguish between formal engineering standards used
+as process guidance and protocol standards directly exercised by the software.
+Do not claim formal certification unless the project actually went through an
+audit process.
+
+Engineering standards/guidance to mention:
+
+| Standard / guidance | How it is reflected in the project | Where to point |
+|---|---|---|
+| ISO/IEC/IEEE 29148-style requirements traceability | Requirements are mapped to proof artifacts instead of only described verbally | Requirement matrix in `final-summary.json`, `final-summary.md`, and this walkthrough |
+| IEEE 1012-style verification and validation discipline | Verification is automated through repeatable CI gates and uploaded evidence | Sponsor Demo E2E, Sponsor Proof Integrity, Demo Readiness, transcript checks |
+| IEEE 730-style software quality assurance concepts | Quality gates are automated and failures are classified rather than hidden | Contract CI, deployed smoke tests, structured error diagnostics, failure artifacts |
+
+Protocol/API standards directly exercised:
+
+| Protocol / API standard | How it is used |
+|---|---|
+| Model Context Protocol / OpenAI tool schema shape | Generated tool schemas expose selected invocables to the chatbot |
+| SOAP/WSDL | Live video target; WSDL operations become generated tools and route to SOAP runtime |
+| JSON-RPC 2.0 | Runtime-backed JSON-RPC proof with success/error envelopes |
+| OpenAPI/REST | REST route and method validation proof |
+| SQL | SQLite-backed deterministic SQL proof |
+| LDAP/JNDI-shaped lookup | Controlled lookup proof for legacy directory-style access |
+| CORBA IDL / IIOP proof path | Controlled CORBA proof in CI artifacts, framed as controlled runtime proof |
+| RPC IDL / MSRPC proof path | Controlled RPC proof in CI artifacts, framed as controlled runtime proof |
+| COM/TLB/DCOM proof path | Windows metadata/runtime proof paths, with remote DCOM scope stated in artifacts |
+
+Script line:
+
+```text
+For standards, we focused on traceability and verification discipline from IEEE/ISO-style software engineering guidance, and on concrete protocol standards actually exercised by the system, such as SOAP/WSDL, JSON-RPC, OpenAPI/REST, SQL, LDAP/JNDI, CORBA IDL, RPC IDL, and COM/TLB metadata.
+```
+
+## Development Risks And Mitigations
+
+Frame risks as project-development risks, not just product behavior.
+
+| Risk event | Impact | Mitigation |
+|---|---|---|
+| Azure service, credential, or permission failure before the demo | Deployed system or proof workflows may be unavailable | Demo Readiness workflow, deployed provider smoke, Key Vault usage, canonical proof bundle fallback |
+| Windows bridge VM instability | Windows GUI/COM proof could fail or stall | Bridge health checks, Session 1 enforcement, focused Windows artifacts, idle reaper |
+| LLM or API transient failure | GPT tool-call proof could be flaky | Deterministic sentinels, transcript integrity checks, focused GPT matrix workflows |
+| Cost overrun or leftover cloud resources | Sponsor budget risk | VM idle reaper, deallocation proof, storage cleanup posture, focused workflows |
+| Team/time constraint near final video | Incomplete live demo or unclear handoff | Recorded SOAP path, proof bundle, video walkthrough, requirement mapping, CI artifacts |
+| Scope creep into arbitrary binary recovery or enterprise migration | Project could become unverifiable | Controlled fixtures, truthful boundaries, explicit caveats |
+
+## Design Trade-Offs
+
+Keep this section short in the video. The goal is to show that the design choices
+were intentional.
+
+| Trade-off | Chosen design | Why |
+|---|---|---|
+| One live target vs. every target live | Show SOAP/WSDL live; prove the full matrix in CI | Faster, clearer video while preserving broad evidence |
+| SOAP/WSDL vs. calculator for the main demo | Use SOAP/WSDL | More technically relevant to legacy integration and less fragile than GUI automation |
+| Live Proof Trace vs. VM desktop streaming | Show structured tool-call/backend/runtime trace | Directly proves MCP behavior without fragile RDP/noVNC infrastructure |
+| Manual demo proof vs. CI artifact proof | Use GitHub Actions as authoritative evidence | Repeatable, inspectable, less dependent on one recording |
+| Broad legacy support vs. overclaiming enterprise migration | Controlled runtime-backed proofs with caveats | Strong evidence while staying truthful |
+
 ## Target To Use
 
 Primary target:
@@ -269,8 +378,12 @@ We only record one live UI target because the full target matrix is verified in 
 
 Commit `ab44a3457b5c8c805afa42183ae65fd26c971be7` in
 `TheNgith/mcp-factory` is a useful error-output improvement, not merely a
-formatting refactor. It adds the idea of structured failure diagnostics for tool
-calls:
+formatting refactor. The final implementation did not cherry-pick that commit
+directly, because its local contracts were different. Instead, this repo
+incorporated the useful design principle: structured tool-call diagnostics
+without destabilizing the existing executor/chat API.
+
+What the teammate commit contributed conceptually:
 
 - `tool_result` events can include an `error` object.
 - failures are classified as sentinel, HRESULT, Win32, timeout, bridge
@@ -281,27 +394,30 @@ calls:
 - a synthetic `explain_failure` tool lets the model ask for diagnostics instead
   of retrying blindly.
 
-Do not cherry-pick the commit directly into this repo. The local chat and
-executor contracts are currently simpler: `api.chat.stream_chat` calls
-`api.executor._execute_tool` and expects a plain string result, while that
-commit expects traced execution hooks such as `_execute_tool_traced` and a
-larger generated-server error-enrichment surface. A direct port would be
-merge-risky.
+What is incorporated in this repo:
 
-Clean incorporation path:
+- `api/error_enrichment.py` provides pure structured error classification.
+- `api.executor._execute_tool_traced(inv, args)` wraps the old plain
+  `_execute_tool(inv, args)` API and returns `{result_str, trace, error}`.
+- `api.chat.stream_chat` keeps the existing SSE event types but enriches
+  `tool_result` with `error`, `trace`, `runtime_mode`, `backend_route`, and
+  artifact hints.
+- `ui/main.py` renders structured errors in the chat and renders the broader
+  `Live Proof Trace` panel for successful and failed tool calls.
+- `tests/test_structured_tool_errors.py` verifies the structured error path,
+  generated-server error payloads, trace metadata, and UI rendering markers.
 
-1. Add `api/error_enrichment.py` as a pure classifier module.
-2. Add a backward-compatible `_execute_tool_traced(inv, args)` wrapper that
-   returns `{result_str, trace, error}` while keeping `_execute_tool(inv, args)`
-   as the plain-string API.
-3. Update `api/chat.py` so every `tool_result` SSE event includes
-   `error: null` on success or a structured error payload on failure.
-4. Update `ui/main.py` to render `evt.error` in a compact diagnostic block.
-5. Add tests for success `error: null`, unknown-tool errors, timeout errors,
-   bridge errors, and generated-server error payloads.
-6. Vendor the enrichment module into generated MCP server artifacts only after
-   the internal chat path is stable.
+What is intentionally not included:
 
-Recommendation: extract the principles and implement them as a small
-`structured-tool-errors` tranche. That gives the professor-facing output
-improvement without destabilizing the already-green sponsor proof contract.
+- The synthetic `explain_failure` tool is not part of the final demo path. The
+  current trace/error UI gives the user and model enough actionable information
+  without adding another generated tool surface.
+- The repo does not directly vendor the teammate commit's exact implementation.
+  It keeps this repo's stable API contracts and applies the error-output
+  principle cleanly.
+
+Professor-facing sentence:
+
+```text
+We incorporated the output critique by adding traced execution and structured tool-result diagnostics. Successful tool calls now show the backend route and runtime in the Live Proof Trace panel, while failures return classified error metadata with readable UI guidance instead of raw stack traces.
+```
