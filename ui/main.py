@@ -186,7 +186,7 @@ _HTML = r"""<!DOCTYPE html>
     /* ── Main layout ───────────────────────────── */
     main {
       flex: 1;
-      max-width: 860px;
+      max-width: 1180px;
       width: 100%;
       margin: 0 auto;
       padding: 32px 24px 64px;
@@ -354,7 +354,7 @@ _HTML = r"""<!DOCTYPE html>
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 16px;
-      height: 380px;
+      height: clamp(500px, 58vh, 680px);
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -423,17 +423,17 @@ _HTML = r"""<!DOCTYPE html>
     }
     .chat-proof-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr);
-      gap: 14px;
+      grid-template-columns: minmax(0, 1.5fr) minmax(340px, .95fr);
+      gap: 18px;
       align-items: stretch;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
     .chat-proof-layout .chat-window { margin-bottom: 0; }
     .trace-panel {
       background: #0a0c14;
       border: 1px solid var(--border);
       border-radius: 8px;
-      height: 380px;
+      height: clamp(500px, 58vh, 680px);
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -505,7 +505,8 @@ _HTML = r"""<!DOCTYPE html>
     }
     @media (max-width: 900px) {
       .chat-proof-layout { grid-template-columns: 1fr; }
-      .trace-panel { height: 320px; }
+      .chat-window { height: clamp(420px, 55vh, 600px); }
+      .trace-panel { height: clamp(360px, 48vh, 520px); }
     }
     .proof-matrix {
       margin: 12px 0 18px;
