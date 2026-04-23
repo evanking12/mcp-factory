@@ -2,6 +2,9 @@
 
 This is the static landing page for sponsor proof artifacts.
 
+For the shortest sponsor/teammate summary page, start with
+[final-demo-brief.md](final-demo-brief.md).
+
 ## Canonical Green Run
 
 - Canonical green run: [24613173130](https://github.com/evanking12/mcp-factory/actions/runs/24613173130)

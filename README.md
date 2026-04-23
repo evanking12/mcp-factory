@@ -142,6 +142,7 @@ Deployed demo UI: [mcp-factory-ui.icycoast-8ddfa278.eastus.azurecontainerapps.io
 
 Static sponsor references:
 
+- [Final demo brief](docs/sponsor/final-demo-brief.md) is the shortest sponsor/teammate handoff page with the canonical run, deployed UI, trust/evidence summary, and architecture/routing charts.
 - [Sponsor video demo walkthrough](docs/sponsor/video-demo-walkthrough.md) gives the recommended SOAP/WSDL UI demo path, GPT prompts, backend diagram, and teammate error-output refactor assessment.
 - [Sponsor proof index](docs/sponsor/proof-index.md) maps the canonical run to the exact artifact paths and fast proof workflows.
 - [Sponsor demo caveats](docs/sponsor/caveats.md) states the proof boundary for JSON-RPC, SOAP, CORBA, RPC, JNDI, COM/DCOM, and arbitrary binary recovery.
