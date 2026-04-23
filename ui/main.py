@@ -620,6 +620,9 @@ _HTML = r"""<!DOCTYPE html>
         <button class="btn btn-secondary" id="load-demo-btn" type="button">
           Load SOAP/WSDL Showcase
         </button>
+        <button class="btn btn-secondary" id="load-corba-demo-btn" type="button">
+          Load CORBA Showcase
+        </button>
         <button class="btn btn-primary" id="analyze-btn" disabled>
           Analyze Binary
         </button>
@@ -773,6 +776,8 @@ const state = {
   demoFile: null,
   demoMode: false,
   demoSentinel: 'MCP_FACTORY_UI_DEMO_SENTINEL',
+  demoPrompt: '',
+  demoPreset: '',
 };
 
 // ── DOM refs ─────────────────────────────────────────────
@@ -813,6 +818,9 @@ fileInput.addEventListener('change', () => {
     $('dir-path').value = '';
     state.demoFile = null;
     state.demoMode = false;
+    state.demoPreset = '';
+    state.demoPrompt = '';
+    state.demoSentinel = 'MCP_FACTORY_UI_DEMO_SENTINEL';
   }
   _syncAnalyzeBtn();
   clearError('upload-error');
@@ -825,6 +833,9 @@ $('dir-path').addEventListener('input', () => {
     $('file-name').textContent = '';
     state.demoFile = null;
     state.demoMode = false;
+    state.demoPreset = '';
+    state.demoPrompt = '';
+    state.demoSentinel = 'MCP_FACTORY_UI_DEMO_SENTINEL';
   }
   _syncAnalyzeBtn();
   clearError('upload-error');
@@ -836,8 +847,14 @@ function _syncAnalyzeBtn() {
   $('analyze-btn').disabled = !hasFile && !hasPath;
 }
 
-$('load-demo-btn').addEventListener('click', () => {
-  const demoSource = [
+const DEMO_PRESETS = {
+  soap: {
+    label: 'SOAP/WSDL showcase',
+    filename: 'contoso_customer_service.wsdl',
+    mimeType: 'text/xml',
+    sentinel: 'MCP_FACTORY_UI_DEMO_SENTINEL',
+    hints: 'Video demo target: SOAP WSDL legacy customer service. Show discovery, generated MCP schema, GPT tool_call, and backend tool_result.',
+    buildSource: () => [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<definitions name="ContosoCustomerService"',
     '  targetNamespace="http://contoso.com/CustomerService"',
@@ -867,16 +884,97 @@ $('load-demo-btn').addEventListener('click', () => {
     '  </binding>',
     '  <service name="ContosoCustomerService"><port name="ContosoCustomerPort" binding="tns:ContosoCustomerSoapBinding"><soap:address location="https://api.contoso.example/CustomerService"/></port></service>',
     '</definitions>',
-  ].join('\n');
-  state.demoFile = new File([demoSource], 'contoso_customer_service.wsdl', { type: 'text/xml' });
+    ].join('\n'),
+    buildPrompt: (toolName, tools) => `Call the tool named ${toolName || tools?.[0]?.function?.name || 'GetCustomer'} now. Use this exact sentinel string for every required string argument: MCP_FACTORY_UI_DEMO_SENTINEL. Show me the tool result.`,
+    buildRunProofPrompt: (toolName, tools) => `Call the tool named ${toolName || tools?.[0]?.function?.name || 'GetCustomer'} now. Use this exact sentinel string for every required string argument: MCP_FACTORY_UI_DEMO_SENTINEL. Show me the tool_call and tool_result evidence.`,
+  },
+  corba: {
+    label: 'CORBA showcase',
+    filename: 'contoso_customer_service.idl',
+    mimeType: 'text/plain',
+    sentinel: 'MCP_FACTORY_CORBA_VIDEO',
+    hints: 'Technical complexity target: CORBA IDL customer, order, and support services. Show discovery, generated MCP schema, GPT tool_call orchestration, and CORBA ORB/IIOP runtime proof.',
+    buildSource: () => [
+      '// Contoso Customer Service - CORBA IDL showcase',
+      'module Contoso {',
+      '  typedef string CustomerId;',
+      '  typedef string OrderId;',
+      '  typedef long TicketId;',
+      '',
+      '  struct CustomerInfo {',
+      '    CustomerId id;',
+      '    string name;',
+      '    string email;',
+      '    string phone;',
+      '    string tier;',
+      '    long loyalty_points;',
+      '  };',
+      '',
+      '  struct OrderItem {',
+      '    string sku;',
+      '    long quantity;',
+      '    double unit_price;',
+      '  };',
+      '',
+      '  typedef sequence<OrderItem> OrderItemList;',
+      '',
+      '  struct OrderSummary {',
+      '    OrderId id;',
+      '    string status;',
+      '    double total;',
+      '    string shipping_address;',
+      '  };',
+      '',
+      '  exception CustomerNotFound { string reason; };',
+      '  exception OrderNotFound { string reason; };',
+      '  exception InvalidPriority { string reason; };',
+      '',
+      '  interface ICustomerService {',
+      '    CustomerInfo getCustomer(in CustomerId customer_id) raises (CustomerNotFound);',
+      '    CustomerId registerCustomer(in string name, in string email, in string phone);',
+      '    boolean updateEmail(in CustomerId customer_id, in string new_email) raises (CustomerNotFound);',
+      '    long getLoyaltyBalance(in CustomerId customer_id) raises (CustomerNotFound);',
+      '    boolean redeemPoints(in CustomerId customer_id, in long points, in string reward_id) raises (CustomerNotFound);',
+      '  };',
+      '',
+      '  interface IOrderService {',
+      '    OrderId createOrder(in CustomerId customer_id, in OrderItemList items, in string shipping_address, in string coupon_code) raises (CustomerNotFound);',
+      '    OrderSummary getOrder(in OrderId order_id) raises (OrderNotFound);',
+      '    boolean cancelOrder(in OrderId order_id, in string reason) raises (OrderNotFound);',
+      '    boolean processRefund(in OrderId order_id, in string reason, in double amount) raises (OrderNotFound);',
+      '  };',
+      '',
+      '  interface ISupportService {',
+      '    TicketId submitTicket(in CustomerId customer_id, in string subject, in string description, in string priority) raises (CustomerNotFound, InvalidPriority);',
+      '    void escalateTicket(in TicketId ticket_id, in string new_priority, in string agent_id) raises (InvalidPriority);',
+      '    void closeTicket(in TicketId ticket_id, in string resolution_notes);',
+      '  };',
+      '};',
+    ].join('\n'),
+    buildPrompt: () => 'Use the generated CORBA customer-service tools to do a small support workflow for customer CUST-001.\n\n1. Look up the customer.\n2. Check the loyalty balance.\n3. If a redemption tool is available, redeem 100 points for reward REWARD-10OFF.\n4. Open a billing support ticket for the customer.\n\nUse this exact sentinel string in every available free-text or string argument that is not a fixed business ID: MCP_FACTORY_CORBA_VIDEO.\n\nShow every tool_call and tool_result, then end with a one-sentence summary of what the CORBA proof demonstrated.',
+    buildRunProofPrompt: () => 'Use the generated CORBA customer-service tools to do a small support workflow for customer CUST-001.\n\n1. Look up the customer.\n2. Check the loyalty balance.\n3. If a redemption tool is available, redeem 100 points for reward REWARD-10OFF.\n4. Open a billing support ticket for the customer.\n\nUse this exact sentinel string in every available free-text or string argument that is not a fixed business ID: MCP_FACTORY_CORBA_VIDEO.\n\nShow every tool_call and tool_result, then end with a one-sentence summary of what the CORBA proof demonstrated.',
+  },
+};
+
+function _applyDemoPreset(presetKey) {
+  const preset = DEMO_PRESETS[presetKey];
+  if (!preset) return;
+  const demoSource = preset.buildSource();
+  state.demoFile = new File([demoSource], preset.filename, { type: preset.mimeType });
   state.demoMode = true;
+  state.demoPreset = presetKey;
+  state.demoSentinel = preset.sentinel;
+  state.demoPrompt = preset.buildPrompt('', []);
   fileInput.value = '';
   $('dir-path').value = '';
-  $('file-name').textContent = `${state.demoFile.name} (SOAP/WSDL showcase)`;
-  $('hints').value = 'Video demo target: SOAP WSDL legacy customer service. Show discovery, generated MCP schema, GPT tool_call, and backend tool_result.';
+  $('file-name').textContent = `${state.demoFile.name} (${preset.label})`;
+  $('hints').value = preset.hints;
   _syncAnalyzeBtn();
   clearError('upload-error');
-});
+}
+
+$('load-demo-btn').addEventListener('click', () => _applyDemoPreset('soap'));
+$('load-corba-demo-btn').addEventListener('click', () => _applyDemoPreset('corba'));
 
 ['dragover','dragleave','drop'].forEach(ev =>
   fileDrop.addEventListener(ev, e => {
@@ -1167,7 +1265,9 @@ $('generate-btn').addEventListener('click', async () => {
     $('schema-preview').textContent = JSON.stringify(data.mcp_schema, null, 2);
     if (state.demoMode) {
       const toolName = state.tools[0]?.function?.name || state.tools[0]?.name || selected[0]?.name || 'echo_sentinel';
-      $('chat-input').value = `Call the tool named ${toolName} now. Use this exact sentinel string for every required string argument: ${state.demoSentinel}. Show me the tool result.`;
+      const preset = DEMO_PRESETS[state.demoPreset];
+      state.demoPrompt = preset ? preset.buildPrompt(toolName, state.tools) : `Call the tool named ${toolName} now. Use this exact sentinel string for every required string argument: ${state.demoSentinel}. Show me the tool result.`;
+      $('chat-input').value = state.demoPrompt;
     }
     showSection(2);
   } catch(e) {
@@ -1489,7 +1589,8 @@ $('send-btn').addEventListener('click', sendMessage);
 
 $('run-proof-btn').addEventListener('click', () => {
   const toolName = state.tools[0]?.function?.name || state.tools[0]?.name || state.invocables[0]?.name || 'echo_sentinel';
-  $('chat-input').value = `Call the tool named ${toolName} now. Use this exact sentinel string for every required string argument: ${state.demoSentinel}. Show me the tool_call and tool_result evidence.`;
+  const preset = DEMO_PRESETS[state.demoPreset];
+  $('chat-input').value = preset ? preset.buildRunProofPrompt(toolName, state.tools) : `Call the tool named ${toolName} now. Use this exact sentinel string for every required string argument: ${state.demoSentinel}. Show me the tool_call and tool_result evidence.`;
   sendMessage();
 });
 
@@ -1540,6 +1641,7 @@ $('restart-btn').addEventListener('click', () => {
   state.schemaBlob = null; state.mcpServerBlob = null; state.mcpJsonBlob = null; state.messages = [];
   state.traceEvents = [];
   state.demoFile = null; state.demoMode = false;
+  state.demoPreset = ''; state.demoPrompt = ''; state.demoSentinel = 'MCP_FACTORY_UI_DEMO_SENTINEL';
   fileInput.value = ''; $('file-name').textContent = '';
   $('dir-path').value = ''; $('hints').value = '';
   $('analyze-btn').disabled = true;
