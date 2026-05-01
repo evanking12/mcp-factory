@@ -53,6 +53,190 @@ _PROVIDER_LABELS = {
     "observed_result": "Windows observed proof",
 }
 
+_CALC_DIGIT_TO_TOOL = {
+    "0": "press_zero",
+    "1": "press_one",
+    "2": "press_two",
+    "3": "press_three",
+    "4": "press_four",
+    "5": "press_five",
+    "6": "press_six",
+    "7": "press_seven",
+    "8": "press_eight",
+    "9": "press_nine",
+}
+_CALC_OPERATOR_TO_TOOL = {
+    "+": "press_plus",
+    "plus": "press_plus",
+    "add": "press_plus",
+    "added": "press_plus",
+    "addition": "press_plus",
+    "-": "press_minus",
+    "minus": "press_minus",
+    "subtract": "press_minus",
+    "subtracted": "press_minus",
+    "*": "press_multiply_by",
+    "x": "press_multiply_by",
+    "×": "press_multiply_by",
+    "multiply": "press_multiply_by",
+    "multiplied": "press_multiply_by",
+    "times": "press_multiply_by",
+    "/": "press_divide_by",
+    "÷": "press_divide_by",
+    "divide": "press_divide_by",
+    "divided": "press_divide_by",
+}
+
+
+def _tool_names_from_schema(tools: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for tool in tools or []:
+        fn = tool.get("function") if isinstance(tool, dict) else {}
+        name = fn.get("name") if isinstance(fn, dict) else tool.get("name")
+        if name:
+            names.add(str(name))
+    return names
+
+
+def _calculator_tool_names(invocables: list[dict[str, Any]], tools: list[dict[str, Any]]) -> set[str]:
+    names = _tool_names_from_schema(tools)
+    for inv in invocables or []:
+        name = str(inv.get("name") or "")
+        if name:
+            names.add(name)
+    calc_names = {
+        name for name in names
+        if name.startswith("press_") and (
+            name in set(_CALC_DIGIT_TO_TOOL.values())
+            or name in set(_CALC_OPERATOR_TO_TOOL.values())
+            or name == "press_equals"
+        )
+    }
+    return calc_names
+
+
+def _parse_simple_calculator_request(text: str) -> dict[str, Any] | None:
+    """Return required calculator tools for simple arithmetic requests.
+
+    This is intentionally narrow. It catches demo-relevant requests like
+    "4 x 2", "calculate 4 * 2", and "add 4 and 2" without trying to become a
+    general math parser.
+    """
+    query = (text or "").lower().replace("×", "x")
+    symbol_match = re.search(r"(?<!\d)(\d{1,6})\s*([+\-*/x÷])\s*(\d{1,6})(?!\d)", query)
+    word_match = None
+    if not symbol_match:
+        word_match = re.search(
+            r"\b(add|plus|subtract|minus|multiply|multiplied|times|divide|divided)\b\s+(\d{1,6})(?:\s+(?:and|by))?\s+(\d{1,6})",
+            query,
+        )
+    if symbol_match:
+        left, op, right = symbol_match.group(1), symbol_match.group(2), symbol_match.group(3)
+    elif word_match:
+        op, left, right = word_match.group(1), word_match.group(2), word_match.group(3)
+    else:
+        return None
+
+    op_tool = _CALC_OPERATOR_TO_TOOL.get(op)
+    if not op_tool:
+        return None
+
+    required: list[str] = []
+    for digit in left:
+        required.append(_CALC_DIGIT_TO_TOOL[digit])
+    required.append(op_tool)
+    for digit in right:
+        required.append(_CALC_DIGIT_TO_TOOL[digit])
+    required.append("press_equals")
+
+    left_i = int(left)
+    right_i = int(right)
+    expected: float | int
+    if op_tool == "press_plus":
+        expected = left_i + right_i
+    elif op_tool == "press_minus":
+        expected = left_i - right_i
+    elif op_tool == "press_multiply_by":
+        expected = left_i * right_i
+    elif op_tool == "press_divide_by":
+        expected = left_i / right_i if right_i else float("inf")
+    else:
+        return None
+    expected_text = str(int(expected)) if isinstance(expected, float) and expected.is_integer() else str(expected)
+    return {
+        "expression": f"{left} {op} {right}",
+        "required_tools": required,
+        "expected_result": expected_text,
+    }
+
+
+def _calculator_missing_tool_error(calc: dict[str, Any], available_tools: set[str]) -> dict[str, Any] | None:
+    missing = [tool for tool in calc["required_tools"] if tool not in available_tools]
+    if not missing:
+        return None
+    deduped_missing = list(dict.fromkeys(missing))
+    message = (
+        f"Cannot perform calculator request '{calc['expression']}' because the selected MCP tool "
+        f"surface is missing: {', '.join(deduped_missing)}."
+    )
+    return {
+        "category": "missing_selected_invocable",
+        "severity": "blocking",
+        "classified_name": "missing_selected_invocable",
+        "raw_code": None,
+        "what_tried": [{
+            "expression": calc["expression"],
+            "required_tools": calc["required_tools"],
+            "available_calculator_tools": sorted(available_tools),
+        }],
+        "known_good": [],
+        "suggestion": "Go back to Select Invocables and include the missing function, or ask for an operation using the selected tools.",
+        "human": message,
+    }
+
+
+def _display_value_from_result(result: str) -> str:
+    match = re.search(r"Display shows:\s*([^\r\n.]+)", result or "", flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    try:
+        data = json.loads(result or "")
+    except Exception:
+        return ""
+    if isinstance(data, dict):
+        for key in ("display", "display_value", "actual_display"):
+            if data.get(key) is not None:
+                return str(data[key]).strip()
+    return ""
+
+
+def _calculator_postcondition_error(calc: dict[str, Any] | None, tool_name: str, result: str) -> dict[str, Any] | None:
+    if not calc or tool_name != "press_equals":
+        return None
+    actual = _display_value_from_result(result)
+    expected = str(calc["expected_result"])
+    if not actual or actual == expected:
+        return None
+    message = (
+        f"Calculator result mismatch for '{calc['expression']}': expected display {expected}, "
+        f"but the application reported {actual}."
+    )
+    return {
+        "category": "gui_validation",
+        "severity": "blocking",
+        "classified_name": "calculator_display_mismatch",
+        "raw_code": None,
+        "what_tried": [{
+            "expression": calc["expression"],
+            "expected_display": expected,
+            "actual_display": actual,
+            "tool": tool_name,
+        }],
+        "known_good": [],
+        "suggestion": "Do not claim success. Re-run only after selecting the exact calculator buttons required by the request.",
+        "human": message,
+    }
+
 
 def _extract_result_metadata(result: str) -> dict[str, Any]:
     text = result or ""
@@ -191,8 +375,11 @@ def _build_system_message(invocables: list) -> dict:
             "for divide use press_divide_by, for add use press_plus, for subtract use press_minus.\n"
             "2. After all tool calls finish, always write a plain-text sentence summarising "
             "what happened and the result visible on screen.\n"
-            "3. Never launch an application that is already open — call the launch tool only once per session.\n"
-            "4. If the user asks about your capabilities (e.g. 'list your tools', 'what can you do'), "
+            "3. Use only the tools provided in this session. If a requested digit, operator, menu item, "
+            "or action is not available as a tool, say it is not available; do not substitute another tool "
+            "and do not claim the requested task succeeded.\n"
+            "4. Never launch an application that is already open — call the launch tool only once per session.\n"
+            "5. If the user asks about your capabilities (e.g. 'list your tools', 'what can you do'), "
             "reply with plain text only — do not call any tools.\n"
             "Use only the tools provided in this session."
         ),
@@ -246,6 +433,41 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
         (m.get("content", "") for m in reversed(conversation) if m.get("role") == "user"),
         "",
     )
+    _calculator_request = _parse_simple_calculator_request(_last_user_message)
+    _calculator_tools = _calculator_tool_names(invocables, tools)
+    if _calculator_request and _calculator_tools:
+        preflight_error = _calculator_missing_tool_error(_calculator_request, _calculator_tools)
+        if preflight_error:
+            result = preflight_error["human"]
+            trace = {
+                "backend": "selected_tool_preflight",
+                "tool": "calculator_preflight",
+                "category": "missing_selected_invocable",
+                "severity": "blocking",
+                "expected_result": _calculator_request["expected_result"],
+                "required_tools": _calculator_request["required_tools"],
+                "available_calculator_tools": sorted(_calculator_tools),
+            }
+            yield _sse({
+                "type": "tool_result",
+                "name": "calculator_preflight",
+                "result": result,
+                "error": preflight_error,
+                "trace": trace,
+                "runtime_mode": "",
+                "backend_route": "selected_tool_preflight",
+                "artifact_hints": [],
+                "result_metadata": {},
+            })
+            yield _sse({
+                "type": "token",
+                "content": (
+                    f"I cannot perform `{_calculator_request['expression']}` with the selected MCP tools. "
+                    f"{result}"
+                ),
+            })
+            yield _sse({"type": "done", "rounds": 0})
+            return
 
     loop = asyncio.get_event_loop()
 
@@ -487,6 +709,16 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
                             })
                     if tool_error is None:
                         tool_error = build_error_payload(fn_name, tool_result)
+                    if tool_error is None:
+                        tool_error = _calculator_postcondition_error(_calculator_request, fn_name, tool_result)
+                        if tool_error:
+                            tool_trace = {
+                                **tool_trace,
+                                "category": "gui_validation",
+                                "severity": "blocking",
+                                "expected_result": _calculator_request["expected_result"] if _calculator_request else "",
+                                "actual_display": _display_value_from_result(tool_result),
+                            }
                     _tool_ms = (time.perf_counter() - _tool_t0) * 1000.0
                     if inv.get("source_type") == "cli" and \
                             Path(inv.get("dll_path", "")).stem.lower() == fn_name.lower():

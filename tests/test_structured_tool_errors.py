@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -8,7 +9,14 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src" / "generation"))
 
 from api.discovery import _safe_discovery_tag
-from api.chat import _extract_result_metadata, _tool_trace_metadata
+from api import chat as chat_module
+from api.chat import (
+    _calculator_postcondition_error,
+    _parse_simple_calculator_request,
+    _extract_result_metadata,
+    _tool_trace_metadata,
+    stream_chat,
+)
 from api.error_enrichment import build_error_payload
 from api.executor import _execute_tool_traced
 from section4_generate_server import generate_mcp_sdk_artifacts
@@ -74,6 +82,17 @@ def test_observed_result_success_with_timeout_field_name_is_not_an_error():
     assert payload is None
 
 
+def test_error_payload_has_missing_invocable_suggestion():
+    payload = build_error_payload(
+        "calculator_preflight",
+        None,
+        {"category": "missing_selected_invocable", "severity": "blocking"},
+    )
+    assert payload is not None
+    assert payload["category"] == "missing_selected_invocable"
+    assert "Select Invocables" in payload["suggestion"]
+
+
 def test_execute_tool_traced_preserves_plain_result_and_adds_error():
     inv = {
         "name": "LaunchThing",
@@ -83,6 +102,58 @@ def test_execute_tool_traced_preserves_plain_result_and_adds_error():
     assert "CLI error: no executable path" in traced["result_str"]
     assert traced["trace"]["backend"] == "cli"
     assert traced["error"]["category"] == "no_executable"
+
+
+def test_calculator_request_parser_maps_required_buttons():
+    parsed = _parse_simple_calculator_request("please do 4 x 2")
+    assert parsed is not None
+    assert parsed["expected_result"] == "8"
+    assert parsed["required_tools"] == [
+        "press_four",
+        "press_multiply_by",
+        "press_two",
+        "press_equals",
+    ]
+
+
+def test_calculator_postcondition_detects_wrong_display():
+    parsed = _parse_simple_calculator_request("do 4 x 2")
+    err = _calculator_postcondition_error(parsed, "press_equals", "Clicked 'Equals'. Display shows: 6")
+    assert err is not None
+    assert err["category"] == "gui_validation"
+    assert err["classified_name"] == "calculator_display_mismatch"
+    assert err["what_tried"][0]["expected_display"] == "8"
+    assert err["what_tried"][0]["actual_display"] == "6"
+
+
+def test_stream_chat_blocks_calculator_request_when_required_tool_not_selected(monkeypatch):
+    monkeypatch.setattr(chat_module, "OPENAI_ENDPOINT", "https://example.openai.azure.com")
+    body = {
+        "messages": [{"role": "user", "content": "Calculate 4 x 2"}],
+        "tools": [
+            {"type": "function", "function": {"name": "press_two", "parameters": {"type": "object"}}},
+            {"type": "function", "function": {"name": "press_multiply_by", "parameters": {"type": "object"}}},
+            {"type": "function", "function": {"name": "press_equals", "parameters": {"type": "object"}}},
+        ],
+        "invocables": [],
+        "job_id": "job-calc",
+    }
+
+    import asyncio
+
+    async def collect():
+        events = []
+        async for item in stream_chat(body):
+            assert item.startswith("data: ")
+            events.append(json.loads(item.removeprefix("data: ").strip()))
+        return events
+
+    events = asyncio.run(collect())
+    tool_result = next(evt for evt in events if evt["type"] == "tool_result")
+    assert tool_result["name"] == "calculator_preflight"
+    assert tool_result["error"]["category"] == "missing_selected_invocable"
+    assert "press_four" in tool_result["result"]
+    assert any(evt["type"] == "token" and "cannot perform" in evt["content"] for evt in events)
 
 
 def test_ui_renders_structured_tool_errors():
