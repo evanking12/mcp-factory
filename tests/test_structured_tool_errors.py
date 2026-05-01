@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -11,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src" / "generation"))
 from api.discovery import _safe_discovery_tag
 from api import chat as chat_module
 from api.chat import (
+    _calculator_incomplete_error,
     _calculator_postcondition_error,
     _parse_simple_calculator_request,
     _extract_result_metadata,
@@ -116,6 +118,27 @@ def test_calculator_request_parser_maps_required_buttons():
     ]
 
 
+def test_calculator_request_parser_accepts_infix_word_operator():
+    parsed = _parse_simple_calculator_request("please calculate 4 times 2")
+    assert parsed is not None
+    assert parsed["expected_result"] == "8"
+    assert parsed["required_tools"] == [
+        "press_four",
+        "press_multiply_by",
+        "press_two",
+        "press_equals",
+    ]
+
+
+def test_calculator_incomplete_error_when_equals_not_executed():
+    parsed = _parse_simple_calculator_request("do 4 x 2")
+    err = _calculator_incomplete_error(parsed, ["press_four", "press_multiply_by", "press_two"])
+    assert err is not None
+    assert err["category"] == "incomplete_tool_sequence"
+    assert err["classified_name"] == "calculator_sequence_incomplete"
+    assert err["what_tried"][0]["remaining_tools"] == ["press_equals"]
+
+
 def test_calculator_postcondition_detects_wrong_display():
     parsed = _parse_simple_calculator_request("do 4 x 2")
     err = _calculator_postcondition_error(parsed, "press_equals", "Clicked 'Equals'. Display shows: 6")
@@ -154,6 +177,75 @@ def test_stream_chat_blocks_calculator_request_when_required_tool_not_selected(m
     assert tool_result["error"]["category"] == "missing_selected_invocable"
     assert "press_four" in tool_result["result"]
     assert any(evt["type"] == "token" and "cannot perform" in evt["content"] for evt in events)
+
+
+def test_stream_chat_reports_incomplete_calculator_sequence(monkeypatch):
+    monkeypatch.setattr(chat_module, "OPENAI_ENDPOINT", "https://example.openai.azure.com")
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="press_four", arguments="{}"),
+    )
+    first_message = SimpleNamespace(tool_calls=[tool_call], content="")
+    second_message = SimpleNamespace(tool_calls=None, content="I successfully calculated 4 x 2.")
+    responses = [
+        SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
+        SimpleNamespace(choices=[SimpleNamespace(message=second_message)]),
+    ]
+
+    def fake_create(**kwargs):
+        return responses.pop(0)
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
+    )
+    monkeypatch.setattr(chat_module, "_openai_client", lambda: fake_client)
+    monkeypatch.setattr(
+        chat_module,
+        "_execute_tool_traced",
+        lambda inv, args: {
+            "result_str": "Clicked 'Four'. Display shows: 4",
+            "trace": {"backend": "gui_action", "backend_route": "windows_bridge"},
+            "error": None,
+        },
+    )
+
+    tools = [
+        {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+        for name in ["press_four", "press_multiply_by", "press_two", "press_equals"]
+    ]
+    invocables = [
+        {"name": name, "source_type": "gui", "execution": {"method": "gui_action"}}
+        for name in ["press_four", "press_multiply_by", "press_two", "press_equals"]
+    ]
+    body = {
+        "messages": [{"role": "user", "content": "Calculate 4 times 2"}],
+        "tools": tools,
+        "invocables": invocables,
+        "job_id": "job-calc",
+    }
+
+    import asyncio
+
+    async def collect():
+        events = []
+        async for item in stream_chat(body):
+            assert item.startswith("data: ")
+            events.append(json.loads(item.removeprefix("data: ").strip()))
+        return events
+
+    events = asyncio.run(collect())
+    completion_error = next(evt for evt in events if evt.get("name") == "calculator_completion_check")
+    assert completion_error["error"]["category"] == "incomplete_tool_sequence"
+    assert "press_equals" in completion_error["result"]
+    assert any(
+        evt["type"] == "token" and "could not finish" in evt["content"].lower()
+        for evt in events
+    )
+    assert not any(
+        evt["type"] == "token" and "successfully calculated" in evt["content"].lower()
+        for evt in events
+    )
 
 
 def test_ui_renders_structured_tool_errors():

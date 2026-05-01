@@ -124,16 +124,24 @@ def _parse_simple_calculator_request(text: str) -> dict[str, Any] | None:
     """
     query = (text or "").lower().replace("×", "x")
     symbol_match = re.search(r"(?<!\d)(\d{1,6})\s*([+\-*/x÷])\s*(\d{1,6})(?!\d)", query)
-    word_match = None
+    infix_word_match = None
+    prefix_word_match = None
     if not symbol_match:
-        word_match = re.search(
+        infix_word_match = re.search(
+            r"(?<!\d)(\d{1,6})\s+(plus|add|minus|subtract|times|multiply|multiplied|divide|divided)(?:\s+by)?\s+(\d{1,6})(?!\d)",
+            query,
+        )
+    if not symbol_match and not infix_word_match:
+        prefix_word_match = re.search(
             r"\b(add|plus|subtract|minus|multiply|multiplied|times|divide|divided)\b\s+(\d{1,6})(?:\s+(?:and|by))?\s+(\d{1,6})",
             query,
         )
     if symbol_match:
         left, op, right = symbol_match.group(1), symbol_match.group(2), symbol_match.group(3)
-    elif word_match:
-        op, left, right = word_match.group(1), word_match.group(2), word_match.group(3)
+    elif infix_word_match:
+        left, op, right = infix_word_match.group(1), infix_word_match.group(2), infix_word_match.group(3)
+    elif prefix_word_match:
+        op, left, right = prefix_word_match.group(1), prefix_word_match.group(2), prefix_word_match.group(3)
     else:
         return None
 
@@ -235,6 +243,67 @@ def _calculator_postcondition_error(calc: dict[str, Any] | None, tool_name: str,
         "known_good": [],
         "suggestion": "Do not claim success. Re-run only after selecting the exact calculator buttons required by the request.",
         "human": message,
+    }
+
+
+def _calculator_incomplete_error(
+    calc: dict[str, Any] | None,
+    executed_tools: list[str],
+) -> dict[str, Any] | None:
+    if not calc or not executed_tools or "press_equals" in executed_tools:
+        return None
+    remaining = list(calc["required_tools"])
+    for tool in executed_tools:
+        if tool in remaining:
+            remaining.remove(tool)
+    message = (
+        f"Calculator request '{calc['expression']}' did not finish. "
+        f"Executed: {', '.join(executed_tools)}. "
+        f"Remaining required steps: {', '.join(remaining) if remaining else 'press_equals/result validation'}."
+    )
+    return {
+        "category": "incomplete_tool_sequence",
+        "severity": "blocking",
+        "classified_name": "calculator_sequence_incomplete",
+        "raw_code": None,
+        "what_tried": [{
+            "expression": calc["expression"],
+            "expected_display": calc["expected_result"],
+            "executed_tools": list(executed_tools),
+            "remaining_tools": remaining,
+        }],
+        "known_good": [],
+        "suggestion": "Do not claim success. Retry only after selecting and executing the full required calculator sequence.",
+        "human": message,
+    }
+
+
+def _calculator_incomplete_result_event(
+    calc: dict[str, Any],
+    executed_tools: list[str],
+    job_id: str,
+) -> dict[str, Any] | None:
+    incomplete_error = _calculator_incomplete_error(calc, executed_tools)
+    if not incomplete_error:
+        return None
+    return {
+        "type": "tool_result",
+        "name": "calculator_completion_check",
+        "result": incomplete_error["human"],
+        "error": incomplete_error,
+        "trace": {
+            "backend": "calculator_completion_check",
+            "backend_route": "selected_tool_sequence",
+            "category": "incomplete_tool_sequence",
+            "severity": "blocking",
+            "expected_result": calc["expected_result"],
+            "executed_tools": list(executed_tools),
+            "job_id": job_id,
+        },
+        "runtime_mode": "",
+        "backend_route": "selected_tool_sequence",
+        "artifact_hints": [],
+        "result_metadata": {},
     }
 
 
@@ -589,6 +658,22 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
 
             # ── No tool calls → final text answer ─────────────────────────
             if not msg.tool_calls:
+                incomplete_event = _calculator_incomplete_result_event(
+                    _calculator_request,
+                    _tools_executed,
+                    job_id,
+                ) if _calculator_request else None
+                if incomplete_event:
+                    yield _sse(incomplete_event)
+                    yield _sse({
+                        "type": "token",
+                        "content": (
+                            "I could not finish the requested calculator operation. "
+                            f"{incomplete_event['result']}"
+                        ),
+                    })
+                    yield _sse({"type": "done", "rounds": _round + 1})
+                    return
                 if msg.content:
                     yield _sse({"type": "token", "content": msg.content})
                 elif _tools_executed:
@@ -637,6 +722,20 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
             )
             if _this_sig == _last_call_signature:
                 logger.warning("[stream_chat] Loop detected — stopping")
+                incomplete_event = _calculator_incomplete_result_event(
+                    _calculator_request,
+                    _tools_executed,
+                    job_id,
+                ) if _calculator_request else None
+                if incomplete_event:
+                    yield _sse(incomplete_event)
+                    yield _sse({
+                        "type": "token",
+                        "content": (
+                            "I could not finish the requested calculator operation. "
+                            f"{incomplete_event['result']}"
+                        ),
+                    })
                 yield _sse({"type": "done", "rounds": _round + 1})
                 return
             _last_call_signature = _this_sig
@@ -768,6 +867,20 @@ async def stream_chat(body: dict[str, Any]) -> AsyncGenerator[str, None]:
             _rest = [m for m in conversation if m.get("role") != "system"]
             conversation = _sys + _rest[-_CONTEXT_WINDOW_TURNS:]
 
+        incomplete_event = _calculator_incomplete_result_event(
+            _calculator_request,
+            _tools_executed,
+            job_id,
+        ) if _calculator_request else None
+        if incomplete_event:
+            yield _sse(incomplete_event)
+            yield _sse({
+                "type": "token",
+                "content": (
+                    "I could not finish the requested calculator operation. "
+                    f"{incomplete_event['result']}"
+                ),
+            })
         yield _sse({"type": "done", "rounds": MAX_TOOL_ROUNDS})
 
     except Exception as exc:

@@ -158,6 +158,7 @@ def build_error_payload(
         "timeout": "Retry with a narrower tool or inspect whether the target opened a blocking dialog.",
         "unknown_tool": "Generate/register the selected invocables before chatting, or call a tool name from the generated schema.",
         "missing_selected_invocable": "Go back to Select Invocables and include the missing function, or ask for an operation using the selected tools.",
+        "incomplete_tool_sequence": "Do not claim success. Retry only after selecting and executing the full required tool sequence.",
         "no_executable": "Select an invocable with an executable path or rerun discovery for this target.",
         "schema_mismatch": "Regenerate the schema and retry with the parameter names shown in the generated tool.",
         "gui_validation": "Inspect the visible application state and retry only after selecting the exact GUI actions required for this request.",
